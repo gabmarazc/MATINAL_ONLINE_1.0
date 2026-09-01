@@ -23,6 +23,7 @@ class DataReturnMode:
 
 class GridUpdateMode:
     VALUE_CHANGED = "VALUE_CHANGED"
+    MODEL_CHANGED = "MODEL_CHANGED"
 
 def JsCode(text):
     return text
