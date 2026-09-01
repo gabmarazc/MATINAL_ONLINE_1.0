@@ -50,7 +50,7 @@ def crear_filtro_excel(label, opciones, key_prefix):
         for op in opciones:
             st.session_state[f"{key_prefix}_{op}"] = val_todos_actual
 
-    with st.popover(f"{label}: ...", use_container_width=True):
+    with st.popover(f"{label}: ...", width="stretch"):
         st.checkbox("TODOS", key=all_key)
         st.divider()
         
@@ -218,13 +218,11 @@ def dibujar_pestaña_batalla(bases, df_vtas_operativo, supervisores_seleccionado
     st.subheader("🎯 Panel Operativo: Batalla de Clientes No Compradores (NC)")
     st.markdown("Filtra y rutea la gestión de cobertura crítica por supervisor, preventista y día de la semana.")
     
-    # Llamada a la función cacheada interna
     nc_enriquecido = _procesar_universo_nc_cacheado(bases["VTA"], bases["UNIVERSO"], bases["PARAMETROS"], df_vtas_operativo)
 
     sup_str = [str(s).strip() for s in supervisores_seleccionados]
     nc_enriquecido = nc_enriquecido[nc_enriquecido["SUP"].astype(str).str.strip().isin(sup_str)].copy()
 
-    # 5. Controles e interfaz usuario (filtros reactivos sin st.form)
     v_dispo = sorted(nc_enriquecido["Preventista"].dropna().unique().tolist())
     
     orden_dias_map = {
@@ -301,7 +299,7 @@ def dibujar_pestaña_batalla(bases, df_vtas_operativo, supervisores_seleccionado
         
     with col_m3: 
         st.markdown('<div class="sub-label">🔍 Buscar ID / Razón Social:</div>', unsafe_allow_html=True)
-        busqueda = st.text_input("", key="nc_busq_f", label_visibility="collapsed")
+        busqueda = st.text_input("Buscar ID o Razón Social", key="nc_busq_f", label_visibility="collapsed")
     
     if busqueda:
         nc_filtrado = nc_filtrado[
@@ -330,7 +328,6 @@ def dibujar_pestaña_batalla(bases, df_vtas_operativo, supervisores_seleccionado
         unsafe_allow_html=True
     )
         
-    # 6. Tabla y descarga Excel
     columnas_vista_nc = ["SUP", "CodVendedor", "Preventista", "Cliente", "NombreCliente", "DireccionCliente", "Taxonomia", "DiaVisita", "Mes_Anterior"]
     nc_render = nc_filtrado[columnas_vista_nc].sort_values(by=["DiaVisita", "Preventista", "Taxonomia"]).reset_index(drop=True)
     
