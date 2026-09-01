@@ -1,9 +1,7 @@
 # app.py
-# Forzar redescubrimiento de dependencias en Streamlit Cloud
 import io
 import streamlit as st
 import pandas as pd
-from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 
 # Importaciones modulares internas (desde el paquete /modules)
 from data_loader import cargar_todas_las_bases
@@ -20,59 +18,18 @@ st.set_page_config(page_title="Sistema Matinal 2.0", layout="wide", page_icon="�
 st.title("🚀 Sistema Modular de Capas - Matinal 2.0")
 
 # ==========================================
-# FUNCIÓN COMPONENTE REUTILIZABLE PARA AG-GRID
+# FUNCIÓN COMPONENTE REUTILIZABLE NATIVA
 # ==========================================
 def renderizar_aggrid(df: pd.DataFrame, altura: int = 400):
     if df.empty:
         st.warning("No hay datos disponibles para mostrar.")
         return
 
-    gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_default_column(
-        filterable=True,
-        sortable=True,
-        resizable=True,
-        editable=False,
-        suppressMenu=False,
-        minWidth=150,          
-        autoHeaderHeight=True,  
-        wrapHeaderText=True     
-    )
-    
-    for col in df.columns:
-        col_lower = col.lower()
-        if any(kw in col_lower for kw in ['pct', '%', 'cobertura', 'cumplimiento']):
-            gb.configure_column(
-                col, 
-                valueFormatter="x != null && x !== '' && !isNaN(x) ? Number(x).toFixed(2) + '%' : '0.00%'"
-            )
-        elif df[col].dtype in ['float64', 'float32']:
-            gb.configure_column(
-                col, 
-                valueFormatter="x != null && x !== '' && !isNaN(x) ? Number(x).toLocaleString('es-ES', {minimumFractionDigits: 1, maximumFractionDigits: 1}) : '0.0'"
-            )
-        elif df[col].dtype in ['int64', 'Int64', 'int32']:
-            if not ('Cod' in col or 'ID' in col or 'Cliente' in col):
-                gb.configure_column(col, valueFormatter="x != null ? Number(x).toLocaleString('es-ES') : '0'")
-
-    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
-    grid_options = gb.build()
-
-    grid_options['autoSizeStrategy'] = {
-        'type': 'fitCellContents'
-    }
-
-    grid_response = AgGrid(
+    st.dataframe(
         df,
-        gridOptions=grid_options,
         height=altura,
-        width="100%",
-        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-        update_mode=GridUpdateMode.VALUE_CHANGED,
-        theme="streamlit",
-        fit_columns_on_grid_load=False
+        use_container_width=True
     )
-    return grid_response
 
 # ==========================================
 # FUNCIÓN CACHEADA PARA MÁXIMA VELOCIDAD
