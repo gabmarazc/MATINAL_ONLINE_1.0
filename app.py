@@ -1,4 +1,5 @@
 # app.py
+# Forzar redescubrimiento de dependencias en Streamlit Cloud
 import io
 import streamlit as st
 import pandas as pd
