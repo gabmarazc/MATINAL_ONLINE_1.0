@@ -49,17 +49,17 @@ def crear_filtro_excel(label, opciones, key_prefix):
         for op in opciones:
             st.session_state[f"{key_prefix}_{op}"] = val_todos_actual
 
+    todos_estan_marcados = all(st.session_state.get(f"{key_prefix}_{op}", False) for op in opciones)
+    if todos_estan_marcados and opciones and not st.session_state.get(all_key, False):
+        st.session_state[all_key] = True
+        st.session_state[aux_cambio_key] = True
+
     with st.popover(f"{label}: ...", use_container_width=True):
         st.checkbox("TODOS", key=all_key)
         st.divider()
         
         for op in opciones:
             st.checkbox(str(op), key=f"{key_prefix}_{op}")
-
-    todos_estan_marcados = all(st.session_state.get(f"{key_prefix}_{op}", False) for op in opciones)
-    if todos_estan_marcados and opciones and not st.session_state.get(all_key, False):
-        st.session_state[all_key] = True
-        st.session_state[aux_cambio_key] = True
 
     seleccionados = [op for op in opciones if st.session_state.get(f"{key_prefix}_{op}", False)]
     return seleccionados
@@ -221,7 +221,6 @@ def dibujar_pestaña_batalla_cobertura_marca(bases, df_vtas_operativo, superviso
         st.info("No se encontraron registros de clientes incumplidores bajo los supervisores seleccionados.")
         return
 
-    # Filtros reactivos directos (sin st.form ni botón Aplicar)
     col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     
     with col_f1:
