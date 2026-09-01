@@ -1,4 +1,4 @@
-# st_aggrid.py (Módulo de compatibilidad local)
+# st_aggrid.py (Módulo de compatibilidad local actualizado)
 import streamlit as st
 import pandas as pd
 
@@ -23,3 +23,6 @@ class DataReturnMode:
 
 class GridUpdateMode:
     VALUE_CHANGED = "VALUE_CHANGED"
+
+def JsCode(text):
+    return text
