@@ -1,3 +1,4 @@
+#[cite: 3]
 from io import BytesIO
 import pandas as pd
 import streamlit as st
@@ -29,7 +30,7 @@ def render_parametros():
   edited_df = st.data_editor(
       st.session_state["df_parametros"],
       num_rows="fixed",
-      use_container_width=True,
+      width="stretch",
       key="editor_parametros_fechas",
   )
 

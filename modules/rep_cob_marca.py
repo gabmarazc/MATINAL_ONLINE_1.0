@@ -204,7 +204,7 @@ def crear_filtro_excel(label, opciones, key_prefix):
         for op in opciones:
             st.session_state[f"{key_prefix}_{op}"] = val_todos_actual
 
-    with st.popover(f"{label}: ...", use_container_width=True):
+    with st.popover(f"{label}: ...", width="stretch"):
         st.checkbox("TODOS", key=all_key)
         st.divider()
         

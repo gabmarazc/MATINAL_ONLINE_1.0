@@ -1,4 +1,3 @@
-# /modules/rep_kilos.py
 import io
 import streamlit as st
 import pandas as pd
@@ -26,7 +25,7 @@ def crear_filtro_excel(label, opciones, key_prefix):
         for op in opciones:
             st.session_state[f"{key_prefix}_{op}"] = val_todos_actual
 
-    with st.popover(f"{label}: ...", use_container_width=True):
+    with st.popover(f"{label}: ...", width="stretch"):
         st.checkbox("TODOS", key=all_key)
         st.divider()
         
@@ -126,21 +125,18 @@ def dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_l
         reporte_avance["SUP"].astype(str).str.strip().isin(sup_str)
     ].copy()
     
-    # 1. Extracción de opciones disponibles basadas en la cascada del Supervisor
     v_dispo_kilos = sorted(reporte_avance_filtrado["Nombre"].dropna().astype(str).str.strip().unique().tolist())
     segmentos_disponibles = sorted(reporte_avance_filtrado["SEGMENTO"].dropna().astype(str).str.strip().unique().tolist())
 
-    # 2. Limpieza automática de estados huérfanos en st.session_state
     for v in v_dispo_kilos:
         k = f"kilos_vend_{v}"
         if k in st.session_state and not st.session_state[k]:
-            pass # Mantiene el estado booleano actual si existe
+            pass
     for seg in segmentos_disponibles:
         k = f"kilos_seg_{seg}"
         if k in st.session_state and not st.session_state[k]:
             pass
 
-    # 3. Filtros locales interactivos completamente reactivos (SIN st.form)
     col_f1, col_f2 = st.columns([2, 2])
     with col_f1:
         v_selec_kilos = crear_filtro_excel("Vendedor", v_dispo_kilos, "kilos_vend")

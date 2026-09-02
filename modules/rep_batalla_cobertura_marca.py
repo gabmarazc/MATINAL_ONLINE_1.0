@@ -1,3 +1,4 @@
+#[cite: 4]
 import io
 import streamlit as st
 import pandas as pd
@@ -54,7 +55,7 @@ def crear_filtro_excel(label, opciones, key_prefix):
         st.session_state[all_key] = True
         st.session_state[aux_cambio_key] = True
 
-    with st.popover(f"{label}: ...", use_container_width=True):
+    with st.popover(f"{label}: ...", width="stretch"):
         st.checkbox("TODOS", key=all_key)
         st.divider()
         

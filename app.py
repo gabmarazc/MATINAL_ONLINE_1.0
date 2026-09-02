@@ -28,7 +28,7 @@ def renderizar_aggrid(df: pd.DataFrame, altura: int = 400):
     st.dataframe(
         df,
         height=altura,
-        use_container_width=True
+        width="stretch"
     )
 
 # ==========================================

@@ -4,7 +4,7 @@ import pandas as pd
 
 def AgGrid(df, gridOptions=None, height=400, width="100%", **kwargs):
     if isinstance(df, pd.DataFrame) and not df.empty:
-        st.dataframe(df, height=height, use_container_width=True)
+        st.dataframe(df, height=height, width="stretch")
     else:
         st.warning("No hay datos disponibles para mostrar.")
     return {"data": df, "selected_rows": []}
