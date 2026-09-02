@@ -133,9 +133,7 @@ if st.session_state["bases"] is not None:
         # --- PESTAÑA 1: PARÁMETROS FECHAS ---
         with tab_params:
             render_parametros()
-            if st.button("💾 Aplicar cambios de fechas y recalcular", key="btn_aplicar_cambios_fechas"):
-                st.rerun()
-
+            
         # --- PESTAÑA 2: AVANCE KILOS ---
         with tab_reporte:
             dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_limpias, parametros_por_nombre)
