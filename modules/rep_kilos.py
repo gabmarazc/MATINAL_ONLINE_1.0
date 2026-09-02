@@ -128,15 +128,6 @@ def dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_l
     v_dispo_kilos = sorted(reporte_avance_filtrado["Nombre"].dropna().astype(str).str.strip().unique().tolist())
     segmentos_disponibles = sorted(reporte_avance_filtrado["SEGMENTO"].dropna().astype(str).str.strip().unique().tolist())
 
-    for v in v_dispo_kilos:
-        k = f"kilos_vend_{v}"
-        if k in st.session_state and not st.session_state[k]:
-            pass
-    for seg in segmentos_disponibles:
-        k = f"kilos_seg_{seg}"
-        if k in st.session_state and not st.session_state[k]:
-            pass
-
     col_f1, col_f2 = st.columns([2, 2])
     with col_f1:
         v_selec_kilos = crear_filtro_excel("Vendedor", v_dispo_kilos, "kilos_vend")
@@ -154,31 +145,38 @@ def dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_l
     ].copy()
     
     total_kilos_operativos = float(reporte_avance_filtrado["Actual"].sum() + reporte_avance_filtrado["Arrastre"].sum())
-    
-    col_m1, col_m2 = st.columns([1, 2])
+    total_objetivo = float(reporte_avance_filtrado["Objetivo Mes Corriente"].sum())
+    cumplimiento = (total_kilos_operativos / total_objetivo * 100) if total_objetivo > 0 else 0.0
+
+    # Tres columnas para las métricas principales
+    col_m1, col_m2, col_m3 = st.columns(3)
     with col_m1:
         st.metric(label="📊 Total Kilos Operativos", value=f"{total_kilos_operativos:,.1f} kg")
     with col_m2:
-        def formatear_detalle(selec, total_disp):
-            if not selec:
-                return "NINGUNO"
-            if len(selec) == len(total_disp):
-                return "TODOS"
-            return ", ".join(map(str, selec))
+        st.metric(label="🎯 Total Objetivo", value=f"{total_objetivo:,.1f} kg")
+    with col_m3:
+        st.metric(label="📈 Cumplimiento", value=f"{cumplimiento:.2f}%")
 
-        vend_res = formatear_detalle(v_selec_kilos, v_dispo_kilos)
-        seg_res = formatear_detalle(segmentos_seleccionados, segmentos_disponibles)
-        
-        st.markdown(
-            f"""
-            <div style="background-color: #1e293b; padding: 10px; border-radius: 6px; font-size: 13px; border: 1px solid #475569; color: #f8fafc;">
-                <b style="color: #38bdf8;">📋 Resumen de Filtros Aplicados:</b><br>
-                • <b>Vendedor:</b> <span style="color: #e2e8f0;">{vend_res}</span><br>
-                • <b>Segmento:</b> <span style="color: #e2e8f0;">{seg_res}</span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+    def formatear_detalle(selec, total_disp):
+        if not selec:
+            return "NINGUNO"
+        if len(selec) == len(total_disp):
+            return "TODOS"
+        return ", ".join(map(str, selec))
+
+    vend_res = formatear_detalle(v_selec_kilos, v_dispo_kilos)
+    seg_res = formatear_detalle(segmentos_seleccionados, segmentos_disponibles)
+    
+    st.markdown(
+        f"""
+        <div style="background-color: #1e293b; padding: 10px; border-radius: 6px; font-size: 13px; border: 1px solid #475569; color: #f8fafc; margin-top: 10px;">
+            <b style="color: #38bdf8;">📋 Resumen de Filtros Aplicados:</b><br>
+            • <b>Vendedor:</b> <span style="color: #e2e8f0;">{vend_res}</span><br>
+            • <b>Segmento:</b> <span style="color: #e2e8f0;">{seg_res}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     st.divider()
     
