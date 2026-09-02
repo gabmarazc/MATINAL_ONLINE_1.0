@@ -35,8 +35,8 @@ def render_parametros():
   # Actualizar el estado global con los cambios realizados por el usuario en tiempo real
   st.session_state["df_parametros"] = edited_df
 
-  # Botón opcional para forzar la actualización/recalculo visual si se desea
-  if st.button("💾 Aplicar cambios de fechas y recalcular"):
+  # Botón con key única para evitar bloqueos visuales o estados grisados
+  if st.button("💾 Aplicar cambios de fechas y recalcular", key="btn_aplicar_cambios_fechas_modulo"):
     st.success(
         "¡Parámetros actualizados correctamente para el resto de los"
         " reportes!"
@@ -55,4 +55,5 @@ def render_parametros():
       data=buffer,
       file_name="parametros_fechas_sistema.xlsx",
       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      key="btn_descargar_parametros_excel"
   )
