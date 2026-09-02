@@ -1,4 +1,3 @@
-#[cite: 3]
 from io import BytesIO
 import pandas as pd
 import streamlit as st
@@ -9,7 +8,7 @@ def render_parametros():
 
   # Inicializar el DataFrame de parámetros en el session_state si no existe
   if "df_parametros" not in st.session_state:
-    data = {
+    st.session_state["df_parametros"] = pd.DataFrame({
         "PARAMETRO": [
             "Año",
             "Mes",
@@ -17,13 +16,12 @@ def render_parametros():
             "Dia Venta",
             "Dia Anterior",
         ],
-        "VALOR": ["2026", "8", "31/08/2026", "29/08/2026", "28/08/2026"],
-    }
-    st.session_state["df_parametros"] = pd.DataFrame(data)
+        "VALOR": ["2026", "9", "02/09/2026", "01/09/2026", "31/08/2026"],
+    })
 
   st.info(
       "Modifica los valores de la tabla inferior para actualizar los"
-      " parámetros de fecha en todo el sistema de forma dinámica."
+      " parámetros de fecha en todo el sistema de forma dinámica en memoria."
   )
 
   # Editor interactivo de datos
@@ -34,8 +32,16 @@ def render_parametros():
       key="editor_parametros_fechas",
   )
 
-  # Actualizar el estado global con los cambios realizados por el usuario
+  # Actualizar el estado global con los cambios realizados por el usuario en tiempo real
   st.session_state["df_parametros"] = edited_df
+
+  # Botón opcional para forzar la actualización/recalculo visual si se desea
+  if st.button("💾 Aplicar cambios de fechas y recalcular"):
+    st.success(
+        "¡Parámetros actualizados correctamente para el resto de los"
+        " reportes!"
+    )
+    st.rerun()
 
   # Generación del archivo Excel en memoria usando openpyxl
   buffer = BytesIO()
@@ -43,7 +49,7 @@ def render_parametros():
     edited_df.to_excel(writer, index=False, sheet_name="FECHAS")
   buffer.seek(0)
 
-  # Botón funcional de descarga a Excel obligatorio
+  # Botón funcional de descarga a Excel obligatorio al final de la vista
   st.download_button(
       label="📥 Descargar Parámetros a Excel",
       data=buffer,
