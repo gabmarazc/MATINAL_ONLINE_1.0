@@ -41,6 +41,12 @@ def crear_filtro_excel(label, opciones, key_prefix):
     return seleccionados
 
 def generar_reporte_avance_kilos_segmento(df_vtas_operativo, df_vtas_limpias, vendedores, segmentos, df_rutas_operativas, dia_venta, anio_operativo, mes_operativo):
+    # Estandarizar tipos de datos operativos para evitar desajustes en comparaciones y merges
+    df_op = df_vtas_operativo.copy()
+    df_op["CodVendedor"] = pd.to_numeric(df_op["CodVendedor"], errors="coerce").astype("Int64")
+    df_op["CodVendedorOperativo"] = pd.to_numeric(df_op["CodVendedorOperativo"], errors="coerce").astype("Int64")
+    df_op["SEGMENTO"] = df_op["SEGMENTO"].fillna("").astype(str).str.strip()
+
     vendedores_reporte = pd.DataFrame()
     vendedores_reporte["CodVend"] = pd.to_numeric(vendedores["CodVend"], errors="coerce").astype("Int64")
     vendedores_reporte["Nombre"] = vendedores["Nombre"].fillna("").astype(str).str.strip()
@@ -59,9 +65,7 @@ def generar_reporte_avance_kilos_segmento(df_vtas_operativo, df_vtas_limpias, ve
     vendedores_reporte["_k"], segmentos_reporte["_k"] = 1, 1
     matriz = vendedores_reporte.merge(segmentos_reporte, on="_k").drop(columns="_k")
     
-    kilos = df_vtas_operativo.groupby(["CodVendedorOperativo", "SEGMENTO", "Periodo"], dropna=False)["PesoKg"].sum().reset_index().rename(columns={"CodVendedorOperativo": "CodVend"})
-    kilos["CodVend"] = pd.to_numeric(kilos["CodVend"], errors="coerce").astype("Int64")
-    kilos["SEGMENTO"] = kilos["SEGMENTO"].fillna("").astype(str).str.strip()
+    kilos = df_op.groupby(["CodVendedorOperativo", "SEGMENTO", "Periodo"], dropna=False)["PesoKg"].sum().reset_index().rename(columns={"CodVendedorOperativo": "CodVend"})
     
     kilos_pivot = kilos.pivot_table(index=["CodVend", "SEGMENTO"], columns="Periodo", values="PesoKg", aggfunc="sum", fill_value=0).reset_index()
     kilos_pivot.columns.name = None
@@ -102,7 +106,7 @@ def generar_reporte_avance_kilos_segmento(df_vtas_operativo, df_vtas_limpias, ve
     reporte = reporte.merge(kilos_historial[["CodVendedor", "SEGMENTO", "Objetivo Mes Corriente"]], left_on=["CodVend", "SEGMENTO"], right_on=["CodVendedor", "SEGMENTO"], how="left").drop(columns="CodVendedor")
     reporte["Objetivo Mes Corriente"] = reporte["Objetivo Mes Corriente"].fillna(0.0)
     
-    reemplazos = df_vtas_operativo[df_vtas_operativo["CodVendedorOperativo"].ne(df_vtas_operativo["CodVendedor"])][["CodVendedor", "CodVendedorOperativo", "SEGMENTO", "PesoKg"]].copy()
+    reemplazos = df_op[df_op["CodVendedorOperativo"].ne(df_op["CodVendedor"])][["CodVendedor", "CodVendedorOperativo", "SEGMENTO", "PesoKg"]].copy()
     
     movimientos_titular = reemplazos[["CodVendedor", "SEGMENTO", "PesoKg"]].rename(columns={"CodVendedor": "CodVend"})
     movimientos_titular["Ajuste_Por_Reemp"] = -movimientos_titular.pop("PesoKg")
@@ -226,6 +230,7 @@ def dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_l
         gb.configure_column("Arrastre", headerName="Arrastre", width=100, valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) : '0.0'")
         gb.configure_column("Actual", headerName="Actual", width=100, valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) : '0.0'")
         gb.configure_column("OPERATIVO", headerName="Operativo", width=110, valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) : '0.0'")
+        gb.configure_column("Ajuste_Por_Reemp", headerName="Ajuste Reemp.", width=110, valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) : '0.0'")
         gb.configure_column("Tendencia_Total_Kg", headerName="Tendencia Kg", width=120, valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 1, maximumFractionDigits: 1}) : '0.0'")
         gb.configure_column("Cumplimiento_Proyectado_Pct", headerName="% Proyectado", width=130, valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'")
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
