@@ -46,7 +46,16 @@ def procesar_datos_completos(bases, df_parametros_dinamico=None):
             parametros_por_nombre[str(n).strip().casefold()] = v
             
     anio_operativo = int(parametros_por_nombre.get("añooperativo", parametros_por_nombre.get("año", 2026)))
-    mes_operativo = int(parametros_por_nombre.get("mesoperativo", parametros_por_nombre.get("mes", 1)))
+    
+    # --- CORRECCIÓN DEL MES OPERATIVO ---
+    val_mes = parametros_por_nombre.get("mesoperativo", parametros_por_nombre.get("mes", 1))
+    val_mes_str = str(val_mes).strip()
+    if "-" in val_mes_str:
+        mes_operativo = int(val_mes_str.split("-")[1])
+    else:
+        mes_operativo = int(float(val_mes_str))
+    # ------------------------------------
+
     dia_venta = pd.to_datetime(parametros_por_nombre.get("dia venta", parametros_por_nombre.get("día venta", "29/08/2026")), dayfirst=True, errors="coerce")
     
     # Inyectar los parámetros dinámicos actualizados en una copia de las bases para que el procesamiento los tome
