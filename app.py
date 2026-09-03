@@ -1,4 +1,3 @@
-# app.py
 import io
 import streamlit as st
 import pandas as pd
@@ -47,14 +46,18 @@ def procesar_datos_completos(bases, df_parametros_dinamico=None):
             
     anio_operativo = int(parametros_por_nombre.get("añooperativo", parametros_por_nombre.get("año", 2026)))
     
-    # --- CORRECCIÓN DEL MES OPERATIVO ---
+    # --- CORRECCIÓN ROBUSTA DEL MES OPERATIVO (SOPORTA /, - Y VALORES NUMÉRICOS) ---
     val_mes = parametros_por_nombre.get("mesoperativo", parametros_por_nombre.get("mes", 1))
     val_mes_str = str(val_mes).strip()
     if "-" in val_mes_str:
-        mes_operativo = int(val_mes_str.split("-")[1])
+        partes = val_mes_str.split("-")
+        mes_operativo = int(partes[1]) if len(partes[0]) == 4 else int(partes[0])
+    elif "/" in val_mes_str:
+        partes = val_mes_str.split("/")
+        mes_operativo = int(partes[1]) if len(partes[0]) == 4 else int(partes[0])
     else:
         mes_operativo = int(float(val_mes_str))
-    # ------------------------------------
+    # -----------------------------------------------------------------------------
 
     dia_venta = pd.to_datetime(parametros_por_nombre.get("dia venta", parametros_por_nombre.get("día venta", "29/08/2026")), dayfirst=True, errors="coerce")
     
