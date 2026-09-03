@@ -9,12 +9,15 @@ import streamlit as st
 
 
 @st.cache_data(show_spinner=False)
-def cargar_vta_optimizado(ruta_excel):
-  """Carga VTA en Parquet.
+def cargar_vta_optimizado(ruta_o_archivo):
+  """Carga VTA en Parquet aceptando ruta local o un buffer subido por Streamlit."""
+  if hasattr(ruta_o_archivo, "read"):
+    # Es un archivo subido por st.file_uploader
+    df_vta = pd.read_excel(ruta_o_archivo, dtype=str)
+    df_vta = df_vta.fillna("")
+    return df_vta
 
-  Si no existe o se actualiza VTA.xlsx, convierte todas las columnas
-  object/string a texto puro usando PyArrow nativo.
-  """
+  ruta_excel = ruta_o_archivo
   ruta_parquet = ruta_excel.replace(".xlsx", ".parquet").replace(
       ".XLSX", ".parquet"
   )
@@ -28,6 +31,9 @@ def cargar_vta_optimizado(ruta_excel):
       except Exception:
         if os.path.exists(ruta_parquet):
           os.remove(ruta_parquet)
+
+  if not os.path.exists(ruta_excel):
+    return None
 
   df_vta = pd.read_excel(ruta_excel, dtype=str)
   df_vta = df_vta.fillna("")
@@ -61,9 +67,45 @@ def cargar_ausencias_remotas(url_ausencias):
 
 
 def cargar_todas_las_bases():
-  """Capa 1: Carga optimizada de bases con Parquet y Caché de Streamlit"""
-  df_vta = cargar_vta_optimizado(cfg.ARCHIVO_VTA_EXCEL)
-  df_universo = pd.read_excel(cfg.ARCHIVO_UNIVERSO)
+  """Capa 1: Carga optimizada de bases, validando archivos locales o solicitándolos por UI."""
+  
+  # Verificamos si los archivos locales existen. Si no, abrimos unexpander / uploader en la barra lateral o pantalla principal.
+  falta_vta = not os.path.exists(cfg.ARCHIVO_VTA_EXCEL)
+  falta_universo = not os.path.exists(cfg.ARCHIVO_UNIVERSO)
+  falta_rutas = not os.path.exists(cfg.ARCHIVO_RUTAS)
+  falta_params = not os.path.exists(cfg.ARCHIVO_PARAMETROS)
+
+  if falta_vta or falta_universo or falta_rutas or falta_params:
+    st.warning("⚠️ No se encontraron las bases de datos locales en el servidor. Por favor, sube los archivos correspondientes para iniciar el sistema:")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+      up_vta = st.file_uploader("Subir Archivo VTA (.xlsx)", type=["xlsx", "xls"], key="up_vta")
+      up_univ = st.file_uploader("Subir Archivo UNIVERSO (.xlsx)", type=["xlsx", "xls"], key="up_univ")
+    with col2:
+      up_rutas = st.file_uploader("Subir Archivo RUTAS (.xlsx)", type=["xlsx", "xls"], key="up_rutas")
+      up_params = st.file_uploader("Subir Archivo PARÁMETROS (.xlsx)", type=["xlsx", "xls"], key="up_params")
+
+    if not up_vta or not up_univ or not up_rutas or not up_params:
+      st.info("ℹ️ Sube todos los archivos requeridos arriba para continuar.")
+      st.stop()
+    
+    # Si fueron subidos, los usamos directamente
+    df_vta = cargar_vta_optimizado(up_vta)
+    df_universo = pd.read_excel(up_univ)
+    df_rutas = pd.read_excel(up_rutas)
+    try:
+      parametros = leer_parametros_con_encabezado(up_params)
+    except Exception:
+      parametros = {}
+  else:
+    df_vta = cargar_vta_optimizado(cfg.ARCHIVO_VTA_EXCEL)
+    df_universo = pd.read_excel(cfg.ARCHIVO_UNIVERSO)
+    df_rutas = pd.read_excel(cfg.ARCHIVO_RUTAS)
+    try:
+      parametros = leer_parametros_con_encabezado(cfg.ARCHIVO_PARAMETROS)
+    except Exception:
+      parametros = {}
 
   renombres = {
       "Codigo": "Cliente",
@@ -84,7 +126,6 @@ def cargar_todas_las_bases():
       renombres[col] = "DireccionCliente"
   df_universo = df_universo.rename(columns=renombres)
 
-  df_rutas = pd.read_excel(cfg.ARCHIVO_RUTAS)
   df_rutas["Codigo"] = (
       pd.to_numeric(df_rutas["Codigo"], errors="coerce").astype("Int64")
   )
@@ -98,15 +139,7 @@ def cargar_todas_las_bases():
 
   ausencias_crudas = cargar_ausencias_remotas(cfg.URL_AUSENCIAS)
 
-  # Carga de las demás solapas del Excel de parámetros (MARCAS, SEGMENTOS, etc.)
-  try:
-    parametros = leer_parametros_con_encabezado(cfg.ARCHIVO_PARAMETROS)
-  except Exception:
-    parametros = {}
-
   # GESTIÓN DINÁMICA DE FECHAS:
-  # Si el usuario ya modificó las fechas en la UI, las tomamos de st.session_state.
-  # Si no, inicializamos los valores por defecto en la sesión para que el sistema nunca falle.
   if "df_parametros" not in st.session_state:
     st.session_state["df_parametros"] = pd.DataFrame({
         "PARAMETRO": [
@@ -119,7 +152,6 @@ def cargar_todas_las_bases():
         "VALOR": ["2026", "9", "02/09/2026", "01/09/2026", "31/08/2026"],
     })
 
-  # Inyectamos el DataFrame de fechas directamente desde el session_state al diccionario de parámetros
   parametros["FECHAS"] = st.session_state["df_parametros"]
 
   return {
