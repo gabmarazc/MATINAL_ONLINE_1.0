@@ -32,11 +32,10 @@ def renderizar_aggrid(df: pd.DataFrame, altura: int = 400):
     )
 
 # ==========================================
-# FUNCIÓN CACHEADA PARA MÁXIMA VELOCIDAD
+# FUNCIÓN DE PROCESAMIENTO DINÁMICO (SIN CACHÉ PARA REFRESCO INMEDIATO)
 # ==========================================
-@st.cache_data
 def procesar_datos_completos(bases, df_parametros_dinamico=None):
-    if df_parametros_dinamico is not None:
+    if df_parametros_dinamico is not None and not df_parametros_dinamico.empty:
         fechas_param = df_parametros_dinamico
     else:
         fechas_param = bases["PARAMETROS"].get("FECHAS", pd.DataFrame({"PARAMETRO": ["Año", "Mes", "Dia Venta"], "VALOR": [2026, 8, "29/08/2026"]}))
@@ -48,29 +47,35 @@ def procesar_datos_completos(bases, df_parametros_dinamico=None):
             
     anio_operativo = int(parametros_por_nombre.get("añooperativo", parametros_por_nombre.get("año", 2026)))
     mes_operativo = int(parametros_por_nombre.get("mesoperativo", parametros_por_nombre.get("mes", 1)))
-    dia_venta = pd.to_datetime(parametros_por_nombre["dia venta"], dayfirst=True, errors="coerce")
+    dia_venta = pd.to_datetime(parametros_por_nombre.get("dia venta", parametros_por_nombre.get("día venta", "29/08/2026")), dayfirst=True, errors="coerce")
     
-    df_vtas_limpias = limpiar_vtas_crudas(bases["VTA"])
+    # Inyectar los parámetros dinámicos actualizados en una copia de las bases para que el procesamiento los tome
+    bases_trabajo = bases.copy()
+    param_copia = bases_trabajo.get("PARAMETROS", {}).copy()
+    param_copia["FECHAS"] = fechas_param
+    bases_trabajo["PARAMETROS"] = param_copia
+
+    df_vtas_limpias = limpiar_vtas_crudas(bases_trabajo["VTA"])
     df_vtas_limpias = df_vtas_limpias[df_vtas_limpias["FechaCarga"] <= dia_venta].copy()
-    df_vtas_operativo = procesar_ext_vta(df_vtas_limpias, bases["AUSENCIAS"], bases["PARAMETROS"])
-    df_rutas_operativas = procesar_rutas_operativas(bases["RUTAS"], anio_operativo, mes_operativo)
+    df_vtas_operativo = procesar_ext_vta(df_vtas_limpias, bases_trabajo["AUSENCIAS"], bases_trabajo["PARAMETROS"])
+    df_rutas_operativas = procesar_rutas_operativas(bases_trabajo["RUTAS"], anio_operativo, mes_operativo)
     
     reporte_avance = generar_reporte_avance_kilos_segmento(
-        df_vtas_operativo, df_vtas_limpias, bases["PARAMETROS"]["VENDEDORES"], 
-        bases["PARAMETROS"]["SEGMENTOS"], df_rutas_operativas, dia_venta, anio_operativo, mes_operativo
+        df_vtas_operativo, df_vtas_limpias, bases_trabajo["PARAMETROS"]["VENDEDORES"], 
+        bases_trabajo["PARAMETROS"]["SEGMENTOS"], df_rutas_operativas, dia_venta, anio_operativo, mes_operativo
     )
     reporte_ccc = generar_reporte_ccc_taxonomia(
-        df_vtas_operativo.copy(), bases["UNIVERSO"].copy(), 
-        bases["PARAMETROS"]["VENDEDORES"].copy(), bases["PARAMETROS"]["CCC"].copy()
+        df_vtas_operativo.copy(), bases_trabajo["UNIVERSO"].copy(), 
+        bases_trabajo["PARAMETROS"]["VENDEDORES"].copy(), bases_trabajo["PARAMETROS"]["CCC"].copy()
     )
     
-    cartera_df = bases.get("UNIVERSO", pd.DataFrame())
+    cartera_df = bases_trabajo.get("UNIVERSO", pd.DataFrame())
     
     reporte_cob_marca, marcas_lista, mapa_objetivos_marca = generar_reporte_cobertura_marca(
         df_vtas_operativo=df_vtas_operativo,
         df_cartera=cartera_df,
-        vendedores=bases["PARAMETROS"]["VENDEDORES"],
-        df_marcas=bases["PARAMETROS"]["MARCAS"]
+        vendedores=bases_trabajo["PARAMETROS"]["VENDEDORES"],
+        df_marcas=bases_trabajo["PARAMETROS"]["MARCAS"]
     )
     
     return df_vtas_limpias, df_vtas_operativo, reporte_avance, reporte_ccc, reporte_cob_marca, marcas_lista, mapa_objetivos_marca, parametros_por_nombre, dia_venta
@@ -133,8 +138,6 @@ if st.session_state["bases"] is not None:
         # --- PESTAÑA 1: PARÁMETROS FECHAS ---
         with tab_params:
             render_parametros()
-            if st.button("💾 Aplicar cambios de fechas y recalcular"):
-                st.rerun()
 
         # --- PESTAÑA 2: AVANCE KILOS ---
         with tab_reporte:
