@@ -4,7 +4,6 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 
 def crear_filtro_excel(label, opciones, key_prefix):
-    """Crea un filtro desplegable tipo Excel con opción de 'TODOS' sincronizada de forma reactiva (sin st.form)."""
     all_key = f"{key_prefix}_todos"
     
     if all_key not in st.session_state:
@@ -41,7 +40,6 @@ def crear_filtro_excel(label, opciones, key_prefix):
     return seleccionados
 
 def generar_reporte_avance_kilos_segmento(df_vtas_operativo, df_vtas_limpias, vendedores, segmentos, df_rutas_operativas, dia_venta, anio_operativo, mes_operativo):
-    # Estandarizar tipos de datos operativos para evitar desajustes en comparaciones y merges
     df_op = df_vtas_operativo.copy()
     df_op["CodVendedor"] = pd.to_numeric(df_op["CodVendedor"], errors="coerce").astype("Int64")
     df_op["CodVendedorOperativo"] = pd.to_numeric(df_op["CodVendedorOperativo"], errors="coerce").astype("Int64")
@@ -120,7 +118,7 @@ def generar_reporte_avance_kilos_segmento(df_vtas_operativo, df_vtas_limpias, ve
     
     return reporte
 
-def dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_limpias, parametros_por_nombre):
+def dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_limpias, parametros_por_nombre, df_vtas_operativo=None):
     st.subheader("Avance de Kilos por Segmento")
     st.markdown("Seguimiento y proyección del avance de kilos por preventista y segmento.")
     
@@ -152,7 +150,6 @@ def dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_l
     total_objetivo = float(reporte_avance_filtrado["Objetivo Mes Corriente"].sum())
     cumplimiento = (total_kilos_operativos / total_objetivo * 100) if total_objetivo > 0 else 0.0
 
-    # Tres columnas para las métricas principales
     col_m1, col_m2, col_m3 = st.columns(3)
     with col_m1:
         st.metric(label="📊 Total Kilos Operativos", value=f"{total_kilos_operativos:,.1f} kg")

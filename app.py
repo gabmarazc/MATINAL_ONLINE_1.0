@@ -94,7 +94,7 @@ if st.session_state["bases"] is not None:
         
         # Sidebar y Botón de Recarga Manual
         st.sidebar.header("Acciones")
-        if st.sidebar.button("🔄 Recargar Bases / Limpiar Caché", key="btn_recargar_bases_sidebar"):
+        if st.sidebar.button("🔄 Recargar Bases / Limpiar Caché"):
             st.cache_data.clear()
             st.session_state["bases"] = None
             if "df_parametros" in st.session_state:
@@ -133,7 +133,9 @@ if st.session_state["bases"] is not None:
         # --- PESTAÑA 1: PARÁMETROS FECHAS ---
         with tab_params:
             render_parametros()
-            
+            if st.button("💾 Aplicar cambios de fechas y recalcular"):
+                st.rerun()
+
         # --- PESTAÑA 2: AVANCE KILOS ---
         with tab_reporte:
             dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_limpias, parametros_por_nombre)

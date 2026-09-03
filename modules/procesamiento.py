@@ -1,4 +1,3 @@
-# procesamiento.py
 import pandas as pd
 import config as cfg
 
@@ -54,17 +53,30 @@ def procesar_ext_vta(df_vtas_limpias, ausencias, parametros):
             
     año_operativo = int(parametros_por_nombre.get("añooperativo", parametros_por_nombre.get("año", 2026)))
     mes_operativo = int(parametros_por_nombre.get("mesoperativo", parametros_por_nombre.get("mes", 1)))
-    mes_anterior = mes_operativo - 1
-    mes_siguiente = mes_operativo + 1
+    
+    # Manejo seguro de cambio de año/mes para Arrastre y Futuro
+    if mes_operativo == 1:
+        mes_anterior = 12
+        año_anterior = año_operativo - 1
+    else:
+        mes_anterior = mes_operativo - 1
+        año_anterior = año_operativo
+        
+    if mes_operativo == 12:
+        mes_siguiente = 1
+        año_siguiente = año_operativo + 1
+    else:
+        mes_siguiente = mes_operativo + 1
+        año_siguiente = año_operativo
     
     df["MesCarga"] = df["FechaCarga"].dt.month.astype("Int64")
     df["AñoCarga"] = df["FechaCarga"].dt.year.astype("Int64")
     df["MesEntrega"] = df["FechaEntrega"].dt.month.astype("Int64")
     df["AñoEntrega"] = df["FechaEntrega"].dt.year.astype("Int64")
     
-    cond_arrastre = (df["AñoCarga"] == año_operativo) & (df["MesCarga"] == mes_anterior) & (df["AñoEntrega"] == año_operativo) & (df["MesEntrega"] == mes_operativo)
+    cond_arrastre = (df["AñoCarga"] == año_anterior) & (df["MesCarga"] == mes_anterior) & (df["AñoEntrega"] == año_operativo) & (df["MesEntrega"] == mes_operativo)
     cond_actual = (df["AñoCarga"] == año_operativo) & (df["MesCarga"] == mes_operativo) & (df["AñoEntrega"] == año_operativo) & (df["MesEntrega"] == mes_operativo)
-    cond_futuro = (df["AñoCarga"] == año_operativo) & (df["MesCarga"] == mes_operativo) & (df["AñoEntrega"] == año_operativo) & (df["MesEntrega"] == mes_siguiente)
+    cond_futuro = (df["AñoCarga"] == año_operativo) & (df["MesCarga"] == mes_operativo) & (df["AñoEntrega"] == año_siguiente) & (df["MesEntrega"] == mes_siguiente)
     
     df["Periodo"] = None
     df.loc[cond_arrastre, "Periodo"] = "Arrastre"
@@ -72,9 +84,8 @@ def procesar_ext_vta(df_vtas_limpias, ausencias, parametros):
     df.loc[cond_futuro, "Periodo"] = "Futuro"
     
     df = df[df["Periodo"].notna()].copy()
-    df["ClaveAUS"] = df["CodVendedor"].astype(str) + "-" + df["FechaCarga"].dt.strftime("%Y-%m-%d")
+    df["ClaveAUS"] = df["CodVendedor"].astype(str).str.strip() + "-" + df["FechaCarga"].dt.strftime("%Y-%m-%d")
     
-    # BUSCADOR INTELIGENTE DE COLUMNA DE FECHA EN AUSENCIAS (Previene el KeyError)
     aus = ausencias.copy()
     col_fecha_aus = "Fecha"
     for c in aus.columns:
@@ -82,13 +93,12 @@ def procesar_ext_vta(df_vtas_limpias, ausencias, parametros):
             col_fecha_aus = c
             break
             
-    aus[col_fecha_aus] = pd.to_datetime(aus[col_fecha_aus], errors="coerce")
+    aus[col_fecha_aus] = pd.to_datetime(aus[col_fecha_aus], dayfirst=True, errors="coerce")
     aus["CodVend"] = pd.to_numeric(aus["Ausente"], errors="coerce").astype("Int64")
     aus["Reemplazo"] = pd.to_numeric(aus["Reemplazo"], errors="coerce").astype("Int64")
     aus["Cliente"] = pd.to_numeric(aus["Cliente"], errors="coerce").astype("Int64")
     
-    # Normalizar clave de cruce usando la columna de fecha detectada
-    aus["ClaveAUS"] = aus["CodVend"].astype(str) + "-" + aus[col_fecha_aus].dt.strftime("%Y-%m-%d")
+    aus["ClaveAUS"] = aus["CodVend"].astype(str).str.strip() + "-" + aus[col_fecha_aus].dt.strftime("%Y-%m-%d")
     
     aus_dia = aus[aus["Cliente"].isna()][["ClaveAUS", "Reemplazo"]].drop_duplicates("ClaveAUS")
     aus_cliente = aus[aus["Cliente"].notna()][["ClaveAUS", "Cliente", "Reemplazo"]].drop_duplicates(["ClaveAUS", "Cliente"])
@@ -97,6 +107,7 @@ def procesar_ext_vta(df_vtas_limpias, ausencias, parametros):
     df = df.merge(aus_cliente.rename(columns={"Reemplazo": "ReemplazoCliente"}), on=["ClaveAUS", "Cliente"], how="left")
     df["Reemplazo"] = df["ReemplazoDia"].combine_first(df["ReemplazoCliente"])
     df["CodVendedorOperativo"] = df["Reemplazo"].combine_first(df["CodVendedor"]).astype("Int64")
+    
     return df[cfg.COLUMNAS_FINALES_EXTVTA]
 
 def procesar_rutas_operativas(df_rutas, anio_operativo, mes_operativo):
