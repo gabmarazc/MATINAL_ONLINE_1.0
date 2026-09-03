@@ -2,20 +2,52 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+from datetime import date, timedelta
+
+def obtener_dia_habil_anterior(d: date) -> date:
+    """Retorna el día hábil inmediato anterior (excluyendo sábados y domingos)."""
+    d = d - timedelta(days=1)
+    while d.weekday() >= 5:  # 5 = Sábado, 6 = Domingo
+        d = d - timedelta(days=1)
+    return d
 
 def render_parametros():
     """
-    Renderiza la pestaña de configuración de Parámetros y Fechas de forma limpia,
-    asegurando un único botón de guardado/recalculo y su respectiva descarga a Excel.
+    Renderiza la pestaña de configuración de Parámetros y Fechas,
+    forzando los valores por defecto correctos basados en la fecha actual real.
     """
     st.markdown("### Configuración de Parámetros Operativos y Fechas")
     st.markdown("Modifique los valores necesarios en la tabla inferior y haga clic en el botón de guardado para actualizar el motor de cálculo en tiempo real.")
 
-    # Inicializar el DataFrame de parámetros en session_state si no existe
+    # Forzar la inicialización o recálculo limpio basado en la fecha de hoy
     if "bases" in st.session_state and st.session_state["bases"] is not None:
         bases = st.session_state["bases"]
-        if "df_parametros" not in st.session_state:
-            st.session_state["df_parametros"] = bases["PARAMETROS"].get("FECHAS", pd.DataFrame()).copy()
+        
+        # Forzamos la actualización de fechas por defecto con la fecha real de hoy
+        df_temp = bases["PARAMETROS"].get("FECHAS", pd.DataFrame()).copy()
+        
+        if not df_temp.empty:
+            hoy = date.today() # Fecha actual real del sistema
+            dia_matinal = hoy
+            dia_venta = obtener_dia_habil_anterior(dia_matinal)
+            dia_anterior = obtener_dia_habil_anterior(dia_venta)
+
+            col_param = df_temp.columns[0]
+            col_val = df_temp.columns[1] if len(df_temp.columns) > 1 else None
+            
+            if col_val is not None:
+                for idx, row in df_temp.iterrows():
+                    p_nombre = str(row[col_param]).strip().lower()
+                    if "mes" in p_nombre:
+                        df_temp.at[idx, col_val] = hoy.strftime("%Y-%m")
+                    elif "matinal" in p_nombre:
+                        df_temp.at[idx, col_val] = dia_matinal.strftime("%d/%m/%Y")
+                    elif "venta" in p_nombre:
+                        df_temp.at[idx, col_val] = dia_venta.strftime("%d/%m/%Y")
+                    elif "anterior" in p_nombre:
+                        df_temp.at[idx, col_val] = dia_anterior.strftime("%d/%m/%Y")
+
+        st.session_state["df_parametros"] = df_temp
 
     df_param = st.session_state.get("df_parametros", pd.DataFrame())
 
@@ -33,18 +65,15 @@ def render_parametros():
 
     st.markdown("---")
 
-    # Contenedor para alinear o mostrar las acciones de forma limpia
     col_btn1, col_btn2 = st.columns([1, 1])
 
     with col_btn1:
-        # ÚNICO BOTÓN DE APLICAR CAMBIOS
         if st.button("💾 Aplicar cambios de fechas y recalcular", key="btn_aplicar_cambios_fechas_modulo", type="primary"):
             st.session_state["df_parametros"] = df_editado
             st.success("¡Parámetros actualizados con éxito! Recargando cálculos...")
             st.rerun()
 
     with col_btn2:
-        # BOTÓN OBLIGATORIO DE DESCARGA A EXCEL
         output = BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df_editado.to_excel(writer, index=False, sheet_name='Parametros_Fechas')
