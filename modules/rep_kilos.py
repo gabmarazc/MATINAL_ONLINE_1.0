@@ -88,7 +88,8 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
             return f"SILVER {rubro}".strip()
         return None
 
-    df["SEGMENTO"] = df.apply(asignar_seg_loc if "asignar_seg_loc" in locals() else asignar_segmento, axis=1)
+    # Corrección limpia de la llamada a la función:
+    df["SEGMENTO"] = df.apply(asignar_segmento, axis=1)
 
     df["MesCarga"] = df["FechaCarga_dt"].dt.month
     df["AñoCarga"] = df["FechaCarga_dt"].dt.year
@@ -245,6 +246,7 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte = matriz.merge(kilos_pivot[["CodVend", "SEGMENTO", "Arrastre", "Actual"]], on=["CodVend", "SEGMENTO"], how="left")
     reporte[["Arrastre", "Actual"]] = reporte[["Arrastre", "Actual"]].fillna(0.0)
 
+    # Procesamiento de Rutas
     rutas = df_rutas.copy() if df_rutas is not None and not df_rutas.empty else pd.DataFrame()
     
     if not rutas.empty:
