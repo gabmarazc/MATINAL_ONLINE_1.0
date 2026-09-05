@@ -67,13 +67,16 @@ def main():
         with col2:
             up_rutas = st.file_uploader("Subir Archivo RUTAS (.xlsx)", type=["xlsx", "xls"], key="up_rutas")
 
-        if up_vta and up_univ and up_rutas:
+        # Control anti-bucle mediante session_state
+        if up_vta and up_univ and up_rutas and not st.session_state.get("bd_inicializada", False):
             with st.spinner("Procesando y guardando archivos en SQLite..."):
                 archivos_dict = {"vta": up_vta, "universo": up_univ, "rutas": up_rutas}
                 db.inicializar_bd_desde_excel(archivos_dict)
+                st.session_state["bd_inicializada"] = True
+            
             st.success("¡Base de datos inicializada con éxito! Recargando aplicación...")
             st.rerun()
-        else:
+        elif not st.session_state.get("bd_inicializada", False):
             st.info("ℹ️ Sube los tres archivos requeridos (VTA, Universo y Rutas) para habilitar el sistema.")
             return
 
