@@ -41,19 +41,12 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
             .astype(str)
             .str.strip()
             .str.upper()
-            .contains("PEPSICO", na=False)
+            .str.contains("PEPSICO", na=False)
         ]
 
     if "Subramo" in df.columns:
-        df = df[
-            ~df["Subramo"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .eq("EMPLOYEES") & 
-            ~df["Subramo"].fillna("").astype(str).str.strip().str.upper().eq("EMPLEADOS")
-        ]
+        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
+        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
 
     df["FechaCarga_dt"] = parsear_fecha_robusta(df["FechaCarga"])
     df["FechaEntrega_dt"] = parsear_fecha_robusta(df["FechaEntrega"])
@@ -88,7 +81,6 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
             return f"SILVER {rubro}".strip()
         return None
 
-    # Corrección limpia de la llamada a la función:
     df["SEGMENTO"] = df.apply(asignar_segmento, axis=1)
 
     df["MesCarga"] = df["FechaCarga_dt"].dt.month
@@ -329,6 +321,7 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
 
     reporte["Objetivo Mes Corriente"] = reporte["Objetivo Mes Corriente"].fillna(0.0)
 
+    # Reemplazos discriminados
     reemplazos = df_vtas_op[df_vtas_op["CodVend_Op"].ne(df_vtas_op["CodVendedor"])][["CodVendedor", "CodVend_Op", "SEGMENTO", "Periodo", "PesoKg"]].copy()
     
     if not reemplazos.empty:
