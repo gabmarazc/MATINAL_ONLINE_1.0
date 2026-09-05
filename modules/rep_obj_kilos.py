@@ -108,13 +108,12 @@ def generar_datos_composicion_mes_anterior(df_vta, maestro_v, maestro_cebe, anio
             .astype(str)
             .str.strip()
             .str.upper()
-            .contains("PEPSICO", na=False)
+            .str.contains("PEPSICO", na=False)
         ]
 
     if "Subramo" in vta.columns:
-        vta = vta[
-            ~vta["Subramo"].fillna("").astype(str).str.strip().str.upper().isin(["EMPLOYEES", "EMPLEADOS"])
-        ]
+        subramo_clean = vta["Subramo"].fillna("").astype(str).str.strip().str.upper()
+        vta = vta[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
 
     if "FechaEntrega" in vta.columns:
         vta["FechaEntrega_dt"] = parsear_fecha_robusta(vta["FechaEntrega"])
