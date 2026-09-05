@@ -1,53 +1,92 @@
+# modules/database.py
 import sqlite3
-import os
 import pandas as pd
+import os
 
-DB_PATH = os.path.join("data", "matinal.db")
+DB_PATH = "data/matinal.db"
 
-def obtener_conexion():
-    """Crea y retorna una conexión a la base de datos SQLite, asegurando que la carpeta data exista."""
+def init_db():
+    """Inicializa la carpeta y la estructura básica si es necesario."""
     os.makedirs("data", exist_ok=True)
-    return sqlite3.connect(DB_PATH)
-
-def inicializar_bd_desde_excel(archivos_dict):
-    """Carga los DataFrames o rutas de Excel iniciales y los persiste en tablas SQLite."""
-    conn = obtener_conexion()
-    
-    if "vta" in archivos_dict and archivos_dict["vta"] is not None:
-        df_vta = pd.read_excel(archivos_dict["vta"], dtype=str)
-        df_vta.to_sql("vta", conn, if_exists="replace", index=False)
-        
-    if "universo" in archivos_dict and archivos_dict["universo"] is not None:
-        df_univ = pd.read_excel(archivos_dict["universo"])
-        df_univ.to_sql("universo", conn, if_exists="replace", index=False)
-        
-    if "rutas" in archivos_dict and archivos_dict["rutas"] is not None:
-        df_rutas = pd.read_excel(archivos_dict["rutas"])
-        df_rutas.to_sql("rutas", conn, if_exists="replace", index=False)
-        
+    conn = sqlite3.connect(DB_PATH)
     conn.close()
 
-def tablas_existen():
-    """Verifica si las tablas principales ya están creadas en la base de datos."""
-    if not os.path.exists(DB_PATH):
-        return False
+def cargar_tabla_sql(query: str) -> pd.DataFrame:
+    """Ejecuta una consulta SQL y retorna un DataFrame."""
+    conn = sqlite3.connect(DB_PATH)
     try:
-        conn = obtener_conexion()
+        df = pd.read_sql(query, conn)
+    except Exception:
+        df = pd.DataFrame()
+    conn.close()
+    return df
+
+def guardar_dataframe_sql(df: pd.DataFrame, nombre_tabla: str, if_exists='replace'):
+    """Guarda un DataFrame en la base de datos SQLite."""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    df.to_sql(nombre_tabla, conn, if_exists=if_exists, index=False, chunksize=10000)
+    conn.close()
+
+def tablas_existen() -> bool:
+    """Verifica de forma robusta si las tablas operativas existen y contienen registros."""
+    try:
+        init_db()
+        conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        
+        cursor.execute("SELECT LOWER(name) FROM sqlite_master WHERE type='table' AND LOWER(name) IN ('vta', 'universo', 'rutas');")
         tablas = [row[0] for row in cursor.fetchall()]
+        
+        if len(set(tablas)) < 3:
+            conn.close()
+            return False
+            
+        for tabla in ['vta', 'universo', 'rutas']:
+            cursor.execute(f"SELECT COUNT(*) FROM {tabla};")
+            count = cursor.fetchone()[0]
+            if count == 0:
+                conn.close()
+                return False
+                
         conn.close()
-        return all(t in tablas for t in ["vta", "universo", "rutas"])
+        return True
     except Exception:
         return False
 
-def cargar_tabla_sql(nombre_tabla: str) -> pd.DataFrame:
-    """Extrae una tabla completa desde SQLite a un DataFrame de Pandas."""
-    conn = obtener_conexion()
-    try:
-        df = pd.read_sql(f"SELECT * FROM {nombre_tabla}", conn)
-    except Exception:
-        df = pd.DataFrame()
-    finally:
-        conn.close()
-    return df
+def inicializar_bd_desde_excel(archivos_dict):
+    """Lee los archivos Excel forzando la interpretación latina DD/MM/YYYY."""
+    init_db()
+    conn = sqlite3.connect(DB_PATH)
+    for nombre_tabla, archivo in archivos_dict.items():
+        # Leer como texto para evitar que el engine de Excel invierta mes y día
+        df = pd.read_excel(archivo)
+        
+        for col in df.columns:
+            col_l = str(col).lower().strip()
+            if any(k in col_l for k in ["fecha", "dia", "date"]):
+                # Convertir a string puro limpio
+                s = df[col].astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
+                
+                # Intentar parseo latino DD/MM/YYYY primero
+                dt = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
+                
+                # Si falló, intentar formato con guiones DD-MM-YYYY
+                mask_na = dt.isna()
+                if mask_na.any():
+                    dt.loc[mask_na] = pd.to_datetime(s[mask_na], format="%d-%m-%Y", errors="coerce")
+                
+                # Si sigue habiendo vacíos, probar ISO YYYY-MM-DD
+                mask_na = dt.isna()
+                if mask_na.any():
+                    dt.loc[mask_na] = pd.to_datetime(s[mask_na], format="%Y-%m-%d", errors="coerce")
+                
+                # Si sigue habiendo vacíos, genérico con dayfirst
+                mask_na = dt.isna()
+                if mask_na.any():
+                    dt.loc[mask_na] = pd.to_datetime(s[mask_na], dayfirst=True, errors="coerce")
+                
+                df[col] = dt.dt.strftime("%Y-%m-%d")
+                
+        df.to_sql(nombre_tabla, conn, if_exists='replace', index=False, chunksize=10000)
+    conn.close()

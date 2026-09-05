@@ -1,187 +1,169 @@
-import io
+# app.py
 import streamlit as st
 import pandas as pd
-
-# Importaciones modulares internas (desde el paquete /modules)
+from datetime import date, timedelta
 from data_loader import cargar_todas_las_bases
-from modules.procesamiento import limpiar_vtas_crudas, procesar_ext_vta, procesar_rutas_operativas
-from modules.rep_kilos import generar_reporte_avance_kilos_segmento, dibujar_pestaña_kilos
-from modules.rep_ccc import generar_reporte_ccc_taxonomia, dibujar_pestaña_ccc
-from modules.rep_batalla_ccc import dibujar_pestaña_batalla
-from modules.rep_cob_marca import generar_reporte_cobertura_marca, dibujar_pestana_cobertura_marca
-from modules.rep_batalla_cobertura_marca import dibujar_pestaña_batalla_cobertura_marca, crear_filtro_excel
-from modules.parametros import render_parametros
+from modules.parametros import render_parametros_view, es_entorno_local, obtener_tabla_parametros
+from modules.rep_kilos import render_rep_kilos
+from modules.rep_obj_kilos import render_rep_obj_kilos
+from modules.rep_ccc import render_rep_ccc
+from modules.rep_batalla_ccc import render_rep_batalla_nc
+from modules.rep_batalla_cobertura_marca import render_rep_batalla_cobertura
+from modules import database as db
 
-# Configuración de página
-st.set_page_config(page_title="Sistema Matinal 2.0", layout="wide", page_icon="🚀")
-st.title("🚀 Sistema Modular de Capas - Matinal 2.0")
+st.set_page_config(
+    page_title="Sistema Matinal 2.0",
+    page_icon="📊",
+    layout="wide"
+)
 
-# ==========================================
-# FUNCIÓN COMPONENTE REUTILIZABLE NATIVA
-# ==========================================
-def renderizar_aggrid(df: pd.DataFrame, altura: int = 400):
-    if df.empty:
-        st.warning("No hay datos disponibles para mostrar.")
-        return
-
-    st.dataframe(
-        df,
-        height=altura,
-        width="stretch"
-    )
-
-# ==========================================
-# FUNCIÓN DE PROCESAMIENTO DINÁMICO (SIN CACHÉ PARA REFRESCO INMEDIATO)
-# ==========================================
-def procesar_datos_completos(bases, df_parametros_dinamico=None):
-    if df_parametros_dinamico is not None and not df_parametros_dinamico.empty:
-        fechas_param = df_parametros_dinamico
+def calcular_fechas_operativas_default():
+    hoy = date.today()
+    if hoy.weekday() == 0:
+        dia_vta = hoy - timedelta(days=2)
+    elif hoy.weekday() == 6:
+        dia_vta = hoy - timedelta(days=1)
     else:
-        fechas_param = bases["PARAMETROS"].get("FECHAS", pd.DataFrame({"PARAMETRO": ["Año", "Mes", "Dia Venta"], "VALOR": [2026, 8, "29/08/2026"]}))
-        
-    parametros_por_nombre = {}
-    for n, v in zip(fechas_param["PARAMETRO"], fechas_param["VALOR"]):
-        if pd.notna(n):
-            parametros_por_nombre[str(n).strip().casefold()] = v
-            
-    anio_operativo = int(parametros_por_nombre.get("añooperativo", parametros_por_nombre.get("año", 2026)))
-    
-    # --- CORRECCIÓN ROBUSTA DEL MES OPERATIVO (SOPORTA /, - Y VALORES NUMÉRICOS) ---
-    val_mes = parametros_por_nombre.get("mesoperativo", parametros_por_nombre.get("mes", 1))
-    val_mes_str = str(val_mes).strip()
-    if "-" in val_mes_str:
-        partes = val_mes_str.split("-")
-        mes_operativo = int(partes[1]) if len(partes[0]) == 4 else int(partes[0])
-    elif "/" in val_mes_str:
-        partes = val_mes_str.split("/")
-        mes_operativo = int(partes[1]) if len(partes[0]) == 4 else int(partes[0])
+        dia_vta = hoy - timedelta(days=1)
+
+    if dia_vta.weekday() == 0:
+        dia_ant = dia_vta - timedelta(days=2)
     else:
-        mes_operativo = int(float(val_mes_str))
-    # -----------------------------------------------------------------------------
+        dia_ant = dia_vta - timedelta(days=1)
 
-    dia_venta = pd.to_datetime(parametros_por_nombre.get("dia venta", parametros_por_nombre.get("día venta", "29/08/2026")), dayfirst=True, errors="coerce")
-    
-    # Inyectar los parámetros dinámicos actualizados en una copia de las bases para que el procesamiento los tome
-    bases_trabajo = bases.copy()
-    param_copia = bases_trabajo.get("PARAMETROS", {}).copy()
-    param_copia["FECHAS"] = fechas_param
-    bases_trabajo["PARAMETROS"] = param_copia
+    return hoy, dia_vta, dia_ant
 
-    df_vtas_limpias = limpiar_vtas_crudas(bases_trabajo["VTA"])
-    df_vtas_limpias = df_vtas_limpias[df_vtas_limpias["FechaCarga"] <= dia_venta].copy()
-    df_vtas_operativo = procesar_ext_vta(df_vtas_limpias, bases_trabajo["AUSENCIAS"], bases_trabajo["PARAMETROS"])
-    df_rutas_operativas = procesar_rutas_operativas(bases_trabajo["RUTAS"], anio_operativo, mes_operativo)
-    
-    reporte_avance = generar_reporte_avance_kilos_segmento(
-        df_vtas_operativo, df_vtas_limpias, bases_trabajo["PARAMETROS"]["VENDEDORES"], 
-        bases_trabajo["PARAMETROS"]["SEGMENTOS"], df_rutas_operativas, dia_venta, anio_operativo, mes_operativo
-    )
-    reporte_ccc = generar_reporte_ccc_taxonomia(
-        df_vtas_operativo.copy(), bases_trabajo["UNIVERSO"].copy(), 
-        bases_trabajo["PARAMETROS"]["VENDEDORES"].copy(), bases_trabajo["PARAMETROS"]["CCC"].copy()
-    )
-    
-    cartera_df = bases_trabajo.get("UNIVERSO", pd.DataFrame())
-    
-    reporte_cob_marca, marcas_lista, mapa_objetivos_marca = generar_reporte_cobertura_marca(
-        df_vtas_operativo=df_vtas_operativo,
-        df_cartera=cartera_df,
-        vendedores=bases_trabajo["PARAMETROS"]["VENDEDORES"],
-        df_marcas=bases_trabajo["PARAMETROS"]["MARCAS"]
-    )
-    
-    return df_vtas_limpias, df_vtas_operativo, reporte_avance, reporte_ccc, reporte_cob_marca, marcas_lista, mapa_objetivos_marca, parametros_por_nombre, dia_venta
+def main():
+    st.title("🚀 Sistema Matinal 2.0 - Panel de Control Comercial")
 
-# Carga de datos en sesión
-if "bases" not in st.session_state:
-    st.session_state["bases"] = None
+    # ==========================================
+    # BARRA LATERAL: CONTROL DE DATOS Y CACHÉ
+    # ==========================================
+    st.sidebar.header("⚙️ Control de Datos")
+    if st.sidebar.button("🔄 Recargar Bases y Limpiar Caché", width="stretch"):
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.session_state.clear()
+        st.sidebar.success("¡Caché borrada y bases actualizadas!")
+        st.rerun()
 
-if st.session_state["bases"] is None:
-    with st.spinner("Cargando y procesando bases matriciales..."):
-        st.session_state["bases"] = cargar_todas_las_bases()
+    if "bases" not in st.session_state or st.session_state["bases"] is None:
+        with st.spinner("Cargando bases de datos y ausencias..."):
+            st.session_state["bases"] = cargar_todas_las_bases()
 
-if st.session_state["bases"] is not None:
-    try:
-        bases = st.session_state["bases"]
-        
-        # Recuperar parámetros interactivos si existen en la sesión
-        df_p_input = st.session_state.get("df_parametros", None)
-        
-        df_vtas_limpias, df_vtas_operativo, reporte_avance, reporte_ccc, reporte_cob_marca, marcas_lista, mapa_objetivos_marca, parametros_por_nombre, dia_venta = procesar_datos_completos(bases, df_p_input)
-        
-        # Sidebar y Botón de Recarga Manual
-        st.sidebar.header("Acciones")
-        if st.sidebar.button("🔄 Recargar Bases / Limpiar Caché"):
-            st.cache_data.clear()
-            st.session_state["bases"] = None
-            if "df_parametros" in st.session_state:
-                del st.session_state["df_parametros"]
-            if "supervisores_activos" in st.session_state:
-                del st.session_state["supervisores_activos"]
+    datos = st.session_state["bases"]
+
+    df_vta = datos.get("VTA") if datos else pd.DataFrame()
+    df_universo = datos.get("UNIVERSO") if datos else pd.DataFrame()
+    df_rutas = datos.get("RUTAS") if datos else pd.DataFrame()
+    df_ausencias = datos.get("AUSENCIAS") if datos else pd.DataFrame()
+
+    if df_vta is None or df_universo is None or df_vta.empty or df_universo.empty:
+        st.warning("⚠️ No se encontraron datos operativos en la base de datos local. Por favor, sube los archivos iniciales para poblar SQLite:")
+        col1, col2 = st.columns(2)
+        with col1:
+            up_vta = st.file_uploader("Subir Archivo VTA (.xlsx)", type=["xlsx", "xls"], key="up_vta")
+            up_univ = st.file_uploader("Subir Archivo UNIVERSO (.xlsx)", type=["xlsx", "xls"], key="up_univ")
+        with col2:
+            up_rutas = st.file_uploader("Subir Archivo RUTAS (.xlsx)", type=["xlsx", "xls"], key="up_rutas")
+
+        if up_vta and up_univ and up_rutas:
+            with st.spinner("Procesando y guardando archivos en SQLite..."):
+                archivos_dict = {"vta": up_vta, "universo": up_univ, "rutas": up_rutas}
+                db.inicializar_bd_desde_excel(archivos_dict)
+            st.success("¡Base de datos inicializada con éxito! Recargando aplicación...")
             st.rerun()
-            
-        supervisores_disponibles = sorted(
-            [str(s).strip() for s in reporte_avance["SUP"].dropna().unique() if str(s).strip() not in ["0", "0.0", ""]]
-        )
-        
-        supervisores_seleccionados = crear_filtro_excel("Supervisor", supervisores_disponibles, "filtro_global_sup")
-        
-        if not supervisores_seleccionados:
-            supervisores_seleccionados = supervisores_disponibles
-            
-        # GUARDAR EN EL ESTADO GLOBAL DE LA SESIÓN PARA ACCESO TRANSVERSAL EN MÓDULOS
-        st.session_state["supervisores_activos"] = supervisores_seleccionados
-            
-        # Visualización centrada, en negrita, tamaño doble (52px) y color rojo en el sidebar
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("<div style='text-align: center;'><b>SUPERVISOR</b></div>", unsafe_allow_html=True)
-        sup_codigos_texto = ", ".join(map(str, supervisores_seleccionados)) if supervisores_seleccionados else "NINGUNO"
-        st.sidebar.markdown(f"<div style='text-align: center; color: #ef4444; font-size: 52px; font-weight: bold;'>{sup_codigos_texto}</div>", unsafe_allow_html=True)
-        
-        reporte_ccc_filtrado = reporte_ccc[
-            reporte_ccc["SUP"].astype(str).str.strip().isin([str(s).strip() for s in supervisores_seleccionados])
-        ].copy()
-        
-        # Pestañas principales con Parámetros Fechas al principio
-        tab_params, tab_reporte, tab_ccc, tab_batalla, tab_cob_marca, tab_batalla_cob = st.tabs([
-            "⚙️ Parámetros Fechas", "📈 Avance Kilos", "📊 Avance CCC Taxonomía", "🎯 Batalla NC", "🏷️ Cobertura por Marca", "🎯 Batalla Cob. Marca"
+        else:
+            st.info("ℹ️ Sube los tres archivos requeridos (VTA, Universo y Rutas) para habilitar el sistema.")
+            return
+
+    def_matinal, def_vta, def_ant = calcular_fechas_operativas_default()
+
+    supervisores_disponibles = ["TODOS"]
+    col_sup = None
+    for cand in ["Supervisor", "SUPERVISOR", "Cod_Supervisor", "Cod_Sup"]:
+        if cand in df_vta.columns:
+            col_sup = cand
+            break
+    
+    if col_sup:
+        sups_unicos = sorted([str(s) for s in df_vta[col_sup].dropna().unique() if str(s).strip() != ""])
+        supervisores_disponibles.extend(sups_unicos)
+    else:
+        try:
+            df_m = db.cargar_tabla_sql("SELECT DISTINCT Supervisor FROM maestro_vendedores")
+            if not df_m.empty and "Supervisor" in df_m.columns:
+                sups_unicos = sorted([str(s) for s in df_m["Supervisor"].dropna().unique() if str(s).strip() != ""])
+                supervisores_disponibles.extend(sups_unicos)
+        except Exception:
+            pass
+
+    st.sidebar.header("🎛️ Filtros Globales")
+
+    with st.sidebar.expander("📅 Fechas de Referencia", expanded=True):
+        sel_dia_matinal = st.date_input("Día Matinal", value=def_matinal, min_value=date(2020, 1, 1), format="DD/MM/YYYY")
+        sel_dia_venta = st.date_input("Día Venta", value=def_vta, min_value=date(2020, 1, 1), format="DD/MM/YYYY")
+        sel_dia_anterior = st.date_input("Día Anterior", value=def_ant, min_value=date(2020, 1, 1), format="DD/MM/YYYY")
+
+    anio_sugerido = sel_dia_venta.year
+    mes_sugerido = sel_dia_venta.month
+
+    opciones_anio = [2023, 2024, 2025, 2026, 2027, 2028]
+    idx_anio = opciones_anio.index(anio_sugerido) if anio_sugerido in opciones_anio else 3
+    anio_operativo = st.sidebar.selectbox("Año Operativo", opciones_anio, index=idx_anio)
+
+    opciones_mes = list(range(1, 13))
+    mes_operativo = st.sidebar.selectbox("Mes Operativo", opciones_mes, index=mes_sugerido - 1)
+
+    sel_supervisor = st.sidebar.selectbox("Supervisor", supervisores_disponibles, index=0)
+
+    filtros_globales = {
+        "anio": int(anio_operativo),
+        "mes": int(mes_operativo),
+        "supervisor": sel_supervisor,
+        "dia_matinal": sel_dia_matinal.strftime("%d/%m/%Y"),
+        "dia_venta": sel_dia_venta.strftime("%d/%m/%Y"),
+        "dia_anterior": sel_dia_anterior.strftime("%d/%m/%Y")
+    }
+
+    es_local = es_entorno_local()
+    
+    if es_local:
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+            "📊 Avance Kilos", 
+            "📦 Composición Obj Kilos",
+            "📈 Avance CCC", 
+            "⚔️ Batalla NC", 
+            "🎯 Cobertura Marca", 
+            "⚙️ Parámetros"
         ])
+    else:
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📊 Avance Kilos", 
+            "📦 Composición Obj Kilos",
+            "📈 Avance CCC", 
+            "⚔️ Batalla NC", 
+            "🎯 Cobertura Marca"
+        ])
+    
+    with tab1:
+        render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
+
+    with tab2:
+        render_rep_obj_kilos(df_vta, filtros_globales)
         
-        # --- PESTAÑA 1: PARÁMETROS FECHAS ---
-        with tab_params:
-            render_parametros()
+    with tab3:
+        render_rep_ccc(df_vta, df_universo)
+        
+    with tab4:
+        render_rep_batalla_nc(df_vta, df_universo)
+        
+    with tab5:
+        render_rep_batalla_cobertura()
+        
+    if es_local:
+        with tab6:
+            render_parametros_view(filtros_globales)
 
-        # --- PESTAÑA 2: AVANCE KILOS ---
-        with tab_reporte:
-            dibujar_pestaña_kilos(reporte_avance, supervisores_seleccionados, df_vtas_limpias, parametros_por_nombre)
-            
-        # --- PESTAÑA 3: AVANCE CCC TAXONOMÍA ---
-        with tab_ccc:
-            dibujar_pestaña_ccc(reporte_ccc_filtrado)
-            
-        # --- PESTAÑA 4: BATALLA NC ---
-        with tab_batalla:
-            dibujar_pestaña_batalla(bases, df_vtas_operativo, supervisores_seleccionados)
-            
-        # --- PESTAÑA 5: COBERTURA POR MARCA ---
-        with tab_cob_marca:
-            dibujar_pestana_cobertura_marca(
-                reporte_cobertura=reporte_cob_marca,
-                marcas=marcas_lista,
-                mapa_objetivos=mapa_objetivos_marca,
-                supervisores_seleccionados=supervisores_seleccionados,
-                df_vtas_operativo=df_vtas_operativo
-            )
-
-        # --- PESTAÑA 6: BATALLA COBERTURA POR MARCA ---
-        with tab_batalla_cob:
-            dibujar_pestaña_batalla_cobertura_marca(
-                bases=bases,
-                df_vtas_operativo=df_vtas_operativo,
-                supervisores_seleccionados=supervisores_seleccionados
-            )
-
-    except Exception as e:
-        import traceback
-        st.error("❌ Ocurrió un error en la ejecución del sistema:")
-        st.code(traceback.format_exc(), language="python")
+if __name__ == "__main__":
+    main()
