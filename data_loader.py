@@ -4,28 +4,40 @@ import config as cfg
 from modules import database as db
 import pandas as pd
 import streamlit as st
+import urllib.request
+import io
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def cargar_ausencias_remotas(url_ausencias):
-    """Carga ausencias desde la web con caché de 1 hora"""
+    """Carga ausencias desde la web con manejo seguro de timeout para evitar bloqueos"""
+    df_vacio = pd.DataFrame(
+        columns=[
+            "Marca temporal",
+            "Dirección de correo electrónico",
+            "Fecha",
+            "Ausente",
+            "Reemplazo",
+            "Cliente",
+        ]
+    )
+    if not url_ausencias:
+        return df_vacio
+        
     try:
-        ausencias_crudas = pd.read_csv(
-            url_ausencias, encoding="utf-8", engine="python", on_bad_lines="skip"
+        req = urllib.request.Request(
+            url_ausencias, 
+            headers={'User-Agent': 'Mozilla/5.0'}
         )
-        if ausencias_crudas.empty or "Fecha" not in ausencias_crudas.columns:
-            raise ValueError("Estructura remota inválida")
-        return ausencias_crudas
+        with urllib.request.urlopen(req, timeout=5) as response:
+            contenido = response.read()
+            ausencias_crudas = pd.read_csv(
+                io.BytesIO(contenido), encoding="utf-8", on_bad_lines="skip"
+            )
+            if ausencias_crudas.empty or "Fecha" not in ausencias_crudas.columns:
+                return df_vacio
+            return ausencias_crudas
     except Exception:
-        return pd.DataFrame(
-            columns=[
-                "Marca temporal",
-                "Dirección de correo electrónico",
-                "Fecha",
-                "Ausente",
-                "Reemplazo",
-                "Cliente",
-            ]
-        )
+        return df_vacio
 
 def sincronizar_archivos_excel_locales():
     """Detecta archivos Excel en la raíz o en data/ y actualiza SQLite si fueron pisados o modificados."""
@@ -47,14 +59,12 @@ def sincronizar_archivos_excel_locales():
             if tabla in archivos_encontrados:
                 break
 
-    # Si encontramos VTA.xlsx en el disco, verificamos si es más nuevo que la base o forzamos actualización
     if "vta" in archivos_encontrados:
         try:
             db_path = "data/matinal.db"
             mtime_vta = os.path.getmtime(archivos_encontrados["vta"])
             mtime_db = os.path.getmtime(db_path) if os.path.exists(db_path) else 0
             
-            # Si el archivo Excel fue modificado después de la base de datos (o la base no existe)
             if mtime_vta > mtime_db or mtime_db == 0:
                 dict_para_cargar = {}
                 for t, r in archivos_encontrados.items():
@@ -67,7 +77,6 @@ def sincronizar_archivos_excel_locales():
 
 def cargar_todas_las_bases():
     """Carga optimizada de las bases operativas desde SQLite y ausencias remotas."""
-    # Sincroniza automáticamente cualquier Excel que se haya pisado en local
     sincronizar_archivos_excel_locales()
 
     df_vta = db.cargar_tabla_sql("SELECT * FROM vta")
