@@ -12,11 +12,8 @@ def parsear_fecha_robusta(serie):
         serie = pd.Series([serie])
     s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
     
-    # 1. Probar formato ISO YYYY-MM-DD
     dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    # 2. Probar formato latino DD/MM/YYYY
     dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-    # 3. Genérico sin dayfirst=True para evitar UserWarning con cadenas ISO
     dt_gen = pd.to_datetime(s, errors="coerce")
     
     return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
@@ -68,6 +65,9 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
         df[col_vend_tit] = 0
 
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
+
+    col_m = next((c for c in ["Marca", "MARCA", "marca"] if c in df.columns), None)
+    df["Marca"] = df[col_m].fillna("").astype(str).str.strip().str.upper() if col_m else "SIN MARCA"
 
     col_rent = "SegmentoRentabilidad" if "SegmentoRentabilidad" in df.columns else None
     col_rubro = "Rubro" if "Rubro" in df.columns else None
@@ -152,7 +152,7 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
 
     return df
 
-def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, maestro_seg, dia_venta, anio_operativo, mes_operativo, sup_filtro):
+def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, maestro_seg, maestro_cebe, dia_venta, anio_operativo, mes_operativo, sup_filtro):
     vendedores_rep = pd.DataFrame()
     col_cod = "Codigo_Vendedor" if "Codigo_Vendedor" in maestro_vend.columns else maestro_vend.columns[0]
     col_nom = "Nombre_Vendedor" if "Nombre_Vendedor" in maestro_vend.columns else maestro_vend.columns[1]
@@ -288,36 +288,53 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte["Rutas"] = reporte["Rutas"].fillna(0).astype("Int64")
     reporte["Días Restantes"] = (reporte["Rutas"] - reporte["Días Pasados"]).clip(lower=0).astype("Int64")
 
-    mes_ant = 12 if mes_operativo == 1 else mes_operativo - 1
-    anio_ant = anio_operativo - 1 if mes_operativo == 1 else anio_operativo
+    # =========================================================================
+    # INTEGRACIÓN DE OBJETIVOS OFICIALES DESDE objetivos_vendedores (SQLite)
+    # =========================================================================
+    df_obj_db = db.cargar_tabla_sql(
+        f"SELECT CodVendedor, SEGMENTO, Obj_Sugerido_Kg FROM objetivos_vendedores WHERE Anio = {int(anio_operativo)} AND Mes = {int(mes_operativo)}"
+    )
 
-    historial = df_vta_prep[
-        df_vta_prep["AñoCarga"].eq(anio_ant) & 
-        df_vta_prep["MesCarga"].eq(mes_ant) & 
-        df_vta_prep["SEGMENTO"].notna()
-    ].copy()
-    
-    if not historial.empty:
-        historial["CodVend"] = pd.to_numeric(historial["CodVendedor"], errors="coerce").astype("Int64")
-        kilos_hist = historial.groupby(["CodVend", "SEGMENTO"])["PesoKg"].sum().reset_index().rename(columns={"PesoKg": "Kilos Historial"})
-        kilos_hist["Kilos Totales Segmento"] = kilos_hist.groupby("SEGMENTO")["Kilos Historial"].transform("sum")
-        kilos_hist["Participación"] = (kilos_hist["Kilos Historial"] / kilos_hist["Kilos Totales Segmento"].replace(0, pd.NA)).fillna(0.0)
+    if not df_obj_db.empty:
+        df_obj_db["CodVend"] = pd.to_numeric(df_obj_db["CodVendedor"], errors="coerce").astype("Int64")
+        df_obj_db["SEGMENTO"] = df_obj_db["SEGMENTO"].fillna("").astype(str).str.strip()
+        df_obj_db["Obj_Sugerido_Kg"] = pd.to_numeric(df_obj_db["Obj_Sugerido_Kg"], errors="coerce").fillna(0.0)
+        
+        objs_agrup = df_obj_db.groupby(["CodVend", "SEGMENTO"], as_index=False)["Obj_Sugerido_Kg"].sum()
+        objs_agrup = objs_agrup.rename(columns={"Obj_Sugerido_Kg": "Objetivo Mes Corriente"})
+        
+        reporte = reporte.merge(objs_agrup, on=["CodVend", "SEGMENTO"], how="left")
     else:
-        kilos_hist = pd.DataFrame(columns=["CodVend", "SEGMENTO", "Participación"])
+        # Fallback de contingencia (histórico mes anterior si no se subieron objetivos calibrados)
+        mes_ant = 12 if mes_operativo == 1 else mes_operativo - 1
+        anio_ant = anio_operativo - 1 if mes_operativo == 1 else anio_operativo
 
-    if maestro_seg is not None and not maestro_seg.empty and "OBJ" in maestro_seg.columns and "Porc_Requerido" in maestro_seg.columns:
-        objs = maestro_seg[["Segmento", "OBJ", "Porc_Requerido"]].copy().rename(columns={"Segmento": "SEGMENTO"})
-        objs["OBJ"] = pd.to_numeric(objs["OBJ"], errors="coerce").fillna(0.0)
-        objs["Porc_Requerido"] = pd.to_numeric(objs["Porc_Requerido"], errors="coerce").fillna(0.0)
-    else:
-        objs = pd.DataFrame({"SEGMENTO": orden_segmentos_maestro, "OBJ": 0.0, "Porc_Requerido": 1.0})
+        historial = df_vta_prep[
+            (df_vta_prep["AñoEntrega"].eq(anio_ant)) & 
+            (df_vta_prep["MesEntrega"].eq(mes_ant)) & 
+            df_vta_prep["SEGMENTO"].notna()
+        ].copy()
 
-    if not kilos_hist.empty:
-        kilos_hist = kilos_hist.merge(objs, on="SEGMENTO", how="left")
-        kilos_hist["Objetivo Mes Corriente"] = kilos_hist["Participación"] * kilos_hist["OBJ"] * kilos_hist["Porc_Requerido"]
-        reporte = reporte.merge(kilos_hist[["CodVend", "SEGMENTO", "Objetivo Mes Corriente"]], on=["CodVend", "SEGMENTO"], how="left")
-    else:
-        reporte["Objetivo Mes Corriente"] = 0.0
+        if not historial.empty and maestro_cebe is not None and not maestro_cebe.empty and "Obj_Mes" in maestro_cebe.columns:
+            historial["CodVend"] = pd.to_numeric(historial["CodVendedor"], errors="coerce").astype("Int64")
+            col_m_cebe = next((c for c in maestro_cebe.columns if str(c).strip().lower() in ["marca", "marcaupper"]), maestro_cebe.columns[0])
+            maestro_cebe_clean = maestro_cebe.copy()
+            maestro_cebe_clean["Marca_Key"] = maestro_cebe_clean[col_m_cebe].fillna("").astype(str).str.strip().str.upper()
+            maestro_cebe_clean["Obj_Mes_Val"] = pd.to_numeric(maestro_cebe_clean["Obj_Mes"], errors="coerce").fillna(0.0)
+            
+            mapa_obj_marca = maestro_cebe_clean.groupby("Marca_Key")["Obj_Mes_Val"].sum().to_dict()
+            
+            kilos_hist = historial.groupby(["CodVend", "SEGMENTO", "Marca"])["PesoKg"].sum().reset_index().rename(columns={"PesoKg": "Kilos_Hist"})
+            kilos_hist["Total_Kilos_Marca_Seg"] = kilos_hist.groupby(["SEGMENTO", "Marca"])["Kilos_Hist"].transform("sum")
+            kilos_hist["Part_Vendedor"] = (kilos_hist["Kilos_Hist"] / kilos_hist["Total_Kilos_Marca_Seg"].replace(0, pd.NA)).fillna(0.0)
+            
+            kilos_hist["Obj_Marca_Oficial"] = kilos_hist["Marca"].map(mapa_obj_marca).fillna(0.0)
+            kilos_hist["Obj_Asignado"] = kilos_hist["Part_Vendedor"] * kilos_hist["Obj_Marca_Oficial"] * 1000.0
+            
+            objs_oficiales = kilos_hist.groupby(["CodVend", "SEGMENTO"])["Obj_Asignado"].sum().reset_index().rename(columns={"Obj_Asignado": "Objetivo Mes Corriente"})
+            reporte = reporte.merge(objs_oficiales, on=["CodVend", "SEGMENTO"], how="left")
+        else:
+            reporte["Objetivo Mes Corriente"] = 0.0
 
     reporte["Objetivo Mes Corriente"] = reporte["Objetivo Mes Corriente"].fillna(0.0)
 
@@ -433,15 +450,24 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
     except Exception:
         maestro_s = pd.DataFrame()
 
+    try:
+        maestro_cebe = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
+        if not maestro_cebe.empty and "Mes" in maestro_cebe.columns:
+            mc_per = maestro_cebe[(maestro_cebe["Mes"].astype(str) == str(mes_op)) & (maestro_cebe["Anio"].astype(str) == str(anio_op))]
+            if not mc_per.empty:
+                maestro_cebe = mc_per
+    except Exception:
+        maestro_cebe = pd.DataFrame()
+
     if maestro_v.empty:
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en SQLite. Verifique en la solapa de Parámetros.")
         return
 
-    cache_key_rep = f"_cache_kilos_v20_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
+    cache_key_rep = f"_cache_kilos_v27_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
     if cache_key_rep not in st.session_state:
-        with st.spinner("Procesando segmentación, ausencias y volúmenes de kilos..."):
+        with st.spinner("Procesando segmentación, ausencias, objetivos oficiales y volúmenes de kilos..."):
             df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
-            reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, dia_venta, anio_op, mes_op, sup_filtro)
+            reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro)
             st.session_state[cache_key_rep] = reporte_avance
     else:
         reporte_avance = st.session_state[cache_key_rep]
@@ -534,19 +560,16 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         total_neto_operativo = float(rep_detalle["OPERATIVO"].sum())
         kilos_deposito = 0.0
 
-    total_distribuidora = total_neto_operativo + kilos_deposito
+    total_objetivo_mes = float(rep_detalle["Objetivo Mes Corriente"].sum())
+    pct_avance = (total_neto_operativo / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
 
-    col_dist_izq, col_dist_vacia2, col_dist_vacia3, col_dist_vacia4, col_dist_vacia5 = st.columns(5)
-    with col_dist_izq:
-        with st.container(border=True):
-            st.metric(label="🚚 Total Kilos Distribuidora", value=f"{total_distribuidora:,.1f} kg")
-
-    mcol1, mcol2, mcol3, mcol4, mcol5 = st.columns(5)
-    mcol1.metric(label="📊 Total Neto Operativo", value=f"{total_neto_operativo:,.1f} kg")
-    mcol2.metric(label="📦 Total Arrastre", value=f"{total_arrastre:,.1f} kg")
-    mcol3.metric(label="🚚 Total Actual", value=f"{total_actual:,.1f} kg")
-    mcol4.metric(label="🔄 Balance Reemplazo", value=f"{balance_reemplazo:,.1f} kg")
-    mcol5.metric(label="🏢 Depósito", value=f"{kilos_deposito:,.1f} kg")
+    mcol1, mcol2, mcol3, mcol4, mcol5, mcol6 = st.columns(6)
+    mcol1.metric(label="🎯 Objetivo Mes", value=f"{total_objetivo_mes:,.1f} kg")
+    mcol2.metric(label="📊 Neto Operativo", value=f"{total_neto_operativo:,.1f} kg")
+    mcol3.metric(label="📈 % Avance", value=f"{pct_avance:,.2f}%")
+    mcol4.metric(label="📦 Arrastre", value=f"{total_arrastre:,.1f} kg")
+    mcol5.metric(label="🚚 Actual", value=f"{total_actual:,.1f} kg")
+    mcol6.metric(label="🏢 Depósito", value=f"{kilos_deposito:,.1f} kg")
     st.divider()
 
     fecha_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]

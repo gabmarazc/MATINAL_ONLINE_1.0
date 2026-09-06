@@ -67,11 +67,35 @@ def obtener_maestro_segmentos_sql(anio: str = None, mes: str = None) -> pd.DataF
         return pd.DataFrame(columns=["Anio", "Mes", "Segmento"])
 
 def obtener_maestro_marcas_cebe_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
-    """Carga la relación Marca - CEBE desde SQLite. Si mes está vacío, devuelve la base completa."""
+    """Carga la relación Marca - CEBE y objetivos desde SQLite. Si mes está vacío, devuelve la base completa."""
     try:
         df_all = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
         if df_all is None or df_all.empty:
-            return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE"])
+            return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
+        
+        for col_nec in ["Obj_TN_Mes", "Obj_Gross_Mes"]:
+            if col_nec not in df_all.columns:
+                df_all[col_nec] = 0.0
+
+        if not mes or str(mes).strip() == "":
+            return df_all
+        
+        if "Anio" in df_all.columns and "Mes" in df_all.columns:
+            cond = (df_all["Mes"].astype(str) == str(mes))
+            if anio and str(anio).strip() != "":
+                cond = cond & (df_all["Anio"].astype(str) == str(anio))
+            return df_all[cond]
+            
+        return df_all
+    except Exception:
+        return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
+
+def obtener_objetivos_vendedores_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
+    """Carga los objetivos calibrados desde SQLite. Si mes está vacío, devuelve la base completa."""
+    try:
+        df_all = db.cargar_tabla_sql("SELECT * FROM objetivos_vendedores")
+        if df_all is None or df_all.empty:
+            return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Obj_Sugerido_Kg"])
         
         if not mes or str(mes).strip() == "":
             return df_all
@@ -84,7 +108,7 @@ def obtener_maestro_marcas_cebe_sql(anio: str = None, mes: str = None) -> pd.Dat
             
         return df_all
     except Exception:
-        return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE"])
+        return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Obj_Sugerido_Kg"])
 
 def render_parametros_view(filtros_globales: dict = None):
     if not es_entorno_local():
@@ -92,7 +116,7 @@ def render_parametros_view(filtros_globales: dict = None):
         return
 
     st.subheader("⚙️ Configuración de Dimensiones y Maestros")
-    st.markdown("Los filtros operativos de Año, Mes, Fechas y Supervisor se gestionan desde la barra lateral izquierda. Esta sección permite cargar y mantener los maestros de Vendedores, Segmentos y Marcas / CEBE.")
+    st.markdown("Los filtros operativos de Año, Mes, Fechas y Supervisor se gestionan desde la barra lateral izquierda. Esta sección permite cargar y mantener los maestros de Vendedores, Segmentos, Marcas / CEBE e importar los objetivos calibrados.")
 
     anio_def = filtros_globales.get("anio", "2026") if filtros_globales else "2026"
     mes_def = filtros_globales.get("mes", "9") if filtros_globales else "9"
@@ -236,10 +260,10 @@ def render_parametros_view(filtros_globales: dict = None):
     st.divider()
 
     # =========================================================================
-    # 3. SECCIÓN: MAESTRO MARCA - CEBE
+    # 3. SECCIÓN: MAESTRO MARCA - CEBE Y OBJETIVOS (Obj_TN_Mes, Obj_Gross_Mes)
     # =========================================================================
-    st.markdown("### 🏷️ 3. Maestro de Marcas y CEBE")
-    st.markdown("Cargue la planilla Excel con la relación entre Marca y CEBE (Global, Pehuamar, Cracker, Cereal, etc.) para el período operativo.")
+    st.markdown("### 🏷️ 3. Maestro de Marcas, CEBE y Objetivos (Obj_TN_Mes / Obj_Gross_Mes)")
+    st.markdown("Descargue la plantilla, complete los objetivos mensuales en toneladas (`Obj_TN_Mes`) y en gross (`Obj_Gross_Mes`), y suba el archivo actualizado.")
 
     col5, col6 = st.columns(2)
     with col5:
@@ -247,7 +271,23 @@ def render_parametros_view(filtros_globales: dict = None):
     with col6:
         sel_mes_m = st.text_input("Mes Operativo (Marcas/CEBE)", value=mes_def, placeholder="Dejar vacío para ver toda la base", key="mes_marca_cebe")
 
-    archivo_marcas = st.file_uploader("📂 Subir Excel de Marcas y CEBE (Columnas esperadas: Marca, CEBE)", type=["xlsx", "xls"], key="up_excel_marcas_cebe")
+    df_marcas_cebe_actual = obtener_maestro_marcas_cebe_sql(sel_anio_m, sel_mes_m)
+
+    output_plantilla = BytesIO()
+    with pd.ExcelWriter(output_plantilla, engine='openpyxl') as writer:
+        df_plantilla = df_marcas_cebe_actual.copy()
+        if df_plantilla.empty:
+            df_plantilla = pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
+        df_plantilla.to_excel(writer, index=False, sheet_name='Maestro_Marcas_CEBE')
+
+    st.download_button(
+        label="📥 Descargar Plantilla de Marcas y CEBE para Completar",
+        data=output_plantilla.getvalue(),
+        file_name=f"plantilla_marcas_cebe_{sel_mes_m}_{sel_anio_m}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    archivo_marcas = st.file_uploader("📂 Subir Excel Actualizado de Marcas, CEBE y Objetivos", type=["xlsx", "xls"], key="up_excel_marcas_cebe")
 
     if archivo_marcas is not None:
         try:
@@ -257,27 +297,38 @@ def render_parametros_view(filtros_globales: dict = None):
             nuevos_nombres_cebe = {}
             for col in columnas_cebe:
                 col_str = str(col).strip().lower()
-                if "marca" in col_str:
+                if "marca" in col_str or "marcaupper" in col_str:
                     nuevos_nombres_cebe[col] = "Marca"
-                elif "cebe" in col_str or "tipo" in col_str or "categoria" in col_str:
+                elif "cebe" in col_str or "tipo" in col_str or "categoria" in col_str or "cebe 2" in col_str:
                     nuevos_nombres_cebe[col] = "CEBE"
+                elif "obj_tn" in col_str or "tn" in col_str:
+                    nuevos_nombres_cebe[col] = "Obj_TN_Mes"
+                elif "obj_gross" in col_str or "gross" in col_str:
+                    nuevos_nombres_cebe[col] = "Obj_Gross_Mes"
 
             df_nuevo_cebe = df_nuevo_cebe.rename(columns=nuevos_nombres_cebe)
 
-            if "Marca" not in df_nuevo_cebe.columns and len(columnas_cebe) > 0:
-                df_nuevo_cebe = df_nuevo_cebe.rename(columns={columnas_cebe[0]: "Marca"})
-            if "CEBE" not in df_nuevo_cebe.columns and len(columnas_cebe) > 1:
-                df_nuevo_cebe = df_nuevo_cebe.rename(columns={columnas_cebe[1]: "CEBE"})
+            for col_req in ["Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"]:
+                if col_req not in df_nuevo_cebe.columns:
+                    if col_req in ["Obj_TN_Mes", "Obj_Gross_Mes"]:
+                        df_nuevo_cebe[col_req] = 0.0
+                    else:
+                        df_nuevo_cebe[col_req] = ""
 
+            df_nuevo_cebe["Obj_TN_Mes"] = pd.to_numeric(df_nuevo_cebe["Obj_TN_Mes"], errors="coerce").fillna(0.0)
+            df_nuevo_cebe["Obj_Gross_Mes"] = pd.to_numeric(df_nuevo_cebe["Obj_Gross_Mes"], errors="coerce").fillna(0.0)
+
+            cols_requeridas = ["Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"]
+            df_nuevo_cebe = df_nuevo_cebe[cols_requeridas].copy()
             df_nuevo_cebe = df_nuevo_cebe.dropna(subset=["Marca", "CEBE"])
             df_nuevo_cebe["Marca"] = df_nuevo_cebe["Marca"].astype(str).str.strip()
             df_nuevo_cebe["CEBE"] = df_nuevo_cebe["CEBE"].astype(str).str.strip()
 
-            st.write("Vista previa de Marcas y CEBE mapeados:", df_nuevo_cebe.head())
+            st.write("Vista previa de Marcas, CEBE y Objetivos mapeados:", df_nuevo_cebe.head())
 
-            if st.button("📥 Registrar y Guardar Marcas/CEBE en Base de Datos"):
+            if st.button("📥 Registrar y Guardar Marcas/CEBE y Objetivos en Base de Datos"):
                 if not sel_mes_m or str(sel_mes_m).strip() == "":
-                    st.error("⚠️ Debe especificar un Mes Operativo válido para registrar las marcas y CEBE.")
+                    st.error("⚠️ Debe especificar un Mes Operativo válido para registrar las marcas, CEBE y objetivos.")
                 else:
                     df_nuevo_cebe["Anio"] = str(sel_anio_m)
                     df_nuevo_cebe["Mes"] = str(sel_mes_m)
@@ -293,16 +344,62 @@ def render_parametros_view(filtros_globales: dict = None):
                         df_final_cebe = df_nuevo_cebe
 
                     db.guardar_dataframe_sql(df_final_cebe, "maestro_marcas_cebe", if_exists='replace')
-                    st.success(f"¡Maestro Marca/CEBE guardado exitosamente para el período {sel_mes_m}/{sel_anio_m}!")
+                    st.success(f"¡Maestro Marca/CEBE y Objetivos guardado exitosamente para el período {sel_mes_m}/{sel_anio_m}!")
                     st.rerun()
         except Exception as e:
             st.error(f"Error al procesar el archivo Excel de Marcas/CEBE: {e}")
 
-    titulo_tabla_m = f"📋 Marcas y CEBE registrados en Base de Datos ({'Base Completa - Sin Filtro' if not sel_mes_m or str(sel_mes_m).strip() == '' else f'Período {sel_mes_m}/{sel_anio_m}'})"
+    titulo_tabla_m = f"📋 Marcas, CEBE y Objetivos registrados en Base de Datos ({'Base Completa - Sin Filtro' if not sel_mes_m or str(sel_mes_m).strip() == '' else f'Período {sel_mes_m}/{sel_anio_m}'})"
     st.markdown(f"#### {titulo_tabla_m}")
 
     df_marcas_cebe_actual = obtener_maestro_marcas_cebe_sql(sel_anio_m, sel_mes_m)
     st.dataframe(df_marcas_cebe_actual, width="stretch")
+
+    st.divider()
+
+    # =========================================================================
+    # 4. SECCIÓN: IMPORTACIÓN DE OBJETIVOS CALIBRADOS (DEFINITIVOS)
+    # =========================================================================
+    st.markdown("### 📥 4. Importación de Objetivos Calibrados (Definitivos)")
+    st.markdown("Cargue aquí el archivo Excel exportado y ajustado desde el generador de objetivos para consolidar los objetivos oficiales del período operativo en la base de datos.")
+
+    col7, col8 = st.columns(2)
+    with col7:
+        sel_anio_obj = st.text_input("Año Operativo (Objetivos Calibrados)", value=anio_def, key="anio_objetivos_calib")
+    with col8:
+        sel_mes_obj = st.text_input("Mes Operativo (Objetivos Calibrados)", value=mes_def, key="mes_objetivos_calib")
+
+    archivo_objetivos_subido = st.file_uploader(
+        "📂 Subir Excel de Objetivos Calibrados (.xlsx)",
+        type=["xlsx", "xls"],
+        key="up_excel_objetivos_calibrados"
+    )
+
+    if archivo_objetivos_subido is not None:
+        try:
+            st.write("Vista previa del Excel calibrado:", pd.read_excel(archivo_objetivos_subido).head())
+            
+            if st.button("🚀 Procesar e Ingresar Objetivos Calibrados a la Base de Datos"):
+                if not sel_mes_obj or str(sel_mes_obj).strip() == "":
+                    st.error("⚠️ Debe especificar un Mes Operativo válido para versionar los objetivos.")
+                else:
+                    with st.spinner("Guardando y versionando objetivos en SQLite..."):
+                        exito, mensaje = db.guardar_objetivos_calibrados_desde_excel(archivo_objetivos_subido, sel_anio_obj, sel_mes_obj)
+                        if exito:
+                            st.success(mensaje)
+                            st.rerun()
+                        else:
+                            st.error(mensaje)
+        except Exception as e:
+            st.error(f"Error al procesar el archivo Excel calibrado: {e}")
+
+    titulo_tabla_obj = f"📋 Objetivos Calibrados registrados en Base de Datos ({'Base Completa - Sin Filtro' if not sel_mes_obj or str(sel_mes_obj).strip() == '' else f'Período {sel_mes_obj}/{sel_anio_obj}'})"
+    st.markdown(f"#### {titulo_tabla_obj}")
+
+    df_objetivos_actual = obtener_objetivos_vendedores_sql(sel_anio_obj, sel_mes_obj)
+    st.dataframe(df_objetivos_actual, width="stretch")
+
+    st.divider()
 
     # =========================================================================
     # BOTÓN DE DESCARGA GLOBAL A EXCEL
@@ -312,10 +409,11 @@ def render_parametros_view(filtros_globales: dict = None):
         df_maestro_actual.to_excel(writer, index=False, sheet_name='Maestro_Vendedores')
         df_segmentos_actual.to_excel(writer, index=False, sheet_name='Maestro_Segmentos')
         df_marcas_cebe_actual.to_excel(writer, index=False, sheet_name='Maestro_Marcas_CEBE')
+        df_objetivos_actual.to_excel(writer, index=False, sheet_name='Objetivos_Calibrados')
     
     st.download_button(
-        label="📥 Descargar Maestros Completos a Excel",
+        label="📥 Descargar Maestros y Objetivos Completos a Excel",
         data=output.getvalue(),
-        file_name="maestros_matinal.xlsx",
+        file_name="maestros_y_objetivos_matinal.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )

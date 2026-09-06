@@ -40,12 +40,13 @@ def cargar_ausencias_remotas(url_ausencias):
         return df_vacio
 
 def sincronizar_archivos_excel_locales():
-    """Detecta archivos Excel en la raíz o en data/ y actualiza SQLite si fueron pisados o modificados."""
+    """Detecta archivos Excel operativas y maestros en la raíz o en data/ y actualiza SQLite si fueron modificados."""
     posibles_rutas = [".", "data"]
     archivos_esperados = {
         "vta": ["VTA.xlsx", "vta.xlsx", "VTA.xls"],
         "universo": ["UNIVERSO.xlsx", "universo.xlsx", "UNIVERSO.xls"],
-        "rutas": ["RUTAS.xlsx", "rutas.xlsx", "RUTAS.xls"]
+        "rutas": ["RUTAS.xlsx", "rutas.xlsx", "RUTAS.xls"],
+        "maestro_marcas_cebe": ["MAESTRO_MARCAS_CEBE.xlsx", "maestro_marcas_cebe.xlsx", "marcas_cebe.xlsx"]
     }
     
     archivos_encontrados = {}
@@ -65,7 +66,10 @@ def sincronizar_archivos_excel_locales():
             mtime_vta = os.path.getmtime(archivos_encontrados["vta"])
             mtime_db = os.path.getmtime(db_path) if os.path.exists(db_path) else 0
             
-            if mtime_vta > mtime_db or mtime_db == 0:
+            # Verificar también si el maestro de marcas/cebes fue actualizado recientemente
+            mtime_cebe = os.path.getmtime(archivos_encontrados["maestro_marcas_cebe"]) if "maestro_marcas_cebe" in archivos_encontrados else 0
+
+            if mtime_vta > mtime_db or mtime_cebe > mtime_db or mtime_db == 0:
                 dict_para_cargar = {}
                 for t, r in archivos_encontrados.items():
                     dict_para_cargar[t] = open(r, "rb")
