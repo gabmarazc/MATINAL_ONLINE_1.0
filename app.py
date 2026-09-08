@@ -48,8 +48,52 @@ def calcular_fechas_operativas_default():
 
     return hoy, dia_vta, dia_ant
 
+def verificar_autenticacion():
+    """Valida el ingreso por nivel de usuario y contraseña antes de permitir operar."""
+    if "autenticado" not in st.session_state:
+        st.session_state["autenticado"] = False
+        st.session_state["nivel_usuario"] = None
+
+    if not st.session_state["autenticado"]:
+        st.title("🔒 Sistema Matinal 2.0 - Acceso Restringido")
+        
+        with st.form("form_login"):
+            nivel_sel = st.selectbox(
+                "Seleccione Nivel de Acceso",
+                ["Nivel 1: Administrador", "Nivel 2: Gerencia", "Nivel 3: Supervisión"]
+            )
+            password = st.text_input("Contraseña de Acceso", type="password")
+            btn_login = st.form_submit_button("Ingresar al Sistema")
+
+            if btn_login:
+                passwords_validos = {
+                    "Nivel 1: Administrador": "admin2026",
+                    "Nivel 2: Gerencia": "gerencia2026",
+                    "Nivel 3: Supervisión": "sup2026"
+                }
+                
+                if passwords_validos.get(nivel_sel) == password:
+                    st.session_state["autenticado"] = True
+                    st.session_state["nivel_usuario"] = nivel_sel
+                    st.success("¡Acceso concedido! Cargando sistema...")
+                    st.rerun()
+                else:
+                    st.error("Contraseña incorrecta. Verifique sus credenciales.")
+        return False
+    return True
+
 def main():
+    if not verificar_autenticacion():
+        return
+
     st.title("🚀 Sistema Matinal 2.0 - Panel de Control Comercial")
+
+    nivel_actual = st.session_state.get("nivel_usuario", "")
+    st.sidebar.info(f"Sesión activa: **{nivel_actual}**")
+    if st.sidebar.button("🔒 Cerrar Sesión", width="stretch"):
+        st.session_state["autenticado"] = False
+        st.session_state["nivel_usuario"] = None
+        st.rerun()
 
     def_matinal, def_vta, def_ant = calcular_fechas_operativas_default()
 
@@ -156,15 +200,32 @@ def main():
 
     es_local = es_entorno_local()
     
-    if es_local:
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    # Restricción de solapas según el nivel autenticado
+    if "Nivel 1" in nivel_actual:
+        if es_local:
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📊 Avance Kilos", 
+                "📦 Composición Obj Kilos",
+                "📈 Avance CCC", 
+                "🎯 Cobertura Marca", 
+                "⚙️ Parámetros"
+            ])
+        else:
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📊 Avance Kilos", 
+                "📦 Composición Obj Kilos",
+                "📈 Avance CCC", 
+                "🎯 Cobertura Marca"
+            ])
+    elif "Nivel 2" in nivel_actual:
+        tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Avance Kilos", 
             "📦 Composición Obj Kilos",
             "📈 Avance CCC", 
-            "🎯 Cobertura Marca", 
-            "⚙️ Parámetros"
+            "🎯 Cobertura Marca"
         ])
     else:
+        # Nivel 3: Supervisión
         tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Avance Kilos", 
             "📦 Composición Obj Kilos",
@@ -184,7 +245,7 @@ def main():
     with tab4:
         render_rep_batalla_cobertura()
         
-    if es_local:
+    if "Nivel 1" in nivel_actual and es_local:
         with tab5:
             render_parametros_view(filtros_globales)
 
