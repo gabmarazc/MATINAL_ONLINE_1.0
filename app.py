@@ -7,7 +7,7 @@ from modules.parametros import render_parametros_view, es_entorno_local, obtener
 from modules.rep_kilos import render_rep_kilos
 from modules.rep_obj_kilos import render_rep_obj_kilos
 from modules.rep_ccc import render_rep_ccc
-from modules.rep_batalla_cobertura_marca import render_rep_batalla_cobertura
+from modules.rep_cob_marca import generar_reporte_cobertura_marca, dibujar_pestana_cobertura_marca
 from modules import database as db
 
 st.set_page_config(
@@ -232,6 +232,12 @@ def main():
             "🎯 Cobertura Marca"
         ])
     
+    df_vend_maestro = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
+    df_marcas_maestro = db.cargar_tabla_sql("SELECT * FROM parametros_marcas")
+    
+    sup_sel_efectivo = supervisores_disponibles[1:] if filtros_globales["supervisor"] == "TODOS" else [filtros_globales["supervisor"]]
+    rep_cob, marcas_lst, mapa_obj = generar_reporte_cobertura_marca(df_vta, df_universo, df_vend_maestro, df_marcas_maestro)
+
     # Renderizado de pestañas acorde al perfil activo
     if "Nivel 1" in nivel_actual:
         with tab1:
@@ -241,7 +247,7 @@ def main():
         with tab3:
             render_rep_ccc(df_vta, df_universo, filtros_globales)
         with tab4:
-            render_rep_batalla_cobertura()
+            dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
         if es_local:
             with tab5:
                 render_parametros_view(filtros_globales)
@@ -253,7 +259,7 @@ def main():
         with tab3:
             render_rep_ccc(df_vta, df_universo, filtros_globales)
         with tab4:
-            render_rep_batalla_cobertura()
+            dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
     else:
         # Nivel 3: Supervisión
         with tab1:
@@ -261,7 +267,7 @@ def main():
         with tab2:
             render_rep_ccc(df_vta, df_universo, filtros_globales)
         with tab3:
-            render_rep_batalla_cobertura()
+            dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
 
 if __name__ == "__main__":
     main()

@@ -1,3 +1,4 @@
+# modules/rep_cob_marca.py
 import io
 import streamlit as st
 import pandas as pd
@@ -65,7 +66,7 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
         if col_prov_v:
             vtass_periodo = vtass_periodo[vtass_periodo[col_prov_v].astype(str).str.contains("pepsico", case=False, na=False)].copy()
             
-        # Filtro de Subramo distinto a Empleados en ventas (igual que en cartera)
+        # Filtro de Subramo distinto a Empleados en ventas
         col_subramo_v = next((vtass_periodo.columns[i] for i, c in enumerate(cols_v_str) if "subramo" in c), None)
         if col_subramo_v:
             vtass_periodo = vtass_periodo[vtass_periodo[col_subramo_v].fillna("").astype(str).str.strip().str.casefold().ne("empleados")].copy()
@@ -79,17 +80,14 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
     if not cartera.empty:
         cols_c_str = [str(c).strip().lower() for c in cartera.columns]
         
-        # Filtro de Proveedor Pepsico en cartera
         col_prov_c = next((cartera.columns[i] for i, c in enumerate(cols_c_str) if c in ["proveedor", "fabricante", "empresa"]), None)
         if col_prov_c:
             cartera = cartera[cartera[col_prov_c].astype(str).str.contains("pepsico", case=False, na=False)].copy()
             
-        # Exclusión de empleados en Subramo
         subramo_col = next((c for c in cartera.columns if "subramo" in str(c).lower()), None)
         if subramo_col:
             cartera = cartera[cartera[subramo_col].fillna("").astype(str).str.strip().str.casefold().ne("empleados")].copy()
             
-        # Filtrado de Taxonomías válidas (A, B, C, D)
         tax_col = next((c for c in cartera.columns if "taxonomia" in str(c).lower() or "segmentoclientecodigo" in str(c).lower()), None)
         if tax_col:
             cartera["Taxonomia"] = cartera[tax_col].astype(str).str.strip().str.upper()
@@ -128,7 +126,6 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
         else:
             vtas["Marca"] = ""
             
-        # Agrupar por vendedor, cliente y marca para evaluar la SUMATORIA del periodo (>= 3)
         vtas["Cliente"] = pd.to_numeric(vtas[cliente_col_vtas], errors="coerce").astype("Int64")
         vtas_agrupadas = vtas.groupby(["CodVendedor", "Cliente", "Marca"], as_index=False).agg(
             Total_Cant=("cantbase", "sum")
@@ -219,8 +216,8 @@ def crear_filtro_excel(label, opciones, key_prefix):
     seleccionados = [op for op in opciones if st.session_state.get(f"{key_prefix}_{op}", False)]
     return seleccionados
 
-def dibujar_pestana_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, supervisores_seleccionados, df_vtas_operativo=None):
-    st.subheader("Cobertura Por Marca")
+def dibujar_pestana_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, supervisores_seleccionados, df_vtas_operativo=None, df_cartera=None):
+    st.subheader("🎯 Cobertura Por Marca y Detalle de Clientes")
     
     sup_str = [str(s).strip() for s in supervisores_seleccionados]
     if reporte_cobertura is not None and not reporte_cobertura.empty and "SUP" in reporte_cobertura.columns:
@@ -276,7 +273,6 @@ def dibujar_pestana_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, s
         cliente_c = "Cliente" if "Cliente" in vtas_g.columns else (vtas_g.columns[1] if len(vtas_g.columns) > 1 else "Cliente")
         vtas_g["Cliente"] = pd.to_numeric(vtas_g[cliente_c], errors="coerce").astype("Int64")
 
-        # Agrupar globalmente sumando CantBase por cliente y marca
         vtas_g_agrup = vtas_g.groupby(["CodVendedor", "Cliente", "Marca"], as_index=False).agg(
             Total_Cant=("cantbase", "sum")
         )
@@ -428,3 +424,108 @@ def dibujar_pestana_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, s
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="cob_marca_btn_dl"
     )
+
+    # ==========================================
+    # SECCIÓN: CLIENTES QUE SÍ ALCANZAN EL OBJETIVO (>= 3 UNIDADES)
+    # ==========================================
+    st.markdown("### ✅ Detalle de Clientes que Alcanzan el Objetivo de Cobertura")
+    st.markdown("Clientes activos en cartera que sí alcanzan el volumen mínimo de compra ($\ge 3$ unidades) en las marcas seleccionadas.")
+
+    if df_cartera is not None and not df_cartera.empty and df_vtas_operativo is not None and not df_vtas_operativo.empty:
+        vendedores_activos_df = df_filtrado[["CodVendedor", "Nombre"]].dropna()
+        cods_vend_activos = vendedores_activos_df["CodVendedor"].tolist()
+
+        c_cartera = df_cartera.copy()
+        cols_c_str = [str(c).strip().lower() for c in c_cartera.columns]
+        enc_vend_c = next((c_cartera.columns[i] for i, c in enumerate(cols_c_str) if c in ["codvendedor", "codvend", "vendedor", "vend"]), None)
+        if enc_vend_c:
+            c_cartera["CodVendedor"] = pd.to_numeric(c_cartera[enc_vend_c], errors="coerce").astype("Int64")
+        
+        c_cartera = c_cartera[c_cartera["CodVendedor"].isin(cods_vend_activos)].copy()
+
+        col_cliente_c = next((c for c in c_cartera.columns if "cliente" in c.lower() and "cod" not in c.lower()), None)
+        if not col_cliente_c:
+            col_cliente_c = c_cartera.columns[1] if len(c_cartera.columns) > 1 else c_cartera.columns[0]
+        
+        col_cod_cliente_c = next((c for c in c_cartera.columns if "cliente" in c.lower() or "nro" in c.lower() or "codigo" in c.lower()), c_cartera.columns[0])
+        c_cartera["Cliente_Cod"] = pd.to_numeric(c_cartera[col_cod_cliente_c], errors="coerce").astype("Int64")
+
+        if not c_cartera.empty and m_selec:
+            lista_clientes_cartera = c_cartera[["CodVendedor", "Cliente_Cod", col_cliente_c]].drop_duplicates().copy()
+            lista_clientes_cartera = lista_clientes_cartera.merge(vendedores_activos_df, on="CodVendedor", how="inner")
+
+            df_expansion = []
+            for marca in m_selec:
+                tmp = lista_clientes_cartera.copy()
+                tmp["Marca"] = marca
+                df_expansion.append(tmp)
+            
+            if df_expansion:
+                df_matriz_potencial = pd.concat(df_expansion, ignore_index=True)
+                
+                vtas_batalla = df_vtas_operativo.copy()
+                if "CodVendedorOperativo" in vtas_batalla.columns:
+                    vtas_batalla["CodVendedor"] = vtas_batalla["CodVendedorOperativo"]
+                elif "CodVend" in vtas_batalla.columns:
+                    vtas_batalla = vtas_batalla.rename(columns={"CodVend": "CodVendedor"})
+                vtas_batalla["CodVendedor"] = pd.to_numeric(vtas_batalla["CodVendedor"], errors="coerce").astype("Int64")
+                
+                if "Periodo" in vtas_batalla.columns:
+                    vtas_batalla = vtas_batalla[vtas_batalla["Periodo"].isin(["Arrastre", "Actual"])].copy()
+
+                cols_vb_str = [str(c).strip().lower() for c in vtas_batalla.columns]
+                pos_cant_vb = ["cantbase", "CantBase", "Cantidad", "CANTIDAD", "cant", "Kilos", "KILOS", "Unidades"]
+                enc_cant_vb = next((p for p in pos_cant_vb if p in cols_vb_str), None)
+                vtas_batalla["cantbase"] = pd.to_numeric(vtas_batalla[enc_cant_vb], errors="coerce").fillna(0.0) if enc_cant_vb else 0.0
+                
+                pos_m_vb = ["Marca", "MARCA", "marca"]
+                enc_m_vb = next((p for p in pos_m_vb if p in cols_vb_str), None)
+                vtas_batalla["Marca"] = vtas_batalla[enc_m_vb].astype(str).str.strip() if enc_m_vb else ""
+
+                cliente_cb = "Cliente" if "Cliente" in vtas_batalla.columns else vtas_batalla.columns[1]
+                vtas_batalla["Cliente_Cod"] = pd.to_numeric(vtas_batalla[cliente_cb], errors="coerce").astype("Int64")
+
+                vtas_batalla_agrup = vtas_batalla.groupby(["CodVendedor", "Cliente_Cod", "Marca"], as_index=False).agg(
+                    Unidades_Ultimo_Mes=("cantbase", "sum")
+                )
+
+                df_batalla_final = df_matriz_potencial.merge(
+                    vtas_batalla_agrup,
+                    on=["CodVendedor", "Cliente_Cod", "Marca"],
+                    how="left"
+                )
+                df_batalla_final["Unidades_Ultimo_Mes"] = df_batalla_final["Unidades_Ultimo_Mes"].fillna(0.0)
+
+                # Filtrar solo aquellos que SÍ alcanzan el objetivo de 3 unidades o más (>= 3.0)
+                df_batalla_filtrada = df_batalla_final[df_batalla_final["Unidades_Ultimo_Mes"] >= 3.0].copy()
+                df_batalla_filtrada["Estado"] = "Cumple Objetivo (>= 3 u.)"
+
+                df_batalla_render = df_batalla_filtrada[[
+                    "Nombre", "Cliente_Cod", col_cliente_c, "Marca", "Unidades_Ultimo_Mes", "Estado"
+                ]].rename(columns={
+                    "Nombre": "Vendedor",
+                    "Cliente_Cod": "Cod_Cliente",
+                    col_cliente_c: "Cliente"
+                })
+
+                if not df_batalla_render.empty:
+                    st.dataframe(df_batalla_render, use_container_width=True, hide_index=True)
+
+                    buffer_batalla = io.BytesIO()
+                    with pd.ExcelWriter(buffer_batalla, engine="openpyxl") as writer:
+                        df_batalla_render.to_excel(writer, index=False, sheet_name="Clientes_Cumplen_Objetivo")
+                    buffer_batalla.seek(0)
+
+                    st.download_button(
+                        label="📥 Descargar Clientes Cubiertos a Excel",
+                        data=buffer_batalla,
+                        file_name="Clientes_Cumplen_Objetivo.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_dl_batalla"
+                    )
+                else:
+                    st.info("No se registran clientes que cumplan con el mínimo de 3 unidades para los filtros seleccionados.")
+        else:
+            st.info("Seleccione al menos una marca y un vendedor para calcular el detalle de clientes.")
+    else:
+        st.info("No hay datos de cartera suficientes para calcular el detalle de clientes.")
