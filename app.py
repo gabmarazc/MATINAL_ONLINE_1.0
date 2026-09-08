@@ -17,6 +17,22 @@ st.set_page_config(
     layout="wide"
 )
 
+# Inyección CSS apuntando correctamente a los span de BaseWeb para forzar un tono gris en los tags seleccionados
+st.markdown("""
+    <style>
+        span[data-baseweb="tag"] {
+            background-color: #475569 !important;
+            border: 1px solid #64748b !important;
+        }
+        span[data-baseweb="tag"] span {
+            color: #f8fafc !important;
+        }
+        span[data-baseweb="tag"] svg {
+            fill: #cbd5e1 !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 def calcular_fechas_operativas_default():
     hoy = date.today()
     if hoy.weekday() == 0:
@@ -36,14 +52,27 @@ def calcular_fechas_operativas_default():
 def main():
     st.title("🚀 Sistema Matinal 2.0 - Panel de Control Comercial")
 
-    # ==========================================
-    # BARRA LATERAL: CONTROL DE DATOS Y CACHÉ
-    # ==========================================
+    def_matinal, def_vta, def_ant = calcular_fechas_operativas_default()
+
+    if "sel_dia_matinal" not in st.session_state:
+        st.session_state["sel_dia_matinal"] = def_matinal
+    if "sel_dia_venta" not in st.session_state:
+        st.session_state["sel_dia_venta"] = def_vta
+    if "sel_dia_anterior" not in st.session_state:
+        st.session_state["sel_dia_anterior"] = def_ant
+
     st.sidebar.header("⚙️ Control de Datos")
     if st.sidebar.button("🔄 Recargar Bases y Limpiar Caché", width="stretch"):
         st.cache_data.clear()
         st.cache_resource.clear()
         st.session_state.clear()
+        
+        h, dv, da = calcular_fechas_operativas_default()
+        st.session_state["sel_dia_matinal"] = h
+        st.session_state["sel_dia_venta"] = dv
+        st.session_state["sel_dia_anterior"] = da
+        st.session_state["sel_sup_op"] = "TODOS"
+        
         st.sidebar.success("¡Caché borrada y bases actualizadas!")
         st.rerun()
 
@@ -67,7 +96,6 @@ def main():
         with col2:
             up_rutas = st.file_uploader("Subir Archivo RUTAS (.xlsx)", type=["xlsx", "xls"], key="up_rutas")
 
-        # Control anti-bucle mediante session_state
         if up_vta and up_univ and up_rutas and not st.session_state.get("bd_inicializada", False):
             with st.spinner("Procesando y guardando archivos en SQLite..."):
                 archivos_dict = {"vta": up_vta, "universo": up_univ, "rutas": up_rutas}
@@ -79,8 +107,6 @@ def main():
         elif not st.session_state.get("bd_inicializada", False):
             st.info("ℹ️ Sube los tres archivos requeridos (VTA, Universo y Rutas) para habilitar el sistema.")
             return
-
-    def_matinal, def_vta, def_ant = calcular_fechas_operativas_default()
 
     supervisores_disponibles = ["TODOS"]
     col_sup = None
@@ -104,21 +130,21 @@ def main():
     st.sidebar.header("🎛️ Filtros Globales")
 
     with st.sidebar.expander("📅 Fechas de Referencia", expanded=True):
-        sel_dia_matinal = st.date_input("Día Matinal", value=def_matinal, min_value=date(2020, 1, 1), format="DD/MM/YYYY")
-        sel_dia_venta = st.date_input("Día Venta", value=def_vta, min_value=date(2020, 1, 1), format="DD/MM/YYYY")
-        sel_dia_anterior = st.date_input("Día Anterior", value=def_ant, min_value=date(2020, 1, 1), format="DD/MM/YYYY")
+        sel_dia_matinal = st.date_input("Día Matinal", min_value=date(2020, 1, 1), format="DD/MM/YYYY", key="sel_dia_matinal")
+        sel_dia_venta = st.date_input("Día Venta", min_value=date(2020, 1, 1), format="DD/MM/YYYY", key="sel_dia_venta")
+        sel_dia_anterior = st.date_input("Día Anterior", min_value=date(2020, 1, 1), format="DD/MM/YYYY", key="sel_dia_anterior")
 
     anio_sugerido = sel_dia_venta.year
     mes_sugerido = sel_dia_venta.month
 
     opciones_anio = [2023, 2024, 2025, 2026, 2027, 2028]
     idx_anio = opciones_anio.index(anio_sugerido) if anio_sugerido in opciones_anio else 3
-    anio_operativo = st.sidebar.selectbox("Año Operativo", opciones_anio, index=idx_anio)
+    anio_operativo = st.sidebar.selectbox("Año Operativo", opciones_anio, index=idx_anio, key="sel_anio_op")
 
     opciones_mes = list(range(1, 13))
-    mes_operativo = st.sidebar.selectbox("Mes Operativo", opciones_mes, index=mes_sugerido - 1)
+    mes_operativo = st.sidebar.selectbox("Mes Operativo", opciones_mes, index=mes_sugerido - 1, key="sel_mes_op")
 
-    sel_supervisor = st.sidebar.selectbox("Supervisor", supervisores_disponibles, index=0)
+    sel_supervisor = st.sidebar.selectbox("Supervisor", supervisores_disponibles, index=0, key="sel_sup_op")
 
     filtros_globales = {
         "anio": int(anio_operativo),
@@ -156,7 +182,7 @@ def main():
         render_rep_obj_kilos(df_vta, filtros_globales)
         
     with tab3:
-        render_rep_ccc(df_vta, df_universo)
+        render_rep_ccc(df_vta, df_universo, filtros_globales)
         
     with tab4:
         render_rep_batalla_nc(df_vta, df_universo)

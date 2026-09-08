@@ -38,6 +38,16 @@ def calcular_fechas_operativas_default():
 def main():
     st.title("🚀 Sistema Matinal 2.0 - Panel de Control Comercial")
 
+    # Inicialización robusta de fechas operativas en st.session_state
+    def_matinal, def_vta, def_ant = calcular_fechas_operativas_default()
+
+    if "sel_dia_matinal" not in st.session_state:
+        st.session_state["sel_dia_matinal"] = def_matinal
+    if "sel_dia_venta" not in st.session_state:
+        st.session_state["sel_dia_venta"] = def_vta
+    if "sel_dia_anterior" not in st.session_state:
+        st.session_state["sel_dia_anterior"] = def_ant
+
     # ==========================================
     # BARRA LATERAL: CONTROL DE DATOS Y CACHÉ
     # ==========================================
@@ -46,6 +56,14 @@ def main():
         st.cache_data.clear()
         st.cache_resource.clear()
         st.session_state.clear()
+        
+        # Reiniciar valores por defecto frescos tras limpiar la sesión
+        h, dv, da = calcular_fechas_operativas_default()
+        st.session_state["sel_dia_matinal"] = h
+        st.session_state["sel_dia_venta"] = dv
+        st.session_state["sel_dia_anterior"] = da
+        st.session_state["sel_sup_op"] = "TODOS"
+        
         st.sidebar.success("¡Caché borrada y bases actualizadas!")
         st.rerun()
 
@@ -69,7 +87,6 @@ def main():
         with col2:
             up_rutas = st.file_uploader("Subir Archivo RUTAS (.xlsx)", type=["xlsx", "xls"], key="up_rutas")
 
-        # Control anti-bucle mediante session_state
         if up_vta and up_univ and up_rutas and not st.session_state.get("bd_inicializada", False):
             with st.spinner("Procesando y guardando archivos en SQLite..."):
                 archivos_dict = {"vta": up_vta, "universo": up_univ, "rutas": up_rutas}
@@ -81,8 +98,6 @@ def main():
         elif not st.session_state.get("bd_inicializada", False):
             st.info("ℹ️ Sube los tres archivos requeridos (VTA, Universo y Rutas) para habilitar el sistema.")
             return
-
-    def_matinal, def_vta, def_ant = calcular_fechas_operativas_default()
 
     supervisores_disponibles = ["TODOS"]
     col_sup = None
@@ -106,21 +121,21 @@ def main():
     st.sidebar.header("🎛️ Filtros Globales")
 
     with st.sidebar.expander("📅 Fechas de Referencia", expanded=True):
-        sel_dia_matinal = st.date_input("Día Matinal", value=def_matinal, min_value=date(2020, 1, 1), format="DD/MM/YYYY")
-        sel_dia_venta = st.date_input("Día Venta", value=def_vta, min_value=date(2020, 1, 1), format="DD/MM/YYYY")
-        sel_dia_anterior = st.date_input("Día Anterior", value=def_ant, min_value=date(2020, 1, 1), format="DD/MM/YYYY")
+        sel_dia_matinal = st.date_input("Día Matinal", min_value=date(2020, 1, 1), format="DD/MM/YYYY", key="sel_dia_matinal")
+        sel_dia_venta = st.date_input("Día Venta", min_value=date(2020, 1, 1), format="DD/MM/YYYY", key="sel_dia_venta")
+        sel_dia_anterior = st.date_input("Día Anterior", min_value=date(2020, 1, 1), format="DD/MM/YYYY", key="sel_dia_anterior")
 
     anio_sugerido = sel_dia_venta.year
     mes_sugerido = sel_dia_venta.month
 
     opciones_anio = [2023, 2024, 2025, 2026, 2027, 2028]
     idx_anio = opciones_anio.index(anio_sugerido) if anio_sugerido in opciones_anio else 3
-    anio_operativo = st.sidebar.selectbox("Año Operativo", opciones_anio, index=idx_anio)
+    anio_operativo = st.sidebar.selectbox("Año Operativo", opciones_anio, index=idx_anio, key="sel_anio_op")
 
     opciones_mes = list(range(1, 13))
-    mes_operativo = st.sidebar.selectbox("Mes Operativo", opciones_mes, index=mes_sugerido - 1)
+    mes_operativo = st.sidebar.selectbox("Mes Operativo", opciones_mes, index=mes_sugerido - 1, key="sel_mes_op")
 
-    sel_supervisor = st.sidebar.selectbox("Supervisor", supervisores_disponibles, index=0)
+    sel_supervisor = st.sidebar.selectbox("Supervisor", supervisores_disponibles, index=0, key="sel_sup_op")
 
     filtros_globales = {
         "anio": int(anio_operativo),
@@ -158,7 +173,7 @@ def main():
         render_rep_obj_kilos(df_vta, filtros_globales)
         
     with tab3:
-        render_rep_ccc(df_vta, df_universo)
+        render_rep_ccc(df_vta, df_universo, filtros_globales)
         
     with tab4:
         render_rep_batalla_nc(df_vta, df_universo)
@@ -193,7 +208,6 @@ DB_PATH = "data/matinal.db"
 def obtener_conexion():
     """Crea una conexión a SQLite con timeout y modo WAL activado para concurrencia segura."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    # timeout=30 espera hasta 30 segundos si la base está ocupada en lugar de dar error de bloqueo
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL;")
     return conn
@@ -246,14 +260,22 @@ def tablas_existen() -> bool:
         conn.close()
 
 def inicializar_bd_desde_excel(archivos_dict):
-    """Lee los archivos Excel forzando la interpretación latina DD/MM/YYYY."""
+    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte para Obj_Mes."""
     conn = obtener_conexion()
     try:
         for nombre_tabla, archivo in archivos_dict.items():
             df = pd.read_excel(archivo)
             
+            if nombre_tabla.lower() in ["maestro_marcas_cebe", "marcas_cebe", "cebes"]:
+                for col in df.columns:
+                    col_l = str(col).strip().lower()
+                    if col_l in ["obj_mes", "objetivo", "obj", "suma de tn", "tn"]:
+                        df = df.rename(columns={col: "Obj_Mes"})
+                if "Obj_Mes" in df.columns:
+                    df["Obj_Mes"] = pd.to_numeric(df["Obj_Mes"], errors="coerce").fillna(0.0)
+
             for col in df.columns:
-                col_l = str(col).lower().strip()
+                col_l = str(col).strip().lower()
                 if any(k in col_l for k in ["fecha", "dia", "date"]):
                     s = df[col].astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
                     
@@ -276,6 +298,73 @@ def inicializar_bd_desde_excel(archivos_dict):
             df.to_sql(nombre_tabla, conn, if_exists='replace', index=False, chunksize=10000)
     finally:
         conn.close()
+
+def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
+    """
+    Lee el Excel exportado desde rep_obj_kilos.py, valida sus columnas esenciales
+    y guarda o reemplaza los objetivos definitivos en la tabla 'objetivos_vendedores' 
+    para el período (Anio, Mes) asegurando control de versión.
+    """
+    try:
+        df_subida = pd.read_excel(file_buffer_or_path)
+    except Exception as e:
+        return False, f"Error al leer el archivo Excel: {e}"
+
+    columnas_requeridas = ["CodVendedor", "Marca", "SEGMENTO", "Obj_Sugerido_Kg"]
+    faltantes = [c for c in columnas_requeridas if c not in df_subida.columns]
+    if faltantes:
+        return False, f"El archivo Excel no tiene el formato correcto. Faltan las columnas: {', '.join(faltantes)}"
+
+    df_subida["CodVendedor"] = pd.to_numeric(df_subida["CodVendedor"], errors="coerce").astype("Int64")
+    df_subida["Marca"] = df_subida["Marca"].fillna("").astype(str).str.strip().str.upper()
+    df_subida["SEGMENTO"] = df_subida["SEGMENTO"].fillna("").astype(str).str.strip()
+    df_subida["Obj_Sugerido_Kg"] = pd.to_numeric(df_subida["Obj_Sugerido_Kg"], errors="coerce").fillna(0.0)
+
+    # Conversión segura y robusta a enteros para evitar el error de formato 'd'
+    try:
+        anio_int = int(float(str(anio)))
+    except Exception:
+        anio_int = 2026
+
+    try:
+        mes_int = int(float(str(mes)))
+    except Exception:
+        mes_int = 9
+
+    df_subida["Anio"] = anio_int
+    df_subida["Mes"] = mes_int
+
+    conn = obtener_conexion()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS objetivos_vendedores (
+                Anio INTEGER,
+                Mes INTEGER,
+                CodVendedor INTEGER,
+                Nombre TEXT,
+                Supervisor TEXT,
+                Marca TEXT,
+                CEBE TEXT,
+                SEGMENTO TEXT,
+                Kilos_Mes_Anterior REAL,
+                Objetivo_Mes_Anterior_Kg REAL,
+                Logro_Anterior_Pct REAL,
+                Obj_Macro_Marca_Kg REAL,
+                Obj_Sugerido_Kg REAL,
+                PRIMARY KEY (Anio, Mes, CodVendedor, Marca, SEGMENTO)
+            )
+        """)
+        conn.commit()
+
+        cursor.execute("DELETE FROM objetivos_vendedores WHERE Anio = ? AND Mes = ?", (anio_int, mes_int))
+        conn.commit()
+
+        df_subida.to_sql("objetivos_vendedores", conn, if_exists="append", index=False, chunksize=10000)
+    finally:
+        conn.close()
+
+    return True, f"¡Objetivos del período {mes_int:02d}/{anio_int} cargados y versionados con éxito en la base de datos!"
 
 ==================================================
 
@@ -350,11 +439,35 @@ def obtener_maestro_segmentos_sql(anio: str = None, mes: str = None) -> pd.DataF
         return pd.DataFrame(columns=["Anio", "Mes", "Segmento"])
 
 def obtener_maestro_marcas_cebe_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
-    """Carga la relación Marca - CEBE desde SQLite. Si mes está vacío, devuelve la base completa."""
+    """Carga la relación Marca - CEBE y objetivos desde SQLite. Si mes está vacío, devuelve la base completa."""
     try:
         df_all = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
         if df_all is None or df_all.empty:
-            return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE"])
+            return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
+        
+        for col_nec in ["Obj_TN_Mes", "Obj_Gross_Mes"]:
+            if col_nec not in df_all.columns:
+                df_all[col_nec] = 0.0
+
+        if not mes or str(mes).strip() == "":
+            return df_all
+        
+        if "Anio" in df_all.columns and "Mes" in df_all.columns:
+            cond = (df_all["Mes"].astype(str) == str(mes))
+            if anio and str(anio).strip() != "":
+                cond = cond & (df_all["Anio"].astype(str) == str(anio))
+            return df_all[cond]
+            
+        return df_all
+    except Exception:
+        return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
+
+def obtener_objetivos_vendedores_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
+    """Carga los objetivos calibrados desde SQLite. Si mes está vacío, devuelve la base completa."""
+    try:
+        df_all = db.cargar_tabla_sql("SELECT * FROM objetivos_vendedores")
+        if df_all is None or df_all.empty:
+            return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Obj_Sugerido_Kg"])
         
         if not mes or str(mes).strip() == "":
             return df_all
@@ -367,7 +480,7 @@ def obtener_maestro_marcas_cebe_sql(anio: str = None, mes: str = None) -> pd.Dat
             
         return df_all
     except Exception:
-        return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE"])
+        return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Obj_Sugerido_Kg"])
 
 def render_parametros_view(filtros_globales: dict = None):
     if not es_entorno_local():
@@ -375,7 +488,7 @@ def render_parametros_view(filtros_globales: dict = None):
         return
 
     st.subheader("⚙️ Configuración de Dimensiones y Maestros")
-    st.markdown("Los filtros operativos de Año, Mes, Fechas y Supervisor se gestionan desde la barra lateral izquierda. Esta sección permite cargar y mantener los maestros de Vendedores, Segmentos y Marcas / CEBE.")
+    st.markdown("Los filtros operativos de Año, Mes, Fechas y Supervisor se gestionan desde la barra lateral izquierda. Esta sección permite cargar y mantener los maestros de Vendedores, Segmentos, Marcas / CEBE e importar los objetivos calibrados.")
 
     anio_def = filtros_globales.get("anio", "2026") if filtros_globales else "2026"
     mes_def = filtros_globales.get("mes", "9") if filtros_globales else "9"
@@ -519,10 +632,10 @@ def render_parametros_view(filtros_globales: dict = None):
     st.divider()
 
     # =========================================================================
-    # 3. SECCIÓN: MAESTRO MARCA - CEBE
+    # 3. SECCIÓN: MAESTRO MARCA - CEBE Y OBJETIVOS (Obj_TN_Mes, Obj_Gross_Mes)
     # =========================================================================
-    st.markdown("### 🏷️ 3. Maestro de Marcas y CEBE")
-    st.markdown("Cargue la planilla Excel con la relación entre Marca y CEBE (Global, Pehuamar, Cracker, Cereal, etc.) para el período operativo.")
+    st.markdown("### 🏷️ 3. Maestro de Marcas, CEBE y Objetivos (Obj_TN_Mes / Obj_Gross_Mes)")
+    st.markdown("Descargue la plantilla, complete los objetivos mensuales en toneladas (`Obj_TN_Mes`) y en gross (`Obj_Gross_Mes`), y suba el archivo actualizado.")
 
     col5, col6 = st.columns(2)
     with col5:
@@ -530,7 +643,23 @@ def render_parametros_view(filtros_globales: dict = None):
     with col6:
         sel_mes_m = st.text_input("Mes Operativo (Marcas/CEBE)", value=mes_def, placeholder="Dejar vacío para ver toda la base", key="mes_marca_cebe")
 
-    archivo_marcas = st.file_uploader("📂 Subir Excel de Marcas y CEBE (Columnas esperadas: Marca, CEBE)", type=["xlsx", "xls"], key="up_excel_marcas_cebe")
+    df_marcas_cebe_actual = obtener_maestro_marcas_cebe_sql(sel_anio_m, sel_mes_m)
+
+    output_plantilla = BytesIO()
+    with pd.ExcelWriter(output_plantilla, engine='openpyxl') as writer:
+        df_plantilla = df_marcas_cebe_actual.copy()
+        if df_plantilla.empty:
+            df_plantilla = pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
+        df_plantilla.to_excel(writer, index=False, sheet_name='Maestro_Marcas_CEBE')
+
+    st.download_button(
+        label="📥 Descargar Plantilla de Marcas y CEBE para Completar",
+        data=output_plantilla.getvalue(),
+        file_name=f"plantilla_marcas_cebe_{sel_mes_m}_{sel_anio_m}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    archivo_marcas = st.file_uploader("📂 Subir Excel Actualizado de Marcas, CEBE y Objetivos", type=["xlsx", "xls"], key="up_excel_marcas_cebe")
 
     if archivo_marcas is not None:
         try:
@@ -540,27 +669,38 @@ def render_parametros_view(filtros_globales: dict = None):
             nuevos_nombres_cebe = {}
             for col in columnas_cebe:
                 col_str = str(col).strip().lower()
-                if "marca" in col_str:
+                if "marca" in col_str or "marcaupper" in col_str:
                     nuevos_nombres_cebe[col] = "Marca"
-                elif "cebe" in col_str or "tipo" in col_str or "categoria" in col_str:
+                elif "cebe" in col_str or "tipo" in col_str or "categoria" in col_str or "cebe 2" in col_str:
                     nuevos_nombres_cebe[col] = "CEBE"
+                elif "obj_tn" in col_str or "tn" in col_str:
+                    nuevos_nombres_cebe[col] = "Obj_TN_Mes"
+                elif "obj_gross" in col_str or "gross" in col_str:
+                    nuevos_nombres_cebe[col] = "Obj_Gross_Mes"
 
             df_nuevo_cebe = df_nuevo_cebe.rename(columns=nuevos_nombres_cebe)
 
-            if "Marca" not in df_nuevo_cebe.columns and len(columnas_cebe) > 0:
-                df_nuevo_cebe = df_nuevo_cebe.rename(columns={columnas_cebe[0]: "Marca"})
-            if "CEBE" not in df_nuevo_cebe.columns and len(columnas_cebe) > 1:
-                df_nuevo_cebe = df_nuevo_cebe.rename(columns={columnas_cebe[1]: "CEBE"})
+            for col_req in ["Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"]:
+                if col_req not in df_nuevo_cebe.columns:
+                    if col_req in ["Obj_TN_Mes", "Obj_Gross_Mes"]:
+                        df_nuevo_cebe[col_req] = 0.0
+                    else:
+                        df_nuevo_cebe[col_req] = ""
 
+            df_nuevo_cebe["Obj_TN_Mes"] = pd.to_numeric(df_nuevo_cebe["Obj_TN_Mes"], errors="coerce").fillna(0.0)
+            df_nuevo_cebe["Obj_Gross_Mes"] = pd.to_numeric(df_nuevo_cebe["Obj_Gross_Mes"], errors="coerce").fillna(0.0)
+
+            cols_requeridas = ["Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"]
+            df_nuevo_cebe = df_nuevo_cebe[cols_requeridas].copy()
             df_nuevo_cebe = df_nuevo_cebe.dropna(subset=["Marca", "CEBE"])
             df_nuevo_cebe["Marca"] = df_nuevo_cebe["Marca"].astype(str).str.strip()
             df_nuevo_cebe["CEBE"] = df_nuevo_cebe["CEBE"].astype(str).str.strip()
 
-            st.write("Vista previa de Marcas y CEBE mapeados:", df_nuevo_cebe.head())
+            st.write("Vista previa de Marcas, CEBE y Objetivos mapeados:", df_nuevo_cebe.head())
 
-            if st.button("📥 Registrar y Guardar Marcas/CEBE en Base de Datos"):
+            if st.button("📥 Registrar y Guardar Marcas/CEBE y Objetivos en Base de Datos"):
                 if not sel_mes_m or str(sel_mes_m).strip() == "":
-                    st.error("⚠️ Debe especificar un Mes Operativo válido para registrar las marcas y CEBE.")
+                    st.error("⚠️ Debe especificar un Mes Operativo válido para registrar las marcas, CEBE y objetivos.")
                 else:
                     df_nuevo_cebe["Anio"] = str(sel_anio_m)
                     df_nuevo_cebe["Mes"] = str(sel_mes_m)
@@ -576,16 +716,62 @@ def render_parametros_view(filtros_globales: dict = None):
                         df_final_cebe = df_nuevo_cebe
 
                     db.guardar_dataframe_sql(df_final_cebe, "maestro_marcas_cebe", if_exists='replace')
-                    st.success(f"¡Maestro Marca/CEBE guardado exitosamente para el período {sel_mes_m}/{sel_anio_m}!")
+                    st.success(f"¡Maestro Marca/CEBE y Objetivos guardado exitosamente para el período {sel_mes_m}/{sel_anio_m}!")
                     st.rerun()
         except Exception as e:
             st.error(f"Error al procesar el archivo Excel de Marcas/CEBE: {e}")
 
-    titulo_tabla_m = f"📋 Marcas y CEBE registrados en Base de Datos ({'Base Completa - Sin Filtro' if not sel_mes_m or str(sel_mes_m).strip() == '' else f'Período {sel_mes_m}/{sel_anio_m}'})"
+    titulo_tabla_m = f"📋 Marcas, CEBE y Objetivos registrados en Base de Datos ({'Base Completa - Sin Filtro' if not sel_mes_m or str(sel_mes_m).strip() == '' else f'Período {sel_mes_m}/{sel_anio_m}'})"
     st.markdown(f"#### {titulo_tabla_m}")
 
     df_marcas_cebe_actual = obtener_maestro_marcas_cebe_sql(sel_anio_m, sel_mes_m)
     st.dataframe(df_marcas_cebe_actual, width="stretch")
+
+    st.divider()
+
+    # =========================================================================
+    # 4. SECCIÓN: IMPORTACIÓN DE OBJETIVOS CALIBRADOS (DEFINITIVOS)
+    # =========================================================================
+    st.markdown("### 📥 4. Importación de Objetivos Calibrados (Definitivos)")
+    st.markdown("Cargue aquí el archivo Excel exportado y ajustado desde el generador de objetivos para consolidar los objetivos oficiales del período operativo en la base de datos.")
+
+    col7, col8 = st.columns(2)
+    with col7:
+        sel_anio_obj = st.text_input("Año Operativo (Objetivos Calibrados)", value=anio_def, key="anio_objetivos_calib")
+    with col8:
+        sel_mes_obj = st.text_input("Mes Operativo (Objetivos Calibrados)", value=mes_def, key="mes_objetivos_calib")
+
+    archivo_objetivos_subido = st.file_uploader(
+        "📂 Subir Excel de Objetivos Calibrados (.xlsx)",
+        type=["xlsx", "xls"],
+        key="up_excel_objetivos_calibrados"
+    )
+
+    if archivo_objetivos_subido is not None:
+        try:
+            st.write("Vista previa del Excel calibrado:", pd.read_excel(archivo_objetivos_subido).head())
+            
+            if st.button("🚀 Procesar e Ingresar Objetivos Calibrados a la Base de Datos"):
+                if not sel_mes_obj or str(sel_mes_obj).strip() == "":
+                    st.error("⚠️ Debe especificar un Mes Operativo válido para versionar los objetivos.")
+                else:
+                    with st.spinner("Guardando y versionando objetivos en SQLite..."):
+                        exito, mensaje = db.guardar_objetivos_calibrados_desde_excel(archivo_objetivos_subido, sel_anio_obj, sel_mes_obj)
+                        if exito:
+                            st.success(mensaje)
+                            st.rerun()
+                        else:
+                            st.error(mensaje)
+        except Exception as e:
+            st.error(f"Error al procesar el archivo Excel calibrado: {e}")
+
+    titulo_tabla_obj = f"📋 Objetivos Calibrados registrados en Base de Datos ({'Base Completa - Sin Filtro' if not sel_mes_obj or str(sel_mes_obj).strip() == '' else f'Período {sel_mes_obj}/{sel_anio_obj}'})"
+    st.markdown(f"#### {titulo_tabla_obj}")
+
+    df_objetivos_actual = obtener_objetivos_vendedores_sql(sel_anio_obj, sel_mes_obj)
+    st.dataframe(df_objetivos_actual, width="stretch")
+
+    st.divider()
 
     # =========================================================================
     # BOTÓN DE DESCARGA GLOBAL A EXCEL
@@ -595,11 +781,12 @@ def render_parametros_view(filtros_globales: dict = None):
         df_maestro_actual.to_excel(writer, index=False, sheet_name='Maestro_Vendedores')
         df_segmentos_actual.to_excel(writer, index=False, sheet_name='Maestro_Segmentos')
         df_marcas_cebe_actual.to_excel(writer, index=False, sheet_name='Maestro_Marcas_CEBE')
+        df_objetivos_actual.to_excel(writer, index=False, sheet_name='Objetivos_Calibrados')
     
     st.download_button(
-        label="📥 Descargar Maestros Completos a Excel",
+        label="📥 Descargar Maestros y Objetivos Completos a Excel",
         data=output.getvalue(),
-        file_name="maestros_matinal.xlsx",
+        file_name="maestros_y_objetivos_matinal.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
@@ -706,33 +893,306 @@ def render_rep_batalla_cobertura():
 === MÓDULO: rep_ccc.py ===
 
 # modules/rep_ccc.py
+import io
 import streamlit as st
 import pandas as pd
-from io import BytesIO
+from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
+from modules import database as db
+from modules.rep_kilos import preparar_datos_ventas_segmento
 
-def render_rep_ccc(df_vta, df_universo):
-    st.subheader("📈 Avance de Condiciones de Crédito Comercial (CCC)")
+def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal):
+    hoja_ccc = hoja_ccc_param.copy() if hoja_ccc_param is not None and not hoja_ccc_param.empty else pd.DataFrame(columns=["Taxonomia", "OBJ_CCC"])
+    if not hoja_ccc.empty:
+        hoja_ccc.columns = hoja_ccc.columns.astype(str).str.strip()
+        rename_metas = {}
+        for c in hoja_ccc.columns:
+            if str(c).lower() in ["obj", "objetivo", "obj_ccc", "obj_pepsico", "kilos", "cantidad"]:
+                rename_metas[c] = "OBJ_CCC"
+            if str(c).lower() in ["taxonomia", "taxonomía", "categoria", "categoría"]:
+                rename_metas[c] = "Taxonomia"
+        hoja_ccc = hoja_ccc.rename(columns=rename_metas)
+        if "Taxonomia" in hoja_ccc.columns:
+            hoja_ccc["Taxonomia"] = hoja_ccc["Taxonomia"].astype(str).str.strip().str.upper()
+        if "OBJ_CCC" in hoja_ccc.columns:
+            hoja_ccc["OBJ_CCC"] = pd.to_numeric(hoja_ccc["OBJ_CCC"], errors="coerce").fillna(0.0)
+            hoja_ccc = hoja_ccc[["Taxonomia", "OBJ_CCC"]].drop_duplicates("Taxonomia")
+        else:
+            hoja_ccc["OBJ_CCC"] = 0.0
+    else:
+        hoja_ccc = pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"], "OBJ_CCC": [0.0, 0.0, 0.0, 0.0]})
+
+    try:
+        df_ausencias = db.cargar_tabla_sql("SELECT * FROM ausencias")
+    except Exception:
+        df_ausencias = pd.DataFrame()
+
+    df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
+    ventas_periodo = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else df_vta_prep.copy()
+
+    if not ventas_periodo.empty:
+        col_c_orig = next((c for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"] if c in ventas_periodo.columns), "Cliente")
+        ventas_periodo["Cliente"] = pd.to_numeric(ventas_periodo[col_c_orig], errors="coerce").astype("Int64")
+        col_kg = next((c for c in ["PesoKg", "CantBase", "Cantidad", "Kilos"] if c in ventas_periodo.columns), "PesoKg")
+        ventas_periodo["_peso_calc"] = pd.to_numeric(ventas_periodo[col_kg], errors="coerce").fillna(0.0)
+
+        clientes_g = ventas_periodo.groupby("Cliente", as_index=False).agg(Total_Peso=("_peso_calc", "sum"))
+        clientes_g["Es_CCC"] = clientes_g["Total_Peso"].gt(0)
+    else:
+        clientes_g = pd.DataFrame(columns=["Cliente", "Es_CCC"])
+
+    universo = df_universo.copy() if df_universo is not None else pd.DataFrame()
+    if not universo.empty:
+        cols_u = [str(c).strip().lower() for c in universo.columns]
+        col_prov_u = next((universo.columns[i] for i, c in enumerate(cols_u) if c in ["proveedor", "fabricante", "empresa"]), None)
+        if col_prov_u:
+            spu = universo[col_prov_u]
+            if isinstance(spu, pd.DataFrame): spu = spu.iloc[:, 0]
+            universo = universo[spu.astype(str).str.contains("pepsico", case=False, na=False)].copy()
+
+        col_sub_u = next((c for c in universo.columns if "subramo" in str(c).lower()), None)
+        if col_sub_u:
+            ssu = universo[col_sub_u]
+            if isinstance(ssu, pd.DataFrame): ssu = ssu.iloc[:, 0]
+            universo = universo[ssu.fillna("").astype(str).str.strip().str.casefold().ne("empleados")].copy()
+
+        pos_v_u = next((c for c in ["codven", "CodVendedor", "CodVend", "Vendedor", "cod_vendedor"] if c in universo.columns), None)
+        if pos_v_u:
+            sv_u = universo[pos_v_u]
+            if isinstance(sv_u, pd.DataFrame): sv_u = sv_u.iloc[:, 0]
+            universo["CodVendedor"] = pd.to_numeric(sv_u, errors="coerce").astype("Int64")
+
+        tax_col = next((c for c in universo.columns if "taxonomia" in str(c).lower() or "segmentoclientecodigo" in str(c).lower() or "clasificacion" in str(c).lower()), None)
+        if tax_col:
+            stx = universo[tax_col]
+            if isinstance(stx, pd.DataFrame): stx = stx.iloc[:, 0]
+            universo["Taxonomia"] = stx.fillna("").astype(str).str.strip().str.upper()
+        else:
+            universo["Taxonomia"] = "A"
+
+        cli_col_u = next((c for c in ["Codigo", "Cliente", "NroCliente", "CodCliente"] if c in universo.columns), universo.columns[0])
+        scli_u = universo[cli_col_u]
+        if isinstance(scli_u, pd.DataFrame): scli_u = scli_u.iloc[:, 0]
+        universo["Cliente"] = pd.to_numeric(scli_u, errors="coerce").astype("Int64")
+        universo = universo[universo["Taxonomia"].isin(["A", "B", "C", "D"])].dropna(subset=["Cliente", "CodVendedor"])
+
+    if not universo.empty and "CodVendedor" in universo.columns:
+        universo["CodVendedor"] = pd.to_numeric(universo["CodVendedor"], errors="coerce").astype("Int64")
+
+    if not universo.empty and not clientes_g.empty:
+        universo = universo.merge(clientes_g[["Cliente", "Es_CCC"]], on="Cliente", how="left")
+        universo["Es_CCC"] = universo["Es_CCC"].fillna(False)
+    else:
+        universo["Es_CCC"] = False
+
+    cartera_matriz = universo.groupby(["CodVendedor", "Taxonomia"], as_index=False).agg(
+        Cartera_Total=("Cliente", "count"),
+        CCC=("Es_CCC", lambda x: int(x.sum()))
+    ) if not universo.empty and "CodVendedor" in universo.columns else pd.DataFrame(columns=["CodVendedor", "Taxonomia", "Cartera_Total", "CCC"])
+
+    vendedores_df = pd.DataFrame()
+    col_c_v = next((c for c in ["Codigo_Vendedor", "CodVend", "CodVendedor"] if c in vendedores.columns), vendedores.columns[0])
+    col_n_v = next((c for c in ["Nombre_Vendedor", "Nombre"] if c in vendedores.columns), vendedores.columns[1])
+    col_s_v = next((c for c in ["Supervisor", "SUP"] if c in vendedores.columns), vendedores.columns[2] if len(vendedores.columns) > 2 else vendedores.columns[1])
+
+    sv_c = vendedores[col_c_v]
+    if isinstance(sv_c, pd.DataFrame): sv_c = sv_c.iloc[:, 0]
+    vendedores_df["CodVendedor"] = pd.to_numeric(sv_c, errors="coerce").astype("Int64")
+    sv_n = vendedores[col_n_v]
+    if isinstance(sv_n, pd.DataFrame): sv_n = sv_n.iloc[:, 0]
+    vendedores_df["Nombre"] = sv_n.fillna("").astype(str).str.strip()
+    sv_s = vendedores[col_s_v]
+    if isinstance(sv_s, pd.DataFrame): sv_s = sv_s.iloc[:, 0]
+    vendedores_df["SUP"] = sv_s.fillna("").astype(str).str.strip()
+    vendedores_df = vendedores_df.drop_duplicates("CodVendedor")
+
+    df_det_nc = universo.merge(vendedores_df, on="CodVendedor", how="left") if not universo.empty and not vendedores_df.empty else pd.DataFrame()
+
+    taxonomias_df = pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"]})
+    vendedores_df["_k"], taxonomias_df["_k"] = 1, 1
+    matriz_base = vendedores_df.merge(taxonomias_df, on="_k").drop(columns="_k")
+
+    reporte = matriz_base.merge(cartera_matriz, on=["CodVendedor", "Taxonomia"], how="left")
+    reporte[["Cartera_Total", "CCC"]] = reporte[["Cartera_Total", "CCC"]].fillna(0).astype("Int64")
+    reporte["NC"] = (reporte["Cartera_Total"] - reporte["CCC"]).clip(lower=0).astype("Int64")
+    reporte["Cobertura_Pct"] = (reporte["CCC"] / reporte["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0)
+    reporte["Total_Cartera_Cia"] = reporte.groupby("Taxonomia")["Cartera_Total"].transform("sum")
+    reporte["Participacion_Cartera"] = (reporte["Cartera_Total"] / reporte["Total_Cartera_Cia"].replace(0, pd.NA)).fillna(0.0)
+
+    reporte = reporte.merge(hoja_ccc, on="Taxonomia", how="left")
+    reporte["OBJ_CCC"] = reporte["OBJ_CCC"].fillna(0.0)
+    reporte["Objetivo_CCC"] = (reporte["Participacion_Cartera"] * reporte["OBJ_CCC"]).fillna(0.0).round(0).astype("Int64")
+    reporte["% Cumplimiento Objetivo"] = (reporte["CCC"] / reporte["Objetivo_CCC"].replace(0, pd.NA)).mul(100).fillna(0.0)
+
+    return reporte[["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Objetivo_CCC", "CCC", "NC", "Cobertura_Pct", "% Cumplimiento Objetivo"]], df_det_nc
+
+def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_param, filtros_globales=None):
+    anio_op = int(filtros_globales.get("anio", 2026)) if filtros_globales else 2026
+    mes_op = int(filtros_globales.get("mes", 9)) if filtros_globales else 9
+    dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026") if filtros_globales else "02/09/2026"
+    sup_filtro = str(filtros_globales.get("supervisor", "TODOS")).strip() if filtros_globales else "TODOS"
+
+    clave_cache_estado = f"_ccc_motor_cache_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
+    if clave_cache_estado not in st.session_state:
+        rep, det = _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal)
+        st.session_state[clave_cache_estado] = (rep, det)
+
+    rep_cached, det_cached = st.session_state[clave_cache_estado]
+    st.session_state["_ccc_df_clientes_detalle"] = det_cached
+    return rep_cached
+
+def dibujar_pestaña_ccc(reporte_ccc_base, supervisores_seleccionados=None):
+    st.subheader("📊 Avance de Condiciones de Crédito Comercial (CCC) por Taxonomía")
+    st.markdown("Analiza la cobertura de Clientes Con Compra (CCC) segmentada por taxonomía y vendedor sobre el universo de cartera.")
+
+    if reporte_ccc_base is None or reporte_ccc_base.empty:
+        st.info("No hay datos disponibles para procesar el Avance CCC.")
+        return
+
+    if supervisores_seleccionados and "SUP" in reporte_ccc_base.columns:
+        reporte_ccc_base = reporte_ccc_base[reporte_ccc_base["SUP"].astype(str).str.strip().isin([str(s).strip() for s in supervisores_seleccionados])].copy()
+
+    if reporte_ccc_base.empty:
+        st.info("No se encontraron registros para los supervisores seleccionados.")
+        return
+
+    v_dispo = sorted(reporte_ccc_base["Nombre"].dropna().astype(str).str.strip().unique().tolist())
+    tax_dispo = sorted(reporte_ccc_base["Taxonomia"].dropna().astype(str).str.strip().unique().tolist())
+
+    col_fc1, col_fc2 = st.columns(2)
+    with col_fc1:
+        v_selec = st.multiselect("Vendedor", options=v_dispo, default=v_dispo, key="ccc_ms_vendedor")
+    with col_fc2:
+        tax_selec = st.multiselect("Taxonomía", options=tax_dispo, default=tax_dispo, key="ccc_ms_taxonomia")
+
+    if not v_selec:
+        v_selec = v_dispo
+    if not tax_selec:
+        tax_selec = tax_dispo
+
+    reporte_ccc_filtrado = reporte_ccc_base[
+        reporte_ccc_base["Nombre"].astype(str).str.strip().isin(v_selec) &
+        reporte_ccc_base["Taxonomia"].astype(str).str.strip().isin(tax_selec)
+    ].copy()
+
+    total_ccc_val = reporte_ccc_filtrado["CCC"].sum()
+    tot_tax = reporte_ccc_filtrado.groupby("Taxonomia")["CCC"].sum()
+    cant_a = tot_tax.get("A", 0)
+    cant_b = tot_tax.get("B", 0)
+    cant_c = tot_tax.get("C", 0)
+    cant_d = tot_tax.get("D", 0)
+
+    col_mc1, col_mc2, col_mc3, col_mc4, col_mc5, col_mc6 = st.columns(6)
+    col_mc1.metric("📊 Total CCC", f"{total_ccc_val:,.0f}")
+    col_mc2.metric("🔴 Taxonomía A", f"{cant_a:,.0f}")
+    col_mc3.metric("🟠 Taxonomía B", f"{cant_b:,.0f}")
+    col_mc4.metric("🟡 Taxonomía C", f"{cant_c:,.0f}")
+    col_mc5.metric("🟢 Taxonomía D", f"{cant_d:,.0f}")
+    col_mc6.metric("📋 Registros", f"{len(reporte_ccc_filtrado):,}")
+
+    st.divider()
+
+    columnas_visuales_ccc = ["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Objetivo_CCC", "CCC", "NC", "Cobertura_Pct", "% Cumplimiento Objetivo"]
+    reporte_ccc_render = reporte_ccc_filtrado[columnas_visuales_ccc].copy()
+
+    if not reporte_ccc_render.empty:
+        gb = GridOptionsBuilder.from_dataframe(reporte_ccc_render)
+        gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
+        gb.configure_column("CodVendedor", headerName="Cód. Vend", width=100, valueFormatter="x != null ? Number(x).toFixed(0) : ''")
+        gb.configure_column("Nombre", headerName="Preventista", minWidth=180)
+        gb.configure_column("SUP", headerName="SUP", width=80)
+        gb.configure_column("Taxonomia", headerName="Tax", width=80)
+        gb.configure_column("Cartera_Total", headerName="Cartera Total", width=110)
+        gb.configure_column("Objetivo_CCC", headerName="Objetivo CCC", width=110)
+        gb.configure_column("CCC", headerName="CCC", width=90)
+        gb.configure_column("NC", headerName="NC", width=90)
+        gb.configure_column("Cobertura_Pct", headerName="Cob %", width=100, valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'")
+        gb.configure_column("% Cumplimiento Objetivo", headerName="% Cumplimiento", width=130, valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'")
+        gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
+
+        grid_options = gb.build()
+        AgGrid(
+            reporte_ccc_render,
+            gridOptions=grid_options,
+            height=420,
+            width="100%",
+            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+            update_mode=GridUpdateMode.MODEL_CHANGED,
+            theme="streamlit",
+            fit_columns_on_grid_load=False
+        )
+    else:
+        st.info("No se encontraron registros de CCC con los filtros seleccionados.")
+
+    st.divider()
+
+    col_dl1, col_dl2 = st.columns(2)
     
-    data = {
-        "Taxonomía": ["Clase A", "Clase B", "Clase C", "Clase D"],
-        "Clientes_Totales": [120, 250, 400, 150],
-        "Clientes_Con_CCC": [110, 200, 300, 90],
-    }
-    df = pd.DataFrame(data)
-    df["Cobertura_CCC_%"] = (df["Clientes_Con_CCC"] / df["Clientes_Totales"] * 100).round(2)
+    with col_dl1:
+        buffer_ccc = io.BytesIO()
+        with pd.ExcelWriter(buffer_ccc, engine="openpyxl") as writer:
+            reporte_ccc_render.to_excel(writer, index=False, sheet_name="Avance_CCC_Taxonomia")
+        buffer_ccc.seek(0)
+        st.download_button(
+            label="📥 Descargar Avance CCC a Excel",
+            data=buffer_ccc,
+            file_name="Avance_CCC_Taxonomia.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="ccc_btn_dl"
+        )
 
-    st.dataframe(df, width="stretch")
+    with col_dl2:
+        df_clientes_det = st.session_state.get("_ccc_df_clientes_detalle", pd.DataFrame())
+        if not df_clientes_det.empty:
+            df_nc = df_clientes_det[df_clientes_det["Es_CCC"] == False].copy()
+            if supervisores_seleccionados and "SUP" in df_nc.columns:
+                df_nc = df_nc[df_nc["SUP"].astype(str).str.strip().isin([str(s).strip() for s in supervisores_seleccionados])]
+            if v_selec and "Nombre" in df_nc.columns:
+                df_nc = df_nc[df_nc["Nombre"].astype(str).str.strip().isin(v_selec)]
+            if tax_selec and "Taxonomia" in df_nc.columns:
+                df_nc = df_nc[df_nc["Taxonomia"].astype(str).str.strip().isin(tax_selec)]
+            
+            cols_excluir = ["_k", "Es_CCC"]
+            cols_nc_final = [c for c in df_nc.columns if c not in cols_excluir]
+            df_nc_render = df_nc[cols_nc_final].copy()
+        else:
+            df_nc_render = pd.DataFrame()
 
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Avance_CCC')
+        buffer_nc = io.BytesIO()
+        with pd.ExcelWriter(buffer_nc, engine="openpyxl") as writer:
+            df_nc_render.to_excel(writer, index=False, sheet_name="Clientes_No_Compradores_NC")
+        buffer_nc.seek(0)
+        st.download_button(
+            label="📥 Descargar Clientes NC a Excel",
+            data=buffer_nc,
+            file_name="Clientes_No_Compradores_NC.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="nc_btn_dl"
+        )
+
+def render_rep_ccc(df_vta, df_universo, filtros_globales=None):
+    sup_filtro = "TODOS"
+    if filtros_globales and isinstance(filtros_globales, dict):
+        sup_filtro = str(filtros_globales.get("supervisor", "TODOS")).strip()
+
+    try:
+        maestro_v = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
+    except Exception:
+        maestro_v = pd.DataFrame()
+
+    if maestro_v.empty:
+        col_v_cand = next((c for c in ["CodVendedor", "Cod_Vendedor", "CodVend", "Vendedor", "codven"] if c in df_vta.columns), None)
+        v_uniq = df_vta[col_v_cand].dropna().unique() if col_v_cand else [1]
+        maestro_v = pd.DataFrame({"Codigo_Vendedor": v_uniq, "Nombre_Vendedor": "VENDEDOR GENERAL", "Supervisor": "GENERAL"})
+
+    try:
+        maestro_ccc_param = db.cargar_tabla_sql("SELECT * FROM maestro_ccc")
+    except Exception:
+        maestro_ccc_param = pd.DataFrame(columns=["Taxonomia", "OBJ_CCC"])
+
+    reporte_base = generar_reporte_ccc_taxonomia(df_vta, df_universo, maestro_v, maestro_ccc_param, filtros_globales)
     
-    st.download_button(
-        label="📥 Descargar Reporte CCC a Excel",
-        data=output.getvalue(),
-        file_name="avance_ccc.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    sups_sel = [sup_filtro] if sup_filtro != "TODOS" else None
+    dibujar_pestaña_ccc(reporte_base, sups_sel)
 
 ==================================================
 
@@ -1187,11 +1647,8 @@ def parsear_fecha_robusta(serie):
         serie = pd.Series([serie])
     s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
     
-    # 1. Probar formato ISO YYYY-MM-DD
     dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    # 2. Probar formato latino DD/MM/YYYY
     dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-    # 3. Genérico sin dayfirst=True para evitar UserWarning con cadenas ISO
     dt_gen = pd.to_datetime(s, errors="coerce")
     
     return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
@@ -1243,6 +1700,9 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
         df[col_vend_tit] = 0
 
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
+
+    col_m = next((c for c in ["Marca", "MARCA", "marca"] if c in df.columns), None)
+    df["Marca"] = df[col_m].fillna("").astype(str).str.strip().str.upper() if col_m else "SIN MARCA"
 
     col_rent = "SegmentoRentabilidad" if "SegmentoRentabilidad" in df.columns else None
     col_rubro = "Rubro" if "Rubro" in df.columns else None
@@ -1327,7 +1787,7 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
 
     return df
 
-def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, maestro_seg, dia_venta, anio_operativo, mes_operativo, sup_filtro):
+def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, maestro_seg, maestro_cebe, dia_venta, anio_operativo, mes_operativo, sup_filtro):
     vendedores_rep = pd.DataFrame()
     col_cod = "Codigo_Vendedor" if "Codigo_Vendedor" in maestro_vend.columns else maestro_vend.columns[0]
     col_nom = "Nombre_Vendedor" if "Nombre_Vendedor" in maestro_vend.columns else maestro_vend.columns[1]
@@ -1413,7 +1873,6 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte = matriz.merge(kilos_pivot[["CodVend", "SEGMENTO", "Arrastre", "Actual"]], on=["CodVend", "SEGMENTO"], how="left")
     reporte[["Arrastre", "Actual"]] = reporte[["Arrastre", "Actual"]].fillna(0.0)
 
-    # Procesamiento de Rutas
     rutas = df_rutas.copy() if df_rutas is not None and not df_rutas.empty else pd.DataFrame()
     
     if not rutas.empty:
@@ -1421,7 +1880,6 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
         col_vend_r = next((c for c in ["codven", "CodVen", "CodVendedor", "Vendedor", "Cod_Vendedor", "CODVEN"] if c in rutas.columns), rutas.columns[1])
 
         s_fechas = rutas[col_fecha_r].astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-        
         dt_directo = pd.to_datetime(s_fechas, format="%Y-%m-%d", errors="coerce")
         dt_invertido = pd.to_datetime(s_fechas, format="%Y-%d-%m", errors="coerce")
         
@@ -1463,40 +1921,51 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte["Rutas"] = reporte["Rutas"].fillna(0).astype("Int64")
     reporte["Días Restantes"] = (reporte["Rutas"] - reporte["Días Pasados"]).clip(lower=0).astype("Int64")
 
-    mes_ant = 12 if mes_operativo == 1 else mes_operativo - 1
-    anio_ant = anio_operativo - 1 if mes_operativo == 1 else anio_operativo
+    df_obj_db = db.cargar_tabla_sql(
+        f"SELECT CodVendedor, SEGMENTO, Obj_Sugerido_Kg FROM objetivos_vendedores WHERE Anio = {int(anio_operativo)} AND Mes = {int(mes_operativo)}"
+    )
 
-    historial = df_vta_prep[
-        df_vta_prep["AñoCarga"].eq(anio_ant) & 
-        df_vta_prep["MesCarga"].eq(mes_ant) & 
-        df_vta_prep["SEGMENTO"].notna()
-    ].copy()
-    
-    if not historial.empty:
-        historial["CodVend"] = pd.to_numeric(historial["CodVendedor"], errors="coerce").astype("Int64")
-        kilos_hist = historial.groupby(["CodVend", "SEGMENTO"])["PesoKg"].sum().reset_index().rename(columns={"PesoKg": "Kilos Historial"})
-        kilos_hist["Kilos Totales Segmento"] = kilos_hist.groupby("SEGMENTO")["Kilos Historial"].transform("sum")
-        kilos_hist["Participación"] = (kilos_hist["Kilos Historial"] / kilos_hist["Kilos Totales Segmento"].replace(0, pd.NA)).fillna(0.0)
+    if not df_obj_db.empty:
+        df_obj_db["CodVend"] = pd.to_numeric(df_obj_db["CodVendedor"], errors="coerce").astype("Int64")
+        df_obj_db["SEGMENTO"] = df_obj_db["SEGMENTO"].fillna("").astype(str).str.strip()
+        df_obj_db["Obj_Sugerido_Kg"] = pd.to_numeric(df_obj_db["Obj_Sugerido_Kg"], errors="coerce").fillna(0.0)
+        
+        objs_agrup = df_obj_db.groupby(["CodVend", "SEGMENTO"], as_index=False)["Obj_Sugerido_Kg"].sum()
+        objs_agrup = objs_agrup.rename(columns={"Obj_Sugerido_Kg": "Objetivo Mes Corriente"})
+        reporte = reporte.merge(objs_agrup, on=["CodVend", "SEGMENTO"], how="left")
     else:
-        kilos_hist = pd.DataFrame(columns=["CodVend", "SEGMENTO", "Participación"])
+        mes_ant = 12 if mes_operativo == 1 else mes_operativo - 1
+        anio_ant = anio_operativo - 1 if mes_operativo == 1 else anio_operativo
 
-    if maestro_seg is not None and not maestro_seg.empty and "OBJ" in maestro_seg.columns and "Porc_Requerido" in maestro_seg.columns:
-        objs = maestro_seg[["Segmento", "OBJ", "Porc_Requerido"]].copy().rename(columns={"Segmento": "SEGMENTO"})
-        objs["OBJ"] = pd.to_numeric(objs["OBJ"], errors="coerce").fillna(0.0)
-        objs["Porc_Requerido"] = pd.to_numeric(objs["Porc_Requerido"], errors="coerce").fillna(0.0)
-    else:
-        objs = pd.DataFrame({"SEGMENTO": orden_segmentos_maestro, "OBJ": 0.0, "Porc_Requerido": 1.0})
+        historial = df_vta_prep[
+            (df_vta_prep["AñoEntrega"].eq(anio_ant)) & 
+            (df_vta_prep["MesEntrega"].eq(mes_ant)) & 
+            df_vta_prep["SEGMENTO"].notna()
+        ].copy()
 
-    if not kilos_hist.empty:
-        kilos_hist = kilos_hist.merge(objs, on="SEGMENTO", how="left")
-        kilos_hist["Objetivo Mes Corriente"] = kilos_hist["Participación"] * kilos_hist["OBJ"] * kilos_hist["Porc_Requerido"]
-        reporte = reporte.merge(kilos_hist[["CodVend", "SEGMENTO", "Objetivo Mes Corriente"]], on=["CodVend", "SEGMENTO"], how="left")
-    else:
-        reporte["Objetivo Mes Corriente"] = 0.0
+        if not historial.empty and maestro_cebe is not None and not maestro_cebe.empty and "Obj_Mes" in maestro_cebe.columns:
+            historial["CodVend"] = pd.to_numeric(historial["CodVendedor"], errors="coerce").astype("Int64")
+            col_m_cebe = next((c for c in maestro_cebe.columns if str(c).strip().lower() in ["marca", "marcaupper"]), maestro_cebe.columns[0])
+            maestro_cebe_clean = maestro_cebe.copy()
+            maestro_cebe_clean["Marca_Key"] = maestro_cebe_clean[col_m_cebe].fillna("").astype(str).str.strip().str.upper()
+            maestro_cebe_clean["Obj_Mes_Val"] = pd.to_numeric(maestro_cebe_clean["Obj_Mes"], errors="coerce").fillna(0.0)
+            
+            mapa_obj_marca = maestro_cebe_clean.groupby("Marca_Key")["Obj_Mes_Val"].sum().to_dict()
+            
+            kilos_hist = historial.groupby(["CodVend", "SEGMENTO", "Marca"])["PesoKg"].sum().reset_index().rename(columns={"PesoKg": "Kilos_Hist"})
+            kilos_hist["Total_Kilos_Marca_Seg"] = kilos_hist.groupby(["SEGMENTO", "Marca"])["Kilos_Hist"].transform("sum")
+            kilos_hist["Part_Vendedor"] = (kilos_hist["Kilos_Hist"] / kilos_hist["Total_Kilos_Marca_Seg"].replace(0, pd.NA)).fillna(0.0)
+            
+            kilos_hist["Obj_Marca_Oficial"] = kilos_hist["Marca"].map(mapa_obj_marca).fillna(0.0)
+            kilos_hist["Obj_Asignado"] = kilos_hist["Part_Vendedor"] * kilos_hist["Obj_Marca_Oficial"] * 1000.0
+            
+            objs_oficiales = kilos_hist.groupby(["CodVend", "SEGMENTO"])["Obj_Asignado"].sum().reset_index().rename(columns={"Obj_Asignado": "Objetivo Mes Corriente"})
+            reporte = reporte.merge(objs_oficiales, on=["CodVend", "SEGMENTO"], how="left")
+        else:
+            reporte["Objetivo Mes Corriente"] = 0.0
 
     reporte["Objetivo Mes Corriente"] = reporte["Objetivo Mes Corriente"].fillna(0.0)
 
-    # Reemplazos discriminados
     reemplazos = df_vtas_op[df_vtas_op["CodVend_Op"].ne(df_vtas_op["CodVendedor"])][["CodVendedor", "CodVend_Op", "SEGMENTO", "Periodo", "PesoKg"]].copy()
     
     if not reemplazos.empty:
@@ -1504,7 +1973,7 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
         mov_titular["Ajuste_Valor"] = -mov_titular.pop("PesoKg")
         
         mov_reemp = reemplazos[["CodVend_Op", "SEGMENTO", "Periodo", "PesoKg"]].rename(columns={"CodVend_Op": "CodVend"})
-        mov_reemp["Ajuste_Valor"] = mov_reemp.pop("PesoKg")
+        mov_reemp["Ajuste_Valor"] = mov_reemp.pop("PesoKg") if "PesoKg" in mov_reemp.columns else 0.0
 
         ajustes_totales = pd.concat([mov_titular, mov_reemp], ignore_index=True)
         ajustes_totales["CodVend"] = pd.to_numeric(ajustes_totales["CodVend"], errors="coerce").astype("Int64")
@@ -1528,42 +1997,6 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
 
     reporte = reporte.rename(columns={"CodVend": "CodVendedor"})
     return reporte
-
-def crear_filtro_excel(label, opciones, key_prefix):
-    all_key = f"{key_prefix}_todos"
-    
-    if all_key not in st.session_state:
-        st.session_state[all_key] = True
-
-    for op in opciones:
-        chk_key = f"{key_prefix}_{op}"
-        if chk_key not in st.session_state:
-            st.session_state[chk_key] = True
-
-    val_todos_actual = st.session_state.get(all_key, True)
-    aux_cambio_key = f"{key_prefix}_aux_prev_todos"
-    if aux_cambio_key not in st.session_state:
-        st.session_state[aux_cambio_key] = val_todos_actual
-
-    if st.session_state[aux_cambio_key] != val_todos_actual:
-        st.session_state[aux_cambio_key] = val_todos_actual
-        for op in opciones:
-            st.session_state[f"{key_prefix}_{op}"] = val_todos_actual
-
-    with st.popover(f"{label}: ...", width="stretch"):
-        st.checkbox("TODOS", key=all_key)
-        st.divider()
-        
-        for op in opciones:
-            st.checkbox(str(op), key=f"{key_prefix}_{op}")
-
-    todos_estan_marcados = all(st.session_state.get(f"{key_prefix}_{op}", False) for op in opciones) if opciones else False
-    if todos_estan_marcados and opciones and not st.session_state.get(all_key, False):
-        st.session_state[all_key] = True
-        st.session_state[aux_cambio_key] = True
-
-    seleccionados = [op for op in opciones if st.session_state.get(f"{key_prefix}_{op}", False)]
-    return seleccionados
 
 def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
     st.subheader("📊 Avance de Kilos por Segmento")
@@ -1602,21 +2035,30 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
     try:
         maestro_s = db.cargar_tabla_sql("SELECT * FROM maestro_segmentos ORDER BY rowid ASC")
         if not maestro_s.empty and "Mes" in maestro_s.columns:
-            ms_per = maestro_s[(maestro_s["Mes"].astype(str) == str(mes_op)) & (maestro_s["Anio"].astype(str) == str(anio_op))]
+            ms_per = maestro_s[(maestro_s["Mes"].astype(str) == str(mes_op)) & (ms_per["Anio"].astype(str) == str(anio_op))]
             if not ms_per.empty:
                 maestro_s = ms_per
     except Exception:
         maestro_s = pd.DataFrame()
 
+    try:
+        maestro_cebe = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
+        if not maestro_cebe.empty and "Mes" in maestro_cebe.columns:
+            mc_per = maestro_cebe[(maestro_cebe["Mes"].astype(str) == str(mes_op)) & (mc_per["Anio"].astype(str) == str(anio_op))]
+            if not mc_per.empty:
+                maestro_cebe = mc_per
+    except Exception:
+        maestro_cebe = pd.DataFrame()
+
     if maestro_v.empty:
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en SQLite. Verifique en la solapa de Parámetros.")
         return
 
-    cache_key_rep = f"_cache_kilos_v20_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
+    cache_key_rep = f"_cache_kilos_v27_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
     if cache_key_rep not in st.session_state:
-        with st.spinner("Procesando segmentación, ausencias y volúmenes de kilos..."):
+        with st.spinner("Procesando segmentación, ausencias, objetivos oficiales y volúmenes de kilos..."):
             df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
-            reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, dia_venta, anio_op, mes_op, sup_filtro)
+            reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro)
             st.session_state[cache_key_rep] = reporte_avance
     else:
         reporte_avance = st.session_state[cache_key_rep]
@@ -1645,14 +2087,11 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         if s not in s_dispo:
             s_dispo.append(s)
 
-    key_pref_v = f"kilos_v_{anio_op}_{mes_op}_{sup_filtro}"
-    key_pref_s = f"kilos_s_{anio_op}_{mes_op}_{sup_filtro}"
-
     col_f1, col_f2 = st.columns(2)
     with col_f1:
-        v_selec = crear_filtro_excel("Vendedor", v_dispo, key_pref_v)
+        v_selec = st.multiselect("Vendedor", options=v_dispo, default=v_dispo, key=f"kilos_ms_vendedor_{anio_op}_{mes_op}_{sup_filtro}")
     with col_f2:
-        s_selec = crear_filtro_excel("Segmento", s_dispo, key_pref_s)
+        s_selec = st.multiselect("Segmento", options=s_dispo, default=s_dispo, key=f"kilos_ms_segmento_{anio_op}_{mes_op}_{sup_filtro}")
 
     rep_filtrado = reporte_vendedores_puro[
         reporte_vendedores_puro["Nombre"].astype(str).str.strip().isin(v_selec) & 
@@ -1709,19 +2148,16 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         total_neto_operativo = float(rep_detalle["OPERATIVO"].sum())
         kilos_deposito = 0.0
 
-    total_distribuidora = total_neto_operativo + kilos_deposito
+    total_objetivo_mes = float(rep_detalle["Objetivo Mes Corriente"].sum())
+    pct_avance = (total_neto_operativo / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
 
-    col_dist_izq, col_dist_vacia2, col_dist_vacia3, col_dist_vacia4, col_dist_vacia5 = st.columns(5)
-    with col_dist_izq:
-        with st.container(border=True):
-            st.metric(label="🚚 Total Kilos Distribuidora", value=f"{total_distribuidora:,.1f} kg")
-
-    mcol1, mcol2, mcol3, mcol4, mcol5 = st.columns(5)
-    mcol1.metric(label="📊 Total Neto Operativo", value=f"{total_neto_operativo:,.1f} kg")
-    mcol2.metric(label="📦 Total Arrastre", value=f"{total_arrastre:,.1f} kg")
-    mcol3.metric(label="🚚 Total Actual", value=f"{total_actual:,.1f} kg")
-    mcol4.metric(label="🔄 Balance Reemplazo", value=f"{balance_reemplazo:,.1f} kg")
-    mcol5.metric(label="🏢 Depósito", value=f"{kilos_deposito:,.1f} kg")
+    mcol1, mcol2, mcol3, mcol4, mcol5, mcol6 = st.columns(6)
+    mcol1.metric(label="🎯 Objetivo Mes", value=f"{total_objetivo_mes:,.1f} kg")
+    mcol2.metric(label="📊 Neto Operativo", value=f"{total_neto_operativo:,.1f} kg")
+    mcol3.metric(label="📈 % Avance", value=f"{pct_avance:,.2f}%")
+    mcol4.metric(label="📦 Arrastre", value=f"{total_arrastre:,.1f} kg")
+    mcol5.metric(label="🚚 Actual", value=f"{total_actual:,.1f} kg")
+    mcol6.metric(label="🏢 Depósito", value=f"{kilos_deposito:,.1f} kg")
     st.divider()
 
     fecha_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
@@ -1858,61 +2294,24 @@ def parsear_fecha_robusta(serie):
     
     return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
 
-def crear_filtro_excel(label, opciones, key_prefix):
-    """Crea un menú desplegable con checkboxes y opción 'TODOS' sincronizada."""
-    all_key = f"{key_prefix}_todos"
-    
-    if all_key not in st.session_state:
-        st.session_state[all_key] = True
-
-    for op in opciones:
-        chk_key = f"{key_prefix}_{op}"
-        if chk_key not in st.session_state:
-            st.session_state[chk_key] = True
-
-    val_todos_actual = st.session_state.get(all_key, True)
-    aux_cambio_key = f"{key_prefix}_aux_prev_todos"
-    if aux_cambio_key not in st.session_state:
-        st.session_state[aux_cambio_key] = val_todos_actual
-
-    if st.session_state[aux_cambio_key] != val_todos_actual:
-        st.session_state[aux_cambio_key] = val_todos_actual
-        for op in opciones:
-            st.session_state[f"{key_prefix}_{op}"] = val_todos_actual
-
-    with st.popover(f"{label}: ...", width="stretch"):
-        st.checkbox("TODOS", key=all_key)
-        st.divider()
-        for op in opciones:
-            st.checkbox(str(op), key=f"{key_prefix}_{op}")
-
-    todos_estan_marcados = all(st.session_state.get(f"{key_prefix}_{op}", False) for op in opciones) if opciones else False
-    if todos_estan_marcados and opciones and not st.session_state.get(all_key, False):
-        st.session_state[all_key] = True
-        st.session_state[aux_cambio_key] = True
-
-    seleccionados = [op for op in opciones if st.session_state.get(f"{key_prefix}_{op}", False)]
-    return seleccionados
-
-def generar_datos_composicion_mes_anterior(df_vta, maestro_v, maestro_cebe, anio_operativo, mes_operativo):
+def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_operativo, mes_operativo):
     """
-    Filtra las ventas por FechaEntrega del mes anterior completo y compone:
-    Vendedor -> Marca -> CEBE -> SEGMENTO -> Kilos
-    Garantiza la presencia de todos los vendedores del padrón.
+    Calcula la distribución proporcional del objetivo macro de la compañía en Kilos 
+    tomando los valores directamente en Kilos y basándose en la participación histórica global por Marca.
     """
+    if maestro_v is None or maestro_v.empty:
+        return pd.DataFrame()
+
     col_cod_v = "Codigo_Vendedor" if "Codigo_Vendedor" in maestro_v.columns else maestro_v.columns[0]
     col_nom_v = "Nombre_Vendedor" if "Nombre_Vendedor" in maestro_v.columns else maestro_v.columns[1]
-    col_sup_v = "Supervisor" if "Supervisor" in maestro_v.columns else maestro_v.columns[2]
+    col_sup_v = "Supervisor" if "Supervisor" in maestro_v.columns else (maestro_v.columns[2] if len(maestro_v.columns) > 2 else maestro_v.columns[0])
 
     df_padron = maestro_v[[col_cod_v, col_nom_v, col_sup_v]].copy()
-    df_padron = df_padron.rename(columns={
-        col_cod_v: "CodVendedor",
-        col_nom_v: "Nombre",
-        col_sup_v: "Supervisor"
-    })
+    df_padron.columns = ["CodVendedor", "Nombre", "Supervisor"]
+    
     df_padron["CodVendedor"] = pd.to_numeric(df_padron["CodVendedor"], errors="coerce").astype("Int64")
     df_padron["Nombre"] = df_padron["Nombre"].fillna("").astype(str).str.strip()
-    df_padron["Supervisor"] = df_padron["Supervisor"].fillna("").astype(str).str.strip()
+    df_padron["Supervisor"] = df_padron["Supervisor"].fillna("SIN SUPERVISOR").astype(str).str.strip()
     df_padron = df_padron.dropna(subset=["CodVendedor"]).drop_duplicates(subset=["CodVendedor"])
 
     if mes_operativo == 1:
@@ -1922,33 +2321,60 @@ def generar_datos_composicion_mes_anterior(df_vta, maestro_v, maestro_cebe, anio
         mes_ant = mes_operativo - 1
         anio_ant = anio_operativo
 
+    # 1. Extraer objetivos macro del mes actual (maestro_cebe_act) directamente en Kilos
+    obj_act_map = {}
+    cebe_map = {}
+    if maestro_cebe_act is not None and not maestro_cebe_act.empty:
+        cm_act = next((c for c in maestro_cebe_act.columns if "marca" in str(c).strip().lower()), maestro_cebe_act.columns[0])
+        cc_act = next((c for c in maestro_cebe_act.columns if "cebe" in str(c).strip().lower()), maestro_cebe_act.columns[1])
+        co_act = next((c for c in maestro_cebe_act.columns if "obj_tn" in str(c).strip().lower() or "tn" in str(c).strip().lower() or "obj" in str(c).strip().lower()), None)
+        
+        for _, r in maestro_cebe_act.iterrows():
+            m = str(r.get(cm_act, "")).strip().upper()
+            c = str(r.get(cc_act, "")).strip()
+            val_kg = pd.to_numeric(r.get(co_act, 0.0), errors="coerce") if co_act else 0.0
+            if m and m != "NAN":
+                obj_act_map[m] = val_kg if pd.notna(val_kg) else 0.0
+                cebe_map[m] = c if c and c != "NAN" else "GLOBAL"
+
+    # 2. Extraer objetivos macro del mes anterior (maestro_cebe_ant) directamente en Kilos
+    obj_ant_map = {}
+    if maestro_cebe_ant is not None and not maestro_cebe_ant.empty:
+        cm_ant = next((c for c in maestro_cebe_ant.columns if "marca" in str(c).strip().lower()), maestro_cebe_ant.columns[0])
+        co_ant = next((c for c in maestro_cebe_ant.columns if "obj_tn" in str(c).strip().lower() or "tn" in str(c).strip().lower() or "obj" in str(c).strip().lower()), None)
+        
+        for _, r in maestro_cebe_ant.iterrows():
+            m = str(r.get(cm_ant, "")).strip().upper()
+            val_kg = pd.to_numeric(r.get(co_ant, 0.0), errors="coerce") if co_ant else 0.0
+            if m and m != "NAN":
+                obj_ant_map[m] = val_kg if pd.notna(val_kg) else 0.0
+
+    segmentos_orden_lista = []
+    segmentos_validos = set()
+    if maestro_seg is not None and not maestro_seg.empty:
+        cs_seg = next((c for c in maestro_seg.columns if "segmento" in str(c).strip().lower()), maestro_seg.columns[0])
+        for _, r in maestro_seg.iterrows():
+            seg = str(r.get(cs_seg, "")).strip()
+            if seg and seg.lower() != "nan":
+                segmentos_validos.add(seg)
+                if seg not in segmentos_orden_lista:
+                    segmentos_orden_lista.append(seg)
+
+    if not segmentos_validos:
+        segmentos_validos = {"GOLD", "SILVER"}
+        segmentos_orden_lista = ["GOLD", "SILVER"]
+
     if df_vta is None or df_vta.empty:
-        df_padron["Marca"] = "-"
-        df_padron["CEBE"] = "-"
-        df_padron["SEGMENTO"] = "-"
-        df_padron["Kilos"] = 0.0
-        return df_padron[["CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Kilos"]]
+        return pd.DataFrame()
 
     vta = df_vta.copy()
     
     if "TipoDeVenta" in vta.columns:
-        tipos_excluidos = [
-            "Comodato Devolución", 
-            "Comodato Ficticio", 
-            "Comodato Ficticio Devolución", 
-            "Comodato Préstamo"
-        ]
+        tipos_excluidos = ["Comodato Devolución", "Comodato Ficticio", "Comodato Ficticio Devolución", "Comodato Préstamo"]
         vta = vta[~vta["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)]
 
     if "Proveedor" in vta.columns:
-        vta = vta[
-            vta["Proveedor"]
-            .fillna("")
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .str.contains("PEPSICO", na=False)
-        ]
+        vta = vta[vta["Proveedor"].fillna("").astype(str).str.strip().str.upper().str.contains("PEPSICO", na=False)]
 
     if "Subramo" in vta.columns:
         subramo_clean = vta["Subramo"].fillna("").astype(str).str.strip().str.upper()
@@ -1965,32 +2391,13 @@ def generar_datos_composicion_mes_anterior(df_vta, maestro_v, maestro_cebe, anio
     ].copy()
 
     if vta_mes_ant.empty:
-        df_padron["Marca"] = "-"
-        df_padron["CEBE"] = "-"
-        df_padron["SEGMENTO"] = "-"
-        df_padron["Kilos"] = 0.0
-        return df_padron[["CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Kilos"]]
+        return pd.DataFrame()
 
     col_vend = next((c for c in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if c in vta_mes_ant.columns), None)
-    if col_vend:
-        vta_mes_ant["CodVendedor"] = pd.to_numeric(vta_mes_ant[col_vend], errors="coerce").astype("Int64")
-    else:
-        vta_mes_ant["CodVendedor"] = pd.NA
+    vta_mes_ant["CodVendedor"] = pd.to_numeric(vta_mes_ant[col_vend], errors="coerce").astype("Int64") if col_vend else pd.NA
 
     col_m = next((c for c in ["Marca", "MARCA", "marca"] if c in vta_mes_ant.columns), None)
-    vta_mes_ant["Marca"] = vta_mes_ant[col_m].fillna("").astype(str).str.strip().str.upper() if col_m else "SIN MARCA"
-
-    mapa_cebe = {}
-    if maestro_cebe is not None and not maestro_cebe.empty:
-        col_m_cebe = "Marca" if "Marca" in maestro_cebe.columns else maestro_cebe.columns[0]
-        col_c_cebe = "CEBE" if "CEBE" in maestro_cebe.columns else maestro_cebe.columns[1]
-        for _, r in maestro_cebe.iterrows():
-            m_key = str(r.get(col_m_cebe, "")).strip().upper()
-            c_val = str(r.get(col_c_cebe, "")).strip()
-            if m_key:
-                mapa_cebe[m_key] = c_val
-
-    vta_mes_ant["CEBE"] = vta_mes_ant["Marca"].map(mapa_cebe).fillna("SIN CEBE")
+    vta_mes_ant["Marca"] = vta_mes_ant[col_m].fillna("").astype(str).str.strip().str.upper() if col_m else ""
 
     col_rent = "SegmentoRentabilidad" if "SegmentoRentabilidad" in vta_mes_ant.columns else None
     col_rubro = "Rubro" if "Rubro" in vta_mes_ant.columns else None
@@ -1999,35 +2406,65 @@ def generar_datos_composicion_mes_anterior(df_vta, maestro_v, maestro_cebe, anio
         sr = str(row.get(col_rent, "")).strip().title() if col_rent else ""
         rubro = str(row.get(col_rubro, "")).strip() if col_rubro else ""
         if sr in ["Platinum", "Gold"]:
-            return f"GOLD {rubro}".strip()
+            seg = f"GOLD {rubro}".strip()
         elif sr in ["Silver", "Bronze"]:
-            return f"SILVER {rubro}".strip()
-        return "SIN SEGMENTO"
+            seg = f"SILVER {rubro}".strip()
+        else:
+            seg = sr
+        return seg if seg in segmentos_validos else None
 
     vta_mes_ant["SEGMENTO"] = vta_mes_ant.apply(resolver_segmento, axis=1)
 
     col_kg = next((c for c in ["PesoKg", "PESOKG", "Kilos", "KILOS"] if c in vta_mes_ant.columns), None)
     vta_mes_ant["Kilos"] = pd.to_numeric(vta_mes_ant[col_kg], errors="coerce").fillna(0.0) if col_kg else 0.0
 
+    marcas_validas = set(obj_act_map.keys()) | set(obj_ant_map.keys())
+
+    vta_mes_ant = vta_mes_ant[
+        vta_mes_ant["Marca"].isin(marcas_validas) & 
+        vta_mes_ant["SEGMENTO"].isin(segmentos_validos) &
+        vta_mes_ant["CodVendedor"].notna()
+    ].copy()
+
+    if vta_mes_ant.empty:
+        return pd.DataFrame()
+
     vta_agrup = vta_mes_ant.groupby(
-        ["CodVendedor", "Marca", "CEBE", "SEGMENTO"], 
+        ["CodVendedor", "Marca", "SEGMENTO"], 
         as_index=False
-    )["Kilos"].sum()
+    )["Kilos"].sum().rename(columns={"Kilos": "Kilos_Mes_Anterior"})
 
-    df_reporte = df_padron.merge(vta_agrup, on="CodVendedor", how="left")
+    df_reporte = df_padron.merge(vta_agrup, on="CodVendedor", how="inner")
+    df_reporte["CEBE"] = df_reporte["Marca"].map(cebe_map).fillna("GLOBAL")
+    df_reporte["Obj_Macro_Marca_Kg"] = df_reporte["Marca"].map(obj_act_map).fillna(0.0)
 
-    df_reporte["Marca"] = df_reporte["Marca"].fillna("-")
-    df_reporte["CEBE"] = df_reporte["CEBE"].fillna("-")
-    df_reporte["SEGMENTO"] = df_reporte["SEGMENTO"].fillna("-")
-    df_reporte["Kilos"] = df_reporte["Kilos"].fillna(0.0)
+    df_reporte["Total_Kilos_Marca"] = df_reporte.groupby("Marca")["Kilos_Mes_Anterior"].transform("sum")
+    df_reporte["Participacion_Pct"] = (df_reporte["Kilos_Mes_Anterior"] / df_reporte["Total_Kilos_Marca"].replace(0, pd.NA)).fillna(0.0)
 
-    df_reporte = df_reporte.sort_values(by=["Supervisor", "Nombre", "Marca", "CEBE", "SEGMENTO"]).reset_index(drop=True)
+    obj_ant_ser = df_reporte["Marca"].map(obj_ant_map).fillna(0.0)
+    df_reporte["Objetivo_Mes_Anterior_Kg"] = df_reporte["Participacion_Pct"] * obj_ant_ser
 
-    columnas_finales = ["CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Kilos"]
-    return df_reporte[columnas_finales]
+    df_reporte["Logro_Anterior_Pct"] = (df_reporte["Kilos_Mes_Anterior"] / df_reporte["Objetivo_Mes_Anterior_Kg"].replace(0, pd.NA)).mul(100).fillna(0.0)
+    df_reporte["Obj_Sugerido_Kg"] = df_reporte["Participacion_Pct"] * df_reporte["Obj_Macro_Marca_Kg"]
+
+    df_reporte = df_reporte.drop(columns=["Total_Kilos_Marca"], errors="ignore")
+    
+    # Ordenar estrictamente según el orden definido en el padrón de segmentos (`maestro_segmentos`)
+    if segmentos_orden_lista:
+        df_reporte["SEGMENTO"] = pd.Categorical(df_reporte["SEGMENTO"], categories=segmentos_orden_lista, ordered=True)
+
+    df_reporte = df_reporte.sort_values(by=["Supervisor", "Nombre", "Marca", "SEGMENTO"]).reset_index(drop=True)
+    df_reporte["SEGMENTO"] = df_reporte["SEGMENTO"].astype(str)
+
+    columnas_finales = [
+        "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", 
+        "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", 
+        "Obj_Macro_Marca_Kg", "Obj_Sugerido_Kg"
+    ]
+    return df_reporte[columnas_finales], segmentos_orden_lista
 
 def render_rep_obj_kilos(df_vta, filtros_globales=None):
-    st.subheader("📦 Base de Objetivos Kilos: Composición Mes Anterior")
+    st.subheader("📦 Generador Tentativo de Objetivos")
 
     if filtros_globales is None:
         anio_op = 2026
@@ -2041,7 +2478,17 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     mes_ant_eval = 12 if mes_op == 1 else mes_op - 1
     anio_ant_eval = anio_op - 1 if mes_op == 1 else anio_op
     
-    st.caption(f"🗓️ Analizando todas las entregas correspondientes al período cerrado: **{mes_ant_eval:02d}/{anio_ant_eval}**")
+    st.markdown(f"**Período Operativo:** {mes_op:02d}/{anio_op} | **Referencia Histórica:** {mes_ant_eval:02d}/{anio_ant_eval}")
+
+    coef_opciones = list(range(100, 111))
+    coef_sel = st.selectbox(
+        "📈 Coeficiente de Ajuste de Objetivo (%)",
+        options=coef_opciones,
+        format_func=lambda x: f"{x}%",
+        index=0,
+        key="sel_coef_ajuste_obj"
+    )
+    factor_multiplicador = coef_sel / 100.0
 
     try:
         maestro_v = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
@@ -2053,111 +2500,140 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         maestro_v = pd.DataFrame()
 
     try:
-        maestro_cebe = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
-        if not maestro_cebe.empty and "Mes" in maestro_cebe.columns:
-            mc_per = maestro_cebe[(maestro_cebe["Mes"].astype(str) == str(mes_op)) & (maestro_cebe["Anio"].astype(str) == str(anio_op))]
-            if not mc_per.empty:
-                maestro_cebe = mc_per
+        maestro_seg = db.cargar_tabla_sql("SELECT * FROM maestro_segmentos")
+        if not maestro_seg.empty and "Mes" in maestro_seg.columns:
+            ms_per = maestro_seg[(maestro_seg["Mes"].astype(str) == str(mes_op)) & (maestro_seg["Anio"].astype(str) == str(anio_op))]
+            if not ms_per.empty:
+                maestro_seg = ms_per
     except Exception:
-        maestro_cebe = pd.DataFrame()
+        maestro_seg = pd.DataFrame()
+
+    try:
+        maestro_cebe_act = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
+        if not maestro_cebe_act.empty and "Mes" in maestro_cebe_act.columns:
+            mc_per = maestro_cebe_act[(maestro_cebe_act["Mes"].astype(str) == str(mes_op)) & (maestro_cebe_act["Anio"].astype(str) == str(anio_op))]
+            if not mc_per.empty:
+                maestro_cebe_act = mc_per
+    except Exception:
+        maestro_cebe_act = pd.DataFrame()
+
+    try:
+        maestro_cebe_ant = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
+        if not maestro_cebe_ant.empty and "Mes" in maestro_cebe_ant.columns:
+            mc_ant = maestro_cebe_ant[(maestro_cebe_ant["Mes"].astype(str) == str(mes_ant_eval)) & (maestro_cebe_ant["Anio"].astype(str) == str(anio_ant_eval))]
+            if not mc_ant.empty:
+                maestro_cebe_ant = mc_ant
+    except Exception:
+        maestro_cebe_ant = pd.DataFrame()
 
     if maestro_v.empty:
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en la base de datos.")
         return
 
-    cache_key = f"_cache_rep_obj_kilos_{anio_op}_{mes_op}_{sup_filtro}"
+    cache_key = f"_cache_rep_obj_distribucion_v10_{anio_op}_{mes_op}_{sup_filtro}"
     if cache_key not in st.session_state:
-        with st.spinner("Procesando histórico de ventas por Marca, CEBE y Segmento..."):
-            df_base = generar_datos_composicion_mes_anterior(df_vta, maestro_v, maestro_cebe, anio_op, mes_op)
-            st.session_state[cache_key] = df_base
+        with st.spinner("Calculando distribución proporcional de objetivos macro en Kilos..."):
+            df_base, seg_orden = generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_op, mes_op)
+            st.session_state[cache_key] = (df_base, seg_orden)
     else:
-        df_base = st.session_state[cache_key]
+        df_base, seg_orden = st.session_state[cache_key]
+
+    if df_base is None or df_base.empty:
+        st.info("No se encontraron registros coincidentes con los maestros oficiales para el período de referencia.")
+        return
+
+    if "Obj_Macro_Marca_Kg" not in df_base.columns:
+        df_base, seg_orden = generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_op, mes_op)
+        st.session_state[cache_key] = (df_base, seg_orden)
 
     df_filtrado = df_base.copy()
-
-    if sup_filtro != "TODOS":
+    if sup_filtro != "TODOS" and "Supervisor" in df_filtrado.columns:
         df_filtrado = df_filtrado[df_filtrado["Supervisor"].astype(str).str.strip() == sup_filtro].copy()
 
-    v_dispo = sorted([v for v in df_filtrado["Nombre"].dropna().unique() if v != ""])
-    m_dispo = sorted([m for m in df_filtrado["Marca"].dropna().unique() if m not in ["", "-"]])
-    c_dispo = sorted([c for c in df_filtrado["CEBE"].dropna().unique() if c not in ["", "-"]])
-    s_dispo = sorted([s for s in df_filtrado["SEGMENTO"].dropna().unique() if s not in ["", "-"]])
+    df_filtrado["Obj_Sugerido_Kg"] = df_filtrado["Obj_Sugerido_Kg"] * factor_multiplicador
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        v_sel = crear_filtro_excel("Vendedor", v_dispo, f"rok_v_{anio_op}_{mes_op}")
-    with c2:
-        m_sel = crear_filtro_excel("Marca", m_dispo, f"rok_m_{anio_op}_{mes_op}")
-    with c3:
-        c_sel = crear_filtro_excel("CEBE", c_dispo, f"rok_c_{anio_op}_{mes_op}")
-    with c4:
-        s_sel = crear_filtro_excel("Segmento", s_dispo, f"rok_s_{anio_op}_{mes_op}")
+    total_kilos_ant = df_filtrado["Kilos_Mes_Anterior"].sum() if "Kilos_Mes_Anterior" in df_filtrado.columns else 0.0
+    total_obj_sugerido = df_filtrado["Obj_Sugerido_Kg"].sum() if "Obj_Sugerido_Kg" in df_filtrado.columns else 0.0
+    total_macro_compania = df_filtrado[["Marca", "Obj_Macro_Marca_Kg"]].drop_duplicates()["Obj_Macro_Marca_Kg"].sum() if "Obj_Macro_Marca_Kg" in df_filtrado.columns and "Marca" in df_filtrado.columns else 0.0
 
-    if v_dispo and v_sel:
-        df_filtrado = df_filtrado[df_filtrado["Nombre"].isin(v_sel)]
-    if m_dispo and m_sel:
-        df_filtrado = df_filtrado[df_filtrado["Marca"].isin(m_sel) | df_filtrado["Marca"].eq("-")]
-    if c_dispo and c_sel:
-        df_filtrado = df_filtrado[df_filtrado["CEBE"].isin(c_sel) | df_filtrado["CEBE"].eq("-")]
-    if s_dispo and s_sel:
-        df_filtrado = df_filtrado[df_filtrado["SEGMENTO"].isin(s_sel) | df_filtrado["SEGMENTO"].eq("-")]
+    m1, m2, m3 = st.columns(3)
+    m1.metric("📦 Total Kilos Históricos", f"{total_kilos_ant:,.1f} kg")
+    m2.metric("🏢 Total Macro Compañía", f"{total_macro_compania:,.1f} kg")
+    m3.metric("🎯 Total Objetivo Sugerido", f"{total_obj_sugerido:,.1f} kg")
 
-    total_kilos_mes = df_filtrado["Kilos"].sum()
-    vendedores_activos = df_filtrado[df_filtrado["Kilos"] > 0]["CodVendedor"].nunique()
-    cebes_activos = df_filtrado[df_filtrado["Kilos"] > 0]["CEBE"].nunique()
-    marcas_activas = df_filtrado[df_filtrado["Kilos"] > 0]["Marca"].nunique()
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("📦 Total Kilos Mes Anterior", f"{total_kilos_mes:,.1f} kg")
-    m2.metric("👥 Vendedores c/ Venta", str(vendedores_activos))
-    m3.metric("🏷️ CEBEs Activos", str(cebes_activos))
-    m4.metric("🎯 Marcas Activas", str(marcas_activas))
+    if not df_filtrado.empty and "SEGMENTO" in df_filtrado.columns:
+        tot_por_seg = df_filtrado.groupby("SEGMENTO")["Obj_Sugerido_Kg"].sum()
+        if seg_orden:
+            tot_por_seg = tot_por_seg.reindex([s for s in seg_orden if s in tot_por_seg.index])
+        
+        st.markdown("📌 **Objetivo Sugerido por Segmento:**")
+        for seg, val in tot_por_seg.items():
+            st.markdown(f"- **{seg}**: {val:,.2f} kg")
 
     st.divider()
 
-    if not df_filtrado.empty:
-        gb = GridOptionsBuilder.from_dataframe(df_filtrado)
-        gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
-        
-        gb.configure_column("CodVendedor", headerName="Cód. Vend", width=100)
-        gb.configure_column("Nombre", headerName="Vendedor", width=180)
-        gb.configure_column("Supervisor", headerName="Supervisor", width=140)
-        gb.configure_column("Marca", headerName="Marca", width=150)
-        gb.configure_column("CEBE", headerName="CEBE", width=140)
-        gb.configure_column("SEGMENTO", headerName="Segmento", width=160)
-        gb.configure_column(
-            "Kilos", 
-            headerName="Kilos",
-            valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'"
-        )
+    gb = GridOptionsBuilder.from_dataframe(df_filtrado)
+    gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
+    
+    gb.configure_column("CodVendedor", headerName="Cód. Vend", width=100)
+    gb.configure_column("Nombre", headerName="Vendedor", width=180)
+    gb.configure_column("Supervisor", headerName="Supervisor", width=140)
+    gb.configure_column("Marca", headerName="Marca", width=150)
+    gb.configure_column("CEBE", headerName="CEBE", width=140)
+    gb.configure_column("SEGMENTO", headerName="Segmento", width=160, rowGroup=True)
+    gb.configure_column(
+        "Kilos_Mes_Anterior", 
+        headerName="Kilos Mes Ant.",
+        valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'"
+    )
+    gb.configure_column(
+        "Objetivo_Mes_Anterior_Kg", 
+        headerName="Obj. Mes Ant. (Kg)",
+        valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'"
+    )
+    gb.configure_column(
+        "Logro_Anterior_Pct", 
+        headerName="% Logro Ant.",
+        valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%' : '0.00%'"
+    )
+    gb.configure_column(
+        "Obj_Macro_Marca_Kg", 
+        headerName="Obj. Macro Marca (Kg)",
+        valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'"
+    )
+    gb.configure_column(
+        "Obj_Sugerido_Kg", 
+        headerName="Obj. Sugerido (Kg)",
+        valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'"
+    )
 
-        gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
-        grid_options = gb.build()
+    gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
+    grid_options = gb.build()
 
-        AgGrid(
-            df_filtrado,
-            gridOptions=grid_options,
-            height=480,
-            width="100%",
-            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-            update_mode=GridUpdateMode.MODEL_CHANGED,
-            theme="streamlit",
-            fit_columns_on_grid_load=False
-        )
-    else:
-        st.info("No se encontraron registros con las combinaciones seleccionadas.")
+    AgGrid(
+        df_filtrado,
+        gridOptions=grid_options,
+        height=450,
+        width="100%",
+        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+        update_mode=GridUpdateMode.MODEL_CHANGED,
+        theme="streamlit",
+        fit_columns_on_grid_load=False
+    )
+
+    st.divider()
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_filtrado.to_excel(writer, index=False, sheet_name="Composicion_Kilos_Mes_Ant")
+        df_filtrado.to_excel(writer, index=False, sheet_name="Propuesta_Objetivos")
     buffer.seek(0)
 
     st.download_button(
-        label="📥 Descargar Reporte Composición a Excel",
+        label="📥 Descargar Propuesta Tentativa a Excel",
         data=buffer,
-        file_name=f"Composicion_Kilos_{mes_ant_eval}_{anio_ant_eval}.xlsx",
+        file_name=f"Propuesta_Objetivos_{mes_op}_{anio_op}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key=f"btn_dl_rep_obj_kilos_{anio_op}_{mes_op}"
+        key=f"btn_dl_propuesta_obj_{anio_op}_{mes_op}"
     )
 
 ==================================================
