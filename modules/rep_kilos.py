@@ -364,7 +364,7 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     return reporte
 
 @st.fragment
-def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro):
+def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro, df_vta_prep, dia_matinal):
     """Fragmento aislado de alta velocidad. Multiselects vacíos por defecto (muestran todo automáticamente)."""
     col_f1, col_f2 = st.columns(2)
     with col_f1:
@@ -372,7 +372,6 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     with col_f2:
         s_selec = st.multiselect("Segmento", options=s_dispo, default=[], key=f"frag_kilos_s_{anio_op}_{mes_op}_{sup_filtro}")
 
-    # Si no se selecciona nada explícitamente, se adopta el universo completo (TODOS)
     if not v_selec:
         v_selec = v_dispo
     if not s_selec:
@@ -441,6 +440,31 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     mcol6.metric(label="🏢 Depósito", value=f"{kilos_deposito:,.1f} kg")
     st.divider()
 
+    fecha_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
+    if pd.notna(fecha_mat_dt):
+        f_ult = (fecha_mat_dt - pd.Timedelta(days=7)).date()
+        f_penult = (fecha_mat_dt - pd.Timedelta(days=14)).date()
+        
+        u_vta = df_vta_prep[df_vta_prep["FechaCarga_dt"].dt.date.eq(f_ult)].groupby(["CodVendedor", "SEGMENTO"])["PesoKg"].sum().reset_index().rename(columns={"PesoKg": "Ultima_Vta"})
+        p_vta = df_vta_prep[df_vta_prep["FechaCarga_dt"].dt.date.eq(f_penult)].groupby(["CodVendedor", "SEGMENTO"])["PesoKg"].sum().reset_index().rename(columns={"PesoKg": "Penultima_Vta"})
+    else:
+        u_vta = pd.DataFrame(columns=["CodVendedor", "SEGMENTO", "Ultima_Vta"])
+        p_vta = pd.DataFrame(columns=["CodVendedor", "SEGMENTO", "Penultima_Vta"])
+
+    if not u_vta.empty:
+        u_vta["CodVendedor"] = pd.to_numeric(u_vta["CodVendedor"], errors="coerce").astype("Int64")
+        rep_detalle = rep_detalle.merge(u_vta, on=["CodVendedor", "SEGMENTO"], how="left")
+    else:
+        rep_detalle["Ultima_Vta"] = 0.0
+
+    if not p_vta.empty:
+        p_vta["CodVendedor"] = pd.to_numeric(p_vta["CodVendedor"], errors="coerce").astype("Int64")
+        rep_detalle = rep_detalle.merge(p_vta, on=["CodVendedor", "SEGMENTO"], how="left")
+    else:
+        rep_detalle["Penultima_Vta"] = 0.0
+
+    rep_detalle[["Ultima_Vta", "Penultima_Vta"]] = rep_detalle[["Ultima_Vta", "Penultima_Vta"]].fillna(0.0)
+
     dp_s = rep_detalle["Días Pasados"].astype(float).replace(0, 1.0)
     dr_s = rep_detalle["Días Restantes"].astype(float).replace(0, 1.0)
 
@@ -449,10 +473,6 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     rep_detalle["Tendencia_Total_Kg"] = (p_diario * dr_s) + rep_detalle["OPERATIVO"]
     rep_detalle["Cumplimiento_Proyectado_Pct"] = ((rep_detalle["Tendencia_Total_Kg"]) / rep_detalle["Objetivo Mes Corriente"].replace(0, pd.NA)).mul(100).fillna(0.0)
     rep_detalle["Media_Necesaria_Diaria"] = ((rep_detalle["Objetivo Mes Corriente"] - rep_detalle["OPERATIVO"]) / dr_s).clip(lower=0)
-
-    for col_aux in ["Ultima_Vta", "Penultima_Vta"]:
-        if col_aux not in rep_detalle.columns:
-            rep_detalle[col_aux] = 0.0
 
     columnas_ordenadas = [
         "CodVendedor", "Nombre", "SUP", "SEGMENTO", "Objetivo Mes Corriente", "Arrastre", "Actual", 
@@ -538,7 +558,7 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
     try:
         maestro_s = db.cargar_tabla_sql("SELECT * FROM maestro_segmentos ORDER BY rowid ASC")
         if not maestro_s.empty and "Mes" in maestro_s.columns:
-            ms_per = maestro_s[(maestro_s["Mes"].astype(str) == str(mes_op)) & (ms_per["Anio"].astype(str) == str(anio_op))]
+            ms_per = maestro_s[(ms_per["Mes"].astype(str) == str(mes_op)) & (ms_per["Anio"].astype(str) == str(anio_op))]
             if not ms_per.empty:
                 maestro_s = ms_per
     except Exception:
@@ -557,13 +577,13 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en SQLite. Verifique en la solapa de Parámetros.")
         return
 
-    cache_key_rep = f"_cache_kilos_v30_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
+    cache_key_rep = f"_cache_kilos_v31_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
     if cache_key_rep not in st.session_state:
         df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
         reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro)
-        st.session_state[cache_key_rep] = reporte_avance
+        st.session_state[cache_key_rep] = (reporte_avance, df_vta_prep)
     else:
-        reporte_avance = st.session_state[cache_key_rep]
+        reporte_avance, df_vta_prep = st.session_state[cache_key_rep]
 
     if "Ajuste_Reemp_Arrastre" not in reporte_avance.columns:
         reporte_avance["Ajuste_Reemp_Arrastre"] = 0.0
@@ -588,4 +608,4 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         if s not in s_dispo:
             s_dispo.append(s)
 
-    render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro)
+    render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro, df_vta_prep, dia_matinal)
