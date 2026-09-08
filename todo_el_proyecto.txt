@@ -9,7 +9,6 @@ from modules.parametros import render_parametros_view, es_entorno_local, obtener
 from modules.rep_kilos import render_rep_kilos
 from modules.rep_obj_kilos import render_rep_obj_kilos
 from modules.rep_ccc import render_rep_ccc
-from modules.rep_batalla_ccc import render_rep_batalla_nc
 from modules.rep_batalla_cobertura_marca import render_rep_batalla_cobertura
 from modules import database as db
 
@@ -160,20 +159,18 @@ def main():
     es_local = es_entorno_local()
     
     if es_local:
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📊 Avance Kilos", 
-            "📦 Composición Obj Kilos",
-            "📈 Avance CCC", 
-            "⚔️ Batalla NC", 
-            "🎯 Cobertura Marca", 
-            "⚙️ Parámetros"
-        ])
-    else:
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📊 Avance Kilos", 
             "📦 Composición Obj Kilos",
             "📈 Avance CCC", 
-            "⚔️ Batalla NC", 
+            "🎯 Cobertura Marca", 
+            "⚙️ Parámetros"
+        ])
+    else:
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📊 Avance Kilos", 
+            "📦 Composición Obj Kilos",
+            "📈 Avance CCC", 
             "🎯 Cobertura Marca"
         ])
     
@@ -187,13 +184,10 @@ def main():
         render_rep_ccc(df_vta, df_universo, filtros_globales)
         
     with tab4:
-        render_rep_batalla_nc(df_vta, df_universo)
-        
-    with tab5:
         render_rep_batalla_cobertura()
         
     if es_local:
-        with tab6:
+        with tab5:
             render_parametros_view(filtros_globales)
 
 if __name__ == "__main__":
@@ -835,39 +829,6 @@ def procesar_ext_vta(df_vtas: pd.DataFrame, df_ausencias: pd.DataFrame) -> pd.Da
 
 ==================================================
 
-=== MÓDULO: rep_batalla_ccc.py ===
-
-# modules/rep_batalla_ccc.py
-import streamlit as st
-import pandas as pd
-from io import BytesIO
-
-def render_rep_batalla_nc(df_vta, df_universo):
-    st.subheader("⚔️ Batalla NC: Clientes Activos sin Compra")
-    
-    data = {
-        "Codigo_Cliente": [1001, 1023, 1055, 1089],
-        "Razon_Social": ["Kiosco El Rápido", "Almacén Don José", "Minimercado Sol", "Maxikiosco Luna"],
-        "Taxonomía": ["A", "B", "A", "C"],
-        "Ultima_Compra": ["2026-07-10", "2026-06-15", "2026-05-20", "2026-07-01"]
-    }
-    df = pd.DataFrame(data)
-
-    st.dataframe(df, width="stretch")
-
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='No_Compradores')
-    
-    st.download_button(
-        label="📥 Descargar Clientes No Compradores a Excel",
-        data=output.getvalue(),
-        file_name="clientes_no_compradores.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-==================================================
-
 === MÓDULO: rep_batalla_cobertura_marca.py ===
 
 # modules/rep_batalla_cobertura_marca.py
@@ -1079,7 +1040,7 @@ def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_para
     for k in keys_to_delete:
         del st.session_state[k]
 
-    clave_cache_estado = f"_ccc_motor_cache_v32_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
+    clave_cache_estado = f"_ccc_motor_cache_v35_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
     if clave_cache_estado not in st.session_state:
         rep, det = _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal)
         st.session_state[clave_cache_estado] = (rep, det)
@@ -1195,7 +1156,7 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     cob_c = (cant_c / cart_c * 100) if cart_c > 0 else 0.0
     cob_d = (cant_d / cart_d * 100) if cart_d > 0 else 0.0
 
-    # Tarjetas métricas superiores con sus colores originales correspondientes a cada taxonomía
+    # Tarjetas métricas superiores con los colores estrictos por taxonomía (#ef4444: A, #f97316: B, #eab308: C, #22c55e: D)
     cols_r1 = st.columns(5)
     with cols_r1[0]:
         st.markdown(_tarjeta_metrica_html("Cartera Total", f"{tot_cartera:,.0f}", "#3b82f6"), unsafe_allow_html=True)
@@ -1235,8 +1196,6 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     st.divider()
 
     columnas_visuales_ccc = ["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Objetivo_CCC", "CCC", "NC", "Cobertura_Pct", "% Cumplimiento Objetivo"]
-    
-    # Para eliminar por completo la columna de índice de la izquierda, evitamos que pandas exporte el índice a la grilla
     reporte_render = reporte_filtrado[columnas_visuales_ccc].copy().reset_index(drop=True)
 
     if not reporte_render.empty:
@@ -1261,9 +1220,6 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
 
         grid_options = gb.build()
         
-        # Propiedad nativa de AgGrid para suprimir por completo la columna de selección de fila / índice izquierdo
-        grid_options['suppressRowTransform'] = True
-        
         AgGrid(
             reporte_render,
             gridOptions=grid_options,
@@ -1272,12 +1228,51 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
             data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
             update_mode=GridUpdateMode.MODEL_CHANGED,
             theme="streamlit",
-            fit_columns_on_grid_load=False,
-            # Asegura que st-aggrid no renderice la columna de índice numérico predeterminada
-            reload_data=True
+            fit_columns_on_grid_load=False
         )
     else:
         st.info("No se encontraron registros de Clientes con Compra con los filtros seleccionados.")
+
+    st.divider()
+
+    # =========================================================================
+    # SECCIÓN INTEGRADA: BATALLA NC (LISTADO DE CLIENTES NO COMPRADORES)
+    # =========================================================================
+    st.markdown("### ⚔️ Batalla NC: Listado de Clientes No Compradores")
+    st.markdown("Detalle de clientes sin compra en el período, filtrados por los criterios activos del reporte superior.")
+
+    if not df_cli_filtrado.empty:
+        df_nc = df_cli_filtrado[df_cli_filtrado["Es_CCC"] == False].copy()
+        
+        # Mapeo inteligente para extraer las columnas idénticas y escuetas del envío a WhatsApp
+        cols_disponibles = df_nc.columns.tolist()
+        map_cols = {}
+        for col in cols_disponibles:
+            cl = col.lower()
+            if cl in ["cliente", "codcliente", "codigo"]: map_cols["Cliente"] = col
+            elif cl in ["nombrecliente", "nombre_cliente", "razonsocial"]: map_cols["NombreCliente"] = col
+            elif cl in ["direccioncliente", "direccion", "domicilio"]: map_cols["DireccionCliente"] = col
+            elif cl in ["diavisita", "dia_visita", "ruta"]: map_cols["DiaVisita"] = col
+            elif cl in ["nombre", "preventista", "vendedor"]: map_cols["Vendedor"] = col
+            elif cl in ["taxonomia", "taxonomía"]: map_cols["Taxonomia"] = col
+
+        # Construcción del DataFrame escueto y ordenado para visualización
+        df_nc_escueto = pd.DataFrame()
+        df_nc_escueto["Código Cliente"] = df_nc.get(map_cols.get("Cliente", "Cliente"), pd.Series())
+        df_nc_escueto["Razón Social"] = df_nc.get(map_cols.get("NombreCliente", "NombreCliente"), pd.Series())
+        df_nc_escueto["Dirección"] = df_nc.get(map_cols.get("DireccionCliente", "DireccionCliente"), pd.Series())
+        df_nc_escueto["Día Visita"] = df_nc.get(map_cols.get("DiaVisita", "DiaVisita"), pd.Series())
+        df_nc_escueto["Taxonomía"] = df_nc.get(map_cols.get("Taxonomia", "Taxonomia"), pd.Series())
+        df_nc_escueto["Preventista"] = df_nc.get(map_cols.get("Vendedor", "Nombre"), pd.Series())
+
+        df_nc_render = df_nc_escueto.dropna(how="all").reset_index(drop=True)
+    else:
+        df_nc_render = pd.DataFrame(columns=["Código Cliente", "Razón Social", "Dirección", "Día Visita", "Taxonomía", "Preventista"])
+
+    if not df_nc_render.empty:
+        st.dataframe(df_nc_render, width="stretch", height=350, hide_index=True)
+    else:
+        st.info("No hay clientes no compradores (NC) para los filtros seleccionados.")
 
     st.divider()
 
@@ -1296,14 +1291,6 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         )
 
     with col_dl2:
-        if not df_cli_filtrado.empty:
-            df_nc = df_cli_filtrado[df_cli_filtrado["Es_CCC"] == False].copy()
-            cols_excluir = ["_k", "Es_CCC"]
-            cols_nc_final = [c for c in df_nc.columns if c not in cols_excluir]
-            df_nc_render = df_nc[cols_nc_final].copy().reset_index(drop=True)
-        else:
-            df_nc_render = pd.DataFrame()
-
         buffer_nc = io.BytesIO()
         with pd.ExcelWriter(buffer_nc, engine="openpyxl") as writer:
             df_nc_render.to_excel(writer, index=False, sheet_name="Clientes_No_Compradores_NC")
