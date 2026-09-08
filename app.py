@@ -200,7 +200,7 @@ def main():
 
     es_local = es_entorno_local()
     
-    # Restricción de solapas según el nivel autenticado
+    # Restricción y definición de solapas según el nivel autenticado
     if "Nivel 1" in nivel_actual:
         if es_local:
             tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -225,29 +225,43 @@ def main():
             "🎯 Cobertura Marca"
         ])
     else:
-        # Nivel 3: Supervisión
-        tab1, tab2, tab3, tab4 = st.tabs([
+        # Nivel 3: Supervisión (Sin Composición Obj Kilos)
+        tab1, tab2, tab3 = st.tabs([
             "📊 Avance Kilos", 
-            "📦 Composición Obj Kilos",
             "📈 Avance CCC", 
             "🎯 Cobertura Marca"
         ])
     
-    with tab1:
-        render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
-
-    with tab2:
-        render_rep_obj_kilos(df_vta, filtros_globales)
-        
-    with tab3:
-        render_rep_ccc(df_vta, df_universo, filtros_globales)
-        
-    with tab4:
-        render_rep_batalla_cobertura()
-        
-    if "Nivel 1" in nivel_actual and es_local:
-        with tab5:
-            render_parametros_view(filtros_globales)
+    # Renderizado de pestañas acorde al perfil activo
+    if "Nivel 1" in nivel_actual:
+        with tab1:
+            render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
+        with tab2:
+            render_rep_obj_kilos(df_vta, filtros_globales)
+        with tab3:
+            render_rep_ccc(df_vta, df_universo, filtros_globales)
+        with tab4:
+            render_rep_batalla_cobertura()
+        if es_local:
+            with tab5:
+                render_parametros_view(filtros_globales)
+    elif "Nivel 2" in nivel_actual:
+        with tab1:
+            render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
+        with tab2:
+            render_rep_obj_kilos(df_vta, filtros_globales)
+        with tab3:
+            render_rep_ccc(df_vta, df_universo, filtros_globales)
+        with tab4:
+            render_rep_batalla_cobertura()
+    else:
+        # Nivel 3: Supervisión
+        with tab1:
+            render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
+        with tab2:
+            render_rep_ccc(df_vta, df_universo, filtros_globales)
+        with tab3:
+            render_rep_batalla_cobertura()
 
 if __name__ == "__main__":
     main()
