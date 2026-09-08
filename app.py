@@ -7,7 +7,6 @@ from modules.parametros import render_parametros_view, es_entorno_local, obtener
 from modules.rep_kilos import render_rep_kilos
 from modules.rep_obj_kilos import render_rep_obj_kilos
 from modules.rep_ccc import render_rep_ccc
-from modules.rep_batalla_ccc import render_rep_batalla_nc
 from modules.rep_batalla_cobertura_marca import render_rep_batalla_cobertura
 from modules import database as db
 
@@ -158,20 +157,18 @@ def main():
     es_local = es_entorno_local()
     
     if es_local:
-        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-            "📊 Avance Kilos", 
-            "📦 Composición Obj Kilos",
-            "📈 Avance CCC", 
-            "⚔️ Batalla NC", 
-            "🎯 Cobertura Marca", 
-            "⚙️ Parámetros"
-        ])
-    else:
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📊 Avance Kilos", 
             "📦 Composición Obj Kilos",
             "📈 Avance CCC", 
-            "⚔️ Batalla NC", 
+            "🎯 Cobertura Marca", 
+            "⚙️ Parámetros"
+        ])
+    else:
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📊 Avance Kilos", 
+            "📦 Composición Obj Kilos",
+            "📈 Avance CCC", 
             "🎯 Cobertura Marca"
         ])
     
@@ -185,13 +182,10 @@ def main():
         render_rep_ccc(df_vta, df_universo, filtros_globales)
         
     with tab4:
-        render_rep_batalla_nc(df_vta, df_universo)
-        
-    with tab5:
         render_rep_batalla_cobertura()
         
     if es_local:
-        with tab6:
+        with tab5:
             render_parametros_view(filtros_globales)
 
 if __name__ == "__main__":

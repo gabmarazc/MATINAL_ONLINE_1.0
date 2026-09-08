@@ -150,15 +150,16 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     reporte = matriz_base.merge(cartera_matriz, on=["CodVendedor", "Taxonomia"], how="left")
     reporte[["Cartera_Total", "CCC"]] = reporte[["Cartera_Total", "CCC"]].fillna(0).astype("Int64")
     reporte["NC"] = (reporte["Cartera_Total"] - reporte["CCC"]).clip(lower=0).astype("Int64")
-    reporte["Cobertura_Pct"] = (reporte["CCC"] / reporte["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0)
+    reporte["Cobertura_Pct"] = (reporte["CCC"] / reporte["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
     reporte["Total_Cartera_Cia"] = reporte.groupby("Taxonomia")["Cartera_Total"].transform("sum")
     reporte["Participacion_Cartera"] = (reporte["Cartera_Total"] / reporte["Total_Cartera_Cia"].replace(0, pd.NA)).fillna(0.0)
 
     reporte = reporte.merge(hoja_ccc, on="Taxonomia", how="left")
     reporte["OBJ_CCC"] = reporte["OBJ_CCC"].fillna(0.0)
     reporte["Objetivo_CCC"] = (reporte["Participacion_Cartera"] * reporte["OBJ_CCC"]).fillna(0.0).round(0).astype("Int64")
-    reporte["% Cumplimiento Objetivo"] = (reporte["CCC"] / reporte["Objetivo_CCC"].replace(0, pd.NA)).mul(100).fillna(0.0)
+    reporte["% Cumplimiento Objetivo"] = (reporte["CCC"] / reporte["Objetivo_CCC"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
 
+    reporte["CodVendedor"] = pd.to_numeric(reporte["CodVendedor"], errors="coerce").astype("Int64")
     reporte = reporte.sort_values(by=["CodVendedor", "Taxonomia"], ascending=[True, True]).reset_index(drop=True)
 
     return reporte[["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Objetivo_CCC", "CCC", "NC", "Cobertura_Pct", "% Cumplimiento Objetivo"]], df_det_nc
@@ -173,7 +174,7 @@ def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_para
     for k in keys_to_delete:
         del st.session_state[k]
 
-    clave_cache_estado = f"_ccc_motor_cache_v15_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
+    clave_cache_estado = f"_ccc_motor_cache_v35_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
     if clave_cache_estado not in st.session_state:
         rep, det = _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal)
         st.session_state[clave_cache_estado] = (rep, det)
@@ -257,13 +258,14 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         )
         reporte_filtrado[["Cartera_Total", "CCC"]] = reporte_filtrado[["Cartera_Total", "CCC"]].fillna(0).astype("Int64")
         reporte_filtrado["NC"] = (reporte_filtrado["Cartera_Total"] - reporte_filtrado["CCC"]).clip(lower=0).astype("Int64")
-        reporte_filtrado["Cobertura_Pct"] = (reporte_filtrado["CCC"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0)
+        reporte_filtrado["Cobertura_Pct"] = (reporte_filtrado["CCC"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
 
         objs_originales = reporte_ccc_base[["CodVendedor", "Taxonomia", "Objetivo_CCC"]].drop_duplicates(["CodVendedor", "Taxonomia"])
         reporte_filtrado = reporte_filtrado.merge(objs_originales, on=["CodVendedor", "Taxonomia"], how="left")
         reporte_filtrado["Objetivo_CCC"] = reporte_filtrado["Objetivo_CCC"].fillna(0).astype("Int64")
-        reporte_filtrado["% Cumplimiento Objetivo"] = (reporte_filtrado["CCC"] / reporte_filtrado["Objetivo_CCC"].replace(0, pd.NA)).mul(100).fillna(0.0)
+        reporte_filtrado["% Cumplimiento Objetivo"] = (reporte_filtrado["CCC"] / reporte_filtrado["Objetivo_CCC"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
         
+        reporte_filtrado["CodVendedor"] = pd.to_numeric(reporte_filtrado["CodVendedor"], errors="coerce").astype("Int64")
         reporte_filtrado = reporte_filtrado.sort_values(by=["CodVendedor", "Taxonomia"], ascending=[True, True]).reset_index(drop=True)
     else:
         reporte_filtrado = pd.DataFrame(columns=["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Objetivo_CCC", "CCC", "NC", "Cobertura_Pct", "% Cumplimiento Objetivo"])
@@ -288,6 +290,7 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     cob_c = (cant_c / cart_c * 100) if cart_c > 0 else 0.0
     cob_d = (cant_d / cart_d * 100) if cart_d > 0 else 0.0
 
+    # Tarjetas métricas superiores con los colores estrictos por taxonomía (#ef4444: A, #f97316: B, #eab308: C, #22c55e: D)
     cols_r1 = st.columns(5)
     with cols_r1[0]:
         st.markdown(_tarjeta_metrica_html("Cartera Total", f"{tot_cartera:,.0f}", "#3b82f6"), unsafe_allow_html=True)
@@ -332,6 +335,7 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     if not reporte_render.empty:
         gb = GridOptionsBuilder.from_dataframe(reporte_render)
         gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
+        
         gb.configure_column("CodVendedor", headerName="Cód. Vend", width=100, valueFormatter="x != null ? Number(x).toFixed(0) : ''")
         gb.configure_column("Nombre", headerName="Preventista", minWidth=180)
         gb.configure_column("SUP", headerName="SUP", width=80)
@@ -340,11 +344,16 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         gb.configure_column("Objetivo_CCC", headerName="Objetivo CCC", width=110)
         gb.configure_column("CCC", headerName="CCC", width=90)
         gb.configure_column("NC", headerName="NC", width=90)
-        gb.configure_column("Cobertura_Pct", headerName="Cob %", width=100, valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'")
-        gb.configure_column("% Cumplimiento Objetivo", headerName="% Cumplimiento", width=130, valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'")
+        
+        val_fmt = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00'"
+        
+        gb.configure_column("Cobertura_Pct", headerName="Cob %", width=100, valueFormatter=val_fmt)
+        gb.configure_column("% Cumplimiento Objetivo", headerName="% Cumplimiento", width=130, valueFormatter=val_fmt)
+        
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
 
         grid_options = gb.build()
+        
         AgGrid(
             reporte_render,
             gridOptions=grid_options,
@@ -357,6 +366,47 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         )
     else:
         st.info("No se encontraron registros de Clientes con Compra con los filtros seleccionados.")
+
+    st.divider()
+
+    # =========================================================================
+    # SECCIÓN INTEGRADA: BATALLA NC (LISTADO DE CLIENTES NO COMPRADORES)
+    # =========================================================================
+    st.markdown("### ⚔️ Batalla NC: Listado de Clientes No Compradores")
+    st.markdown("Detalle de clientes sin compra en el período, filtrados por los criterios activos del reporte superior.")
+
+    if not df_cli_filtrado.empty:
+        df_nc = df_cli_filtrado[df_cli_filtrado["Es_CCC"] == False].copy()
+        
+        # Mapeo inteligente para extraer las columnas idénticas y escuetas del envío a WhatsApp
+        cols_disponibles = df_nc.columns.tolist()
+        map_cols = {}
+        for col in cols_disponibles:
+            cl = col.lower()
+            if cl in ["cliente", "codcliente", "codigo"]: map_cols["Cliente"] = col
+            elif cl in ["nombrecliente", "nombre_cliente", "razonsocial"]: map_cols["NombreCliente"] = col
+            elif cl in ["direccioncliente", "direccion", "domicilio"]: map_cols["DireccionCliente"] = col
+            elif cl in ["diavisita", "dia_visita", "ruta"]: map_cols["DiaVisita"] = col
+            elif cl in ["nombre", "preventista", "vendedor"]: map_cols["Vendedor"] = col
+            elif cl in ["taxonomia", "taxonomía"]: map_cols["Taxonomia"] = col
+
+        # Construcción del DataFrame escueto y ordenado para visualización
+        df_nc_escueto = pd.DataFrame()
+        df_nc_escueto["Código Cliente"] = df_nc.get(map_cols.get("Cliente", "Cliente"), pd.Series())
+        df_nc_escueto["Razón Social"] = df_nc.get(map_cols.get("NombreCliente", "NombreCliente"), pd.Series())
+        df_nc_escueto["Dirección"] = df_nc.get(map_cols.get("DireccionCliente", "DireccionCliente"), pd.Series())
+        df_nc_escueto["Día Visita"] = df_nc.get(map_cols.get("DiaVisita", "DiaVisita"), pd.Series())
+        df_nc_escueto["Taxonomía"] = df_nc.get(map_cols.get("Taxonomia", "Taxonomia"), pd.Series())
+        df_nc_escueto["Preventista"] = df_nc.get(map_cols.get("Vendedor", "Nombre"), pd.Series())
+
+        df_nc_render = df_nc_escueto.dropna(how="all").reset_index(drop=True)
+    else:
+        df_nc_render = pd.DataFrame(columns=["Código Cliente", "Razón Social", "Dirección", "Día Visita", "Taxonomía", "Preventista"])
+
+    if not df_nc_render.empty:
+        st.dataframe(df_nc_render, width="stretch", height=350, hide_index=True)
+    else:
+        st.info("No hay clientes no compradores (NC) para los filtros seleccionados.")
 
     st.divider()
 
@@ -375,14 +425,6 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         )
 
     with col_dl2:
-        if not df_cli_filtrado.empty:
-            df_nc = df_cli_filtrado[df_cli_filtrado["Es_CCC"] == False].copy()
-            cols_excluir = ["_k", "Es_CCC"]
-            cols_nc_final = [c for c in df_nc.columns if c not in cols_excluir]
-            df_nc_render = df_nc[cols_nc_final].copy().reset_index(drop=True)
-        else:
-            df_nc_render = pd.DataFrame()
-
         buffer_nc = io.BytesIO()
         with pd.ExcelWriter(buffer_nc, engine="openpyxl") as writer:
             df_nc_render.to_excel(writer, index=False, sheet_name="Clientes_No_Compradores_NC")
