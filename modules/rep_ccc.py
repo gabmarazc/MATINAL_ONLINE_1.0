@@ -6,7 +6,20 @@ import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
-from modules.rep_kilos import preparar_datos_ventas_segmento, parsear_fecha_robusta
+
+def parsear_fecha_robusta(serie):
+    """Estandariza parseo de fechas considerando formatos ISO, DD/MM/YYYY y genérico sin advertencias."""
+    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
+        return pd.Series(dtype="datetime64[ns]")
+    if not isinstance(serie, pd.Series):
+        serie = pd.Series([serie])
+    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
+    
+    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
+    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
+    dt_gen = pd.to_datetime(s, errors="coerce")
+    
+    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
 
 def _extraer_dia_de_ruta(val):
     if pd.isna(val):
@@ -22,6 +35,105 @@ def _extraer_dia_de_ruta(val):
     if "SAB" in val_clean: return "SABADO"
     if "DOM" in val_clean: return "DOMINGO"
     return "SIN DÍA"
+
+def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
+    """Pipeline de ventas independiente y específico para CCC basado en CantBase, ImporteNeto y períodos."""
+    df = df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame()
+    if df.empty:
+        return df
+
+    col_cant = next((c for c in ["CantBase", "CANTBASE", "Cantidad", "CANTIDAD", "Unidades", "UNIDADES"] if c in df.columns), df.columns[0])
+    df["CantBase"] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0.0)
+
+    col_imp = next((c for c in ["ImporteNetoItem", "ImporteNeto", "IMIMPORTENETO", "Neto"] if c in df.columns), None)
+    if col_imp:
+        df["ImporteNeto"] = pd.to_numeric(df[col_imp], errors="coerce").fillna(0.0)
+    else:
+        df["ImporteNeto"] = 0.0
+
+    if "TipoDeVenta" in df.columns:
+        tipos_excluidos = [
+            "Comodato Devolución", 
+            "Comodato Ficticio", 
+            "Comodato Ficticio Devolución", 
+            "Comodato Préstamo"
+        ]
+        df = df[~df["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)]
+
+    if "Proveedor" in df.columns:
+        df = df[
+            df["Proveedor"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .str.contains("PEPSICO", na=False)
+        ]
+
+    if "Subramo" in df.columns:
+        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
+        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
+
+    df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
+    df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
+
+    dia_matinal_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
+    if pd.notna(dia_matinal_dt):
+        es_mes_en_curso = (dia_matinal_dt.year == anio_operativo and dia_matinal_dt.month in [mes_operativo, mes_operativo + 1])
+        if es_mes_en_curso:
+            df = df[df["FechaCarga_dt"].dt.date < dia_matinal_dt.date()]
+
+    col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
+    df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
+
+    df["MesCarga"] = df["FechaCarga_dt"].dt.month
+    df["AñoCarga"] = df["FechaCarga_dt"].dt.year
+    df["MesEntrega"] = df["FechaEntrega_dt"].dt.month
+    df["AñoEntrega"] = df["FechaEntrega_dt"].dt.year
+
+    mes_ant = 12 if mes_operativo == 1 else mes_operativo - 1
+    anio_ant = anio_operativo - 1 if mes_operativo == 1 else anio_operativo
+
+    mes_sig = 1 if mes_operativo == 12 else mes_operativo + 1
+    anio_sig = anio_operativo + 1 if mes_operativo == 12 else anio_operativo
+
+    def asignar_periodo(row):
+        ac, mc = row["AñoCarga"], row["MesCarga"]
+        ae, me = row["AñoEntrega"], row["MesEntrega"]
+        
+        if ac == anio_ant and mc == mes_ant and ae == anio_operativo and me == mes_operativo:
+            return "Arrastre"
+        elif ac == anio_operativo and mc == mes_operativo and ae == anio_operativo and me == mes_operativo:
+            return "Actual"
+        elif ac == anio_operativo and mc == mes_operativo and ae == anio_sig and me == mes_sig:
+            return "Futuro"
+        return "Fuera de Periodo"
+
+    df["Periodo"] = df.apply(asignar_periodo, axis=1)
+
+    df["ClaveAUS_Carga"] = df["CodVendedor"].astype(str) + "-" + df["FechaCarga_dt"].dt.strftime("%Y-%m-%d")
+    df["ClaveAUS_Entrega"] = df["CodVendedor"].astype(str) + "-" + df["FechaEntrega_dt"].dt.strftime("%Y-%m-%d")
+
+    df_aus = df_ausencias.copy() if df_ausencias is not None and not df_ausencias.empty else pd.DataFrame()
+    if not df_aus.empty:
+        col_aus_vend = next((c for c in ["Ausente", "CodVend", "CodVendedor", "Vendedor", "Cod_Vendedor"] if c in df_aus.columns), df_aus.columns[3])
+        col_aus_fecha = next((c for c in df_aus.columns if c in ["Fecha", "FechaAusencia", "Dia"]), df_aus.columns[2])
+        col_aus_reemp = next((c for c in df_aus.columns if c in ["Reemplazo", "CodReemplazo", "Cod_Reemplazo", "PreventistaReemplazo"]), df_aus.columns[4])
+
+        df_aus["Fecha_dt"] = parsear_fecha_robusta(df_aus[col_aus_fecha])
+        df_aus["CodVend_clean"] = pd.to_numeric(df_aus[col_aus_vend], errors="coerce").astype("Int64")
+        df_aus["ClaveAUS"] = df_aus["CodVend_clean"].astype(str) + "-" + df_aus["Fecha_dt"].dt.strftime("%Y-%m-%d")
+        df_aus["Reemplazo_clean"] = pd.to_numeric(df_aus[col_aus_reemp], errors="coerce").astype("Int64")
+
+        aus_map = df_aus.dropna(subset=["ClaveAUS", "Reemplazo_clean"]).drop_duplicates("ClaveAUS").set_index("ClaveAUS")["Reemplazo_clean"]
+        
+        df["Reemplazo"] = df["ClaveAUS_Carga"].map(aus_map).combine_first(df["ClaveAUS_Entrega"].map(aus_map))
+        df["CodVendedorOperativo"] = df["Reemplazo"].combine_first(df["CodVendedor"]).astype("Int64")
+    else:
+        df["Reemplazo"] = pd.NA
+        df["CodVendedorOperativo"] = df["CodVendedor"]
+
+    return df
 
 def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal):
     hoja_ccc = hoja_ccc_param.copy() if hoja_ccc_param is not None and not hoja_ccc_param.empty else pd.DataFrame(columns=["Taxonomia", "OBJ_CCC"])
@@ -49,7 +161,7 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     except Exception:
         df_ausencias = pd.DataFrame()
 
-    df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
+    df_vta_prep = preparar_ventas_ccc(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
     ventas_periodo = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else df_vta_prep.copy()
 
     dia_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
@@ -59,11 +171,24 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     if not ventas_periodo.empty:
         col_c_orig = next((c for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"] if c in ventas_periodo.columns), "Cliente")
         ventas_periodo["Cliente"] = pd.to_numeric(ventas_periodo[col_c_orig], errors="coerce").astype("Int64")
-        col_kg = next((c for c in ["PesoKg", "CantBase", "Cantidad", "Kilos"] if c in ventas_periodo.columns), "PesoKg")
-        ventas_periodo["_peso_calc"] = pd.to_numeric(ventas_periodo[col_kg], errors="coerce").fillna(0.0)
+        
+        col_cant = next((c for c in ["CantBase", "CANTBASE", "Cantidad", "CANTIDAD", "Unidades", "UNIDADES"] if c in ventas_periodo.columns), "CantBase")
+        ventas_periodo["_cant_calc"] = pd.to_numeric(ventas_periodo[col_cant], errors="coerce").fillna(0.0)
+        
+        col_imp = next((c for c in ["ImporteNetoItem", "ImporteNeto", "IMIMPORTENETO", "Neto"] if c in ventas_periodo.columns), None)
+        if col_imp:
+            ventas_periodo["_imp_calc"] = pd.to_numeric(ventas_periodo[col_imp], errors="coerce").fillna(0.0)
+        else:
+            ventas_periodo["_imp_calc"] = 0.0
 
-        clientes_g = ventas_periodo.groupby("Cliente", as_index=False).agg(Total_Peso=("_peso_calc", "sum"))
-        clientes_g["Es_CCC"] = clientes_g["Total_Peso"].gt(0)
+        # Agregación neta de unidades e importe por cliente
+        clientes_g = ventas_periodo.groupby("Cliente", as_index=False).agg(
+            Total_Cant=("_cant_calc", "sum"),
+            Total_Imp=("_imp_calc", "sum")
+        )
+        
+        # Criterio estricto CCC: unidades netas >= 3 E importe neto >= 1
+        clientes_g["Es_CCC"] = clientes_g["Total_Cant"].ge(3) & clientes_g["Total_Imp"].ge(1)
     else:
         clientes_g = pd.DataFrame(columns=["Cliente", "Es_CCC"])
 
@@ -174,7 +299,7 @@ def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_para
     for k in keys_to_delete:
         del st.session_state[k]
 
-    clave_cache_estado = f"_ccc_motor_cache_v35_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
+    clave_cache_estado = f"_ccc_motor_cache_v40_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
     if clave_cache_estado not in st.session_state:
         rep, det = _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal)
         st.session_state[clave_cache_estado] = (rep, det)
@@ -290,7 +415,6 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     cob_c = (cant_c / cart_c * 100) if cart_c > 0 else 0.0
     cob_d = (cant_d / cart_d * 100) if cart_d > 0 else 0.0
 
-    # Tarjetas métricas superiores con los colores estrictos por taxonomía (#ef4444: A, #f97316: B, #eab308: C, #22c55e: D)
     cols_r1 = st.columns(5)
     with cols_r1[0]:
         st.markdown(_tarjeta_metrica_html("Cartera Total", f"{tot_cartera:,.0f}", "#3b82f6"), unsafe_allow_html=True)
@@ -369,16 +493,12 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
 
     st.divider()
 
-    # =========================================================================
-    # SECCIÓN INTEGRADA: BATALLA NC (LISTADO DE CLIENTES NO COMPRADORES)
-    # =========================================================================
     st.markdown("### ⚔️ Batalla NC: Listado de Clientes No Compradores")
     st.markdown("Detalle de clientes sin compra en el período, filtrados por los criterios activos del reporte superior.")
 
     if not df_cli_filtrado.empty:
         df_nc = df_cli_filtrado[df_cli_filtrado["Es_CCC"] == False].copy()
         
-        # Mapeo inteligente para extraer las columnas idénticas y escuetas del envío a WhatsApp
         cols_disponibles = df_nc.columns.tolist()
         map_cols = {}
         for col in cols_disponibles:
@@ -390,7 +510,6 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
             elif cl in ["nombre", "preventista", "vendedor"]: map_cols["Vendedor"] = col
             elif cl in ["taxonomia", "taxonomía"]: map_cols["Taxonomia"] = col
 
-        # Construcción del DataFrame escueto y ordenado para visualización
         df_nc_escueto = pd.DataFrame()
         df_nc_escueto["Código Cliente"] = df_nc.get(map_cols.get("Cliente", "Cliente"), pd.Series())
         df_nc_escueto["Razón Social"] = df_nc.get(map_cols.get("NombreCliente", "NombreCliente"), pd.Series())
