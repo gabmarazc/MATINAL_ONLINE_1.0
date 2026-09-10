@@ -378,9 +378,9 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
 
 @st.fragment
 def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro, df_vta_prep, dia_matinal):
-    """Fragmento aislado de alta velocidad con estilo visual de tarjetas idéntico a Avance CCC."""
+    """Fragmento aislado de alta velocidad con estilo visual de tarjetas idéntico a Avance CCC y tamaño de fuente ampliado 50%."""
     
-    # Inyección de Estilos CSS idénticos al formato de Avance CCC
+    # Inyección de Estilos CSS idénticos al formato de Avance CCC pero con fuente ampliada un 50% (títulos ~21px, valores ~39px)
     st.markdown("""
         <style>
             div.card-azul {
@@ -393,13 +393,13 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
             }
             div.card-azul p {
                 color: #8b949e;
-                font-size: 14px;
+                font-size: 21px;
                 margin-bottom: 5px;
                 font-weight: 600;
             }
             div.card-azul h2 {
                 color: #ffffff;
-                font-size: 26px;
+                font-size: 39px;
                 margin: 0;
                 font-weight: 700;
             }
@@ -413,13 +413,13 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
             }
             div.card-rojo p {
                 color: #8b949e;
-                font-size: 14px;
+                font-size: 21px;
                 margin-bottom: 5px;
                 font-weight: 600;
             }
             div.card-rojo h2 {
                 color: #ffffff;
-                font-size: 26px;
+                font-size: 39px;
                 margin: 0;
                 font-weight: 700;
             }
@@ -465,7 +465,7 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
             if sup_filtro != "TODOS":
                 df_reemp_trans = df_reemp_trans[df_reemp_trans["SUP_Transaccion"].astype(str).str.strip() == sup_filtro]
             if s_dispo:
-                df_reemp_trans = df_reemp_trans[df_reemp_trans["SEGMENTO"].astype(str).str.strip().isin(s_dispo)]
+                df_reemp_trans = df_reemp_trans[df_reemp_trans["SEGMENTO"].astype(str).str.strip().isin(s_selec)]
             
             arrastre_reemp = float(df_reemp_trans[df_reemp_trans["Periodo"] == "Arrastre"]["PesoKg"].sum())
             actual_reemp = float(df_reemp_trans[df_reemp_trans["Periodo"] == "Actual"]["PesoKg"].sum())
@@ -533,7 +533,7 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
         total_tendencia = float(rep_detalle["Tendencia_Total_Kg"].sum())
         pct_cumplimiento_obj = (total_tendencia / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
 
-    # RENDERIZADO DE MÉTRICAS CON ESTILO DE TARJETAS (Nivel 1 y Nivel 2)
+    # RENDERIZADO DE MÉTRICAS CON ESTILO DE TARJETAS (Nivel 1 y Nivel 2 en Azul, Tendencia Kgs en Rojo)
     mcol1, mcol2, mcol3, mcol4 = st.columns(4)
     with mcol1:
         st.markdown(f"""<div class="card-azul"><p>📦 Arrastre</p><h2>{total_arrastre:,.1f} kg</h2></div>""", unsafe_allow_html=True)
@@ -663,7 +663,7 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en SQLite. Verifique en la solapa de Parámetros.")
         return
 
-    cache_key_rep = f"_cache_kilos_v46_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
+    cache_key_rep = f"_cache_kilos_v47_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
     if cache_key_rep not in st.session_state:
         df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
         reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro)

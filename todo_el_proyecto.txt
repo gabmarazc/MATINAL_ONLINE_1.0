@@ -13,7 +13,7 @@ from modules.rep_cob_marca import generar_reporte_cobertura_marca, dibujar_pesta
 from modules import database as db
 
 st.set_page_config(
-    page_title="Sistema Matinal 2.0",
+    page_title="Sistema de Gestión de Ventas - MABELHERDI S.A",
     page_icon="📊",
     layout="wide"
 )
@@ -57,7 +57,8 @@ def verificar_autenticacion():
         st.session_state["nivel_usuario"] = None
 
     if not st.session_state["autenticado"]:
-        st.title("🔒 Sistema Matinal 2.0 - Acceso Restringido")
+        st.title("🔒 Sistema de Gestión de Ventas - MABELHERDI S.A")
+        st.markdown("### Acceso Restringido")
         
         with st.form("form_login"):
             nivel_sel = st.selectbox(
@@ -88,7 +89,7 @@ def main():
     if not verificar_autenticacion():
         return
 
-    st.title("🚀 Sistema Matinal 2.0 - Panel de Control Comercial")
+    st.title("Sistema de Gestión de Ventas - MABELHERDI S.A")
 
     nivel_actual = st.session_state.get("nivel_usuario", "")
     st.sidebar.info(f"Sesión activa: **{nivel_actual}**")
@@ -110,7 +111,14 @@ def main():
     if st.sidebar.button("🔄 Recargar Bases y Limpiar Caché", width="stretch"):
         st.cache_data.clear()
         st.cache_resource.clear()
+        
+        auth_status = st.session_state.get("autenticado", False)
+        nivel_status = st.session_state.get("nivel_usuario", None)
+        
         st.session_state.clear()
+        
+        st.session_state["autenticado"] = auth_status
+        st.session_state["nivel_usuario"] = nivel_status
         
         h, dv, da = calcular_fechas_operativas_default()
         st.session_state["sel_dia_matinal"] = h
@@ -202,29 +210,30 @@ def main():
 
     es_local = es_entorno_local()
     
-    # Restricción y definición de solapas según el nivel autenticado
+    # Restricción y definición de solapas según el orden solicitado y el nivel autenticado
+    # Orden: Avance Kilos, Avance CCC, Cobertura Marca, Parámetros, Composición Obj Kilos
     if "Nivel 1" in nivel_actual:
         if es_local:
             tab1, tab2, tab3, tab4, tab5 = st.tabs([
                 "📊 Avance Kilos", 
-                "📦 Composición Obj Kilos",
                 "📈 Avance CCC", 
                 "🎯 Cobertura Marca", 
-                "⚙️ Parámetros"
+                "⚙️ Parámetros",
+                "📦 Composición Obj Kilos"
             ])
         else:
             tab1, tab2, tab3, tab4 = st.tabs([
                 "📊 Avance Kilos", 
-                "📦 Composición Obj Kilos",
                 "📈 Avance CCC", 
-                "🎯 Cobertura Marca"
+                "🎯 Cobertura Marca", 
+                "📦 Composición Obj Kilos"
             ])
     elif "Nivel 2" in nivel_actual:
         tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Avance Kilos", 
-            "📦 Composición Obj Kilos",
             "📈 Avance CCC", 
-            "🎯 Cobertura Marca"
+            "🎯 Cobertura Marca", 
+            "📦 Composición Obj Kilos"
         ])
     else:
         # Nivel 3: Supervisión (Sin Composición Obj Kilos)
@@ -240,28 +249,31 @@ def main():
     sup_sel_efectivo = supervisores_disponibles[1:] if filtros_globales["supervisor"] == "TODOS" else [filtros_globales["supervisor"]]
     rep_cob, marcas_lst, mapa_obj = generar_reporte_cobertura_marca(df_vta, df_universo, df_vend_maestro, df_marcas_maestro)
 
-    # Renderizado de pestañas acorde al perfil activo
+    # Renderizado de pestañas acorde al perfil activo y al nuevo orden de solapas
     if "Nivel 1" in nivel_actual:
         with tab1:
             render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
         with tab2:
-            render_rep_obj_kilos(df_vta, filtros_globales)
-        with tab3:
             render_rep_ccc(df_vta, df_universo, filtros_globales)
-        with tab4:
+        with tab3:
             dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
         if es_local:
-            with tab5:
+            with tab4:
                 render_parametros_view(filtros_globales)
+            with tab5:
+                render_rep_obj_kilos(df_vta, filtros_globales)
+        else:
+            with tab4:
+                render_rep_obj_kilos(df_vta, filtros_globales)
     elif "Nivel 2" in nivel_actual:
         with tab1:
             render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
         with tab2:
-            render_rep_obj_kilos(df_vta, filtros_globales)
-        with tab3:
             render_rep_ccc(df_vta, df_universo, filtros_globales)
-        with tab4:
+        with tab3:
             dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
+        with tab4:
+            render_rep_obj_kilos(df_vta, filtros_globales)
     else:
         # Nivel 3: Supervisión
         with tab1:
@@ -387,26 +399,28 @@ def inicializar_bd_desde_excel(archivos_dict):
 
 def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
     """
-    Lee el Excel exportado desde rep_obj_kilos.py, valida sus columnas esenciales
-    y guarda o reemplaza los objetivos definitivos en la tabla 'objetivos_vendedores' 
-    para el período (Anio, Mes) asegurando control de versión.
+    Lee el Excel exportado desde rep_obj_kilos.py, valida sus columnas esenciales agrupadas
+    por vendedor y segmento, y guarda o reemplaza los objetivos definitivos en la tabla 
+    'objetivos_vendedores' para el período (Anio, Mes) asegurando control de versión multimes.
     """
     try:
         df_subida = pd.read_excel(file_buffer_or_path)
     except Exception as e:
         return False, f"Error al leer el archivo Excel: {e}"
 
-    columnas_requeridas = ["CodVendedor", "Marca", "SEGMENTO", "Obj_Sugerido_Kg"]
+    columnas_requeridas = ["CodVendedor", "SEGMENTO", "Obj_Sugerido_Kg"]
     faltantes = [c for c in columnas_requeridas if c not in df_subida.columns]
     if faltantes:
         return False, f"El archivo Excel no tiene el formato correcto. Faltan las columnas: {', '.join(faltantes)}"
 
     df_subida["CodVendedor"] = pd.to_numeric(df_subida["CodVendedor"], errors="coerce").astype("Int64")
-    df_subida["Marca"] = df_subida["Marca"].fillna("").astype(str).str.strip().str.upper()
+    if "Nombre" in df_subida.columns:
+        df_subida["Nombre"] = df_subida["Nombre"].fillna("").astype(str).str.strip()
+    if "Supervisor" in df_subida.columns:
+        df_subida["Supervisor"] = df_subida["Supervisor"].fillna("").astype(str).str.strip()
     df_subida["SEGMENTO"] = df_subida["SEGMENTO"].fillna("").astype(str).str.strip()
     df_subida["Obj_Sugerido_Kg"] = pd.to_numeric(df_subida["Obj_Sugerido_Kg"], errors="coerce").fillna(0.0)
 
-    # Conversión segura y robusta a enteros para evitar el error de formato 'd'
     try:
         anio_int = int(float(str(anio)))
     except Exception:
@@ -423,6 +437,8 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
     conn = obtener_conexion()
     try:
         cursor = conn.cursor()
+        
+        # Crear la tabla si no existe, preservando los datos de otros meses ya cargados
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS objetivos_vendedores (
                 Anio INTEGER,
@@ -430,22 +446,21 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
                 CodVendedor INTEGER,
                 Nombre TEXT,
                 Supervisor TEXT,
-                Marca TEXT,
-                CEBE TEXT,
                 SEGMENTO TEXT,
                 Kilos_Mes_Anterior REAL,
                 Objetivo_Mes_Anterior_Kg REAL,
                 Logro_Anterior_Pct REAL,
-                Obj_Macro_Marca_Kg REAL,
                 Obj_Sugerido_Kg REAL,
-                PRIMARY KEY (Anio, Mes, CodVendedor, Marca, SEGMENTO)
+                PRIMARY KEY (Anio, Mes, CodVendedor, SEGMENTO)
             )
         """)
         conn.commit()
 
+        # Eliminar únicamente los registros del período específico que se está actualizando
         cursor.execute("DELETE FROM objetivos_vendedores WHERE Anio = ? AND Mes = ?", (anio_int, mes_int))
         conn.commit()
 
+        # Anexar los nuevos objetivos sin afectar los meses históricos
         df_subida.to_sql("objetivos_vendedores", conn, if_exists="append", index=False, chunksize=10000)
     finally:
         conn.close()
@@ -553,7 +568,7 @@ def obtener_objetivos_vendedores_sql(anio: str = None, mes: str = None) -> pd.Da
     try:
         df_all = db.cargar_tabla_sql("SELECT * FROM objetivos_vendedores")
         if df_all is None or df_all.empty:
-            return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Obj_Sugerido_Kg"])
+            return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO", "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", "Obj_Sugerido_Kg"])
         
         if not mes or str(mes).strip() == "":
             return df_all
@@ -566,7 +581,7 @@ def obtener_objetivos_vendedores_sql(anio: str = None, mes: str = None) -> pd.Da
             
         return df_all
     except Exception:
-        return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Obj_Sugerido_Kg"])
+        return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO", "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", "Obj_Sugerido_Kg"])
 
 def render_parametros_view(filtros_globales: dict = None):
     if not es_entorno_local():
@@ -918,6 +933,105 @@ def _extraer_dia_de_ruta(val):
     if "DOM" in val_clean: return "DOMINGO"
     return "SIN DÍA"
 
+def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
+    """Pipeline de ventas independiente y específico para CCC basado en CantBase, ImporteNeto y períodos."""
+    df = df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame()
+    if df.empty:
+        return df
+
+    col_cant = next((c for c in ["CantBase", "CANTBASE", "Cantidad", "CANTIDAD", "Unidades", "UNIDADES"] if c in df.columns), df.columns[0])
+    df["CantBase"] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0.0)
+
+    col_imp = next((c for c in ["ImporteNetoItem", "ImporteNeto", "IMIMPORTENETO", "Neto"] if c in df.columns), None)
+    if col_imp:
+        df["ImporteNeto"] = pd.to_numeric(df[col_imp], errors="coerce").fillna(0.0)
+    else:
+        df["ImporteNeto"] = 0.0
+
+    if "TipoDeVenta" in df.columns:
+        tipos_excluidos = [
+            "Comodato Devolución", 
+            "Comodato Ficticio", 
+            "Comodato Ficticio Devolución", 
+            "Comodato Préstamo"
+        ]
+        df = df[~df["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)]
+
+    if "Proveedor" in df.columns:
+        df = df[
+            df["Proveedor"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .str.contains("PEPSICO", na=False)
+        ]
+
+    if "Subramo" in df.columns:
+        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
+        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
+
+    df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
+    df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
+
+    dia_matinal_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
+    if pd.notna(dia_matinal_dt):
+        es_mes_en_curso = (dia_matinal_dt.year == anio_operativo and dia_matinal_dt.month in [mes_operativo, mes_operativo + 1])
+        if es_mes_en_curso:
+            df = df[df["FechaCarga_dt"].dt.date < dia_matinal_dt.date()]
+
+    col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
+    df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
+
+    df["MesCarga"] = df["FechaCarga_dt"].dt.month
+    df["AñoCarga"] = df["FechaCarga_dt"].dt.year
+    df["MesEntrega"] = df["FechaEntrega_dt"].dt.month
+    df["AñoEntrega"] = df["FechaEntrega_dt"].dt.year
+
+    mes_ant = 12 if mes_operativo == 1 else mes_operativo - 1
+    anio_ant = anio_operativo - 1 if mes_operativo == 1 else anio_operativo
+
+    mes_sig = 1 if mes_operativo == 12 else mes_operativo + 1
+    anio_sig = anio_operativo + 1 if mes_operativo == 12 else anio_operativo
+
+    def asignar_periodo(row):
+        ac, mc = row["AñoCarga"], row["MesCarga"]
+        ae, me = row["AñoEntrega"], row["MesEntrega"]
+        
+        if ac == anio_ant and mc == mes_ant and ae == anio_operativo and me == mes_operativo:
+            return "Arrastre"
+        elif ac == anio_operativo and mc == mes_operativo and ae == anio_operativo and me == mes_operativo:
+            return "Actual"
+        elif ac == anio_operativo and mc == mes_operativo and ae == anio_sig and me == mes_sig:
+            return "Futuro"
+        return "Fuera de Periodo"
+
+    df["Periodo"] = df.apply(asignar_periodo, axis=1)
+
+    df["ClaveAUS_Carga"] = df["CodVendedor"].astype(str) + "-" + df["FechaCarga_dt"].dt.strftime("%Y-%m-%d")
+    df["ClaveAUS_Entrega"] = df["CodVendedor"].astype(str) + "-" + df["FechaEntrega_dt"].dt.strftime("%Y-%m-%d")
+
+    df_aus = df_ausencias.copy() if df_ausencias is not None and not df_ausencias.empty else pd.DataFrame()
+    if not df_aus.empty:
+        col_aus_vend = next((c for c in ["Ausente", "CodVend", "CodVendedor", "Vendedor", "Cod_Vendedor"] if c in df_aus.columns), df_aus.columns[3])
+        col_aus_fecha = next((c for c in df_aus.columns if c in ["Fecha", "FechaAusencia", "Dia"]), df_aus.columns[2])
+        col_aus_reemp = next((c for c in df_aus.columns if c in ["Reemplazo", "CodReemplazo", "Cod_Reemplazo", "PreventistaReemplazo"]), df_aus.columns[4])
+
+        df_aus["Fecha_dt"] = parsear_fecha_robusta(df_aus[col_aus_fecha])
+        df_aus["CodVend_clean"] = pd.to_numeric(df_aus[col_aus_vend], errors="coerce").astype("Int64")
+        df_aus["ClaveAUS"] = df_aus["CodVend_clean"].astype(str) + "-" + df_aus["Fecha_dt"].dt.strftime("%Y-%m-%d")
+        df_aus["Reemplazo_clean"] = pd.to_numeric(df_aus[col_aus_reemp], errors="coerce").astype("Int64")
+
+        aus_map = df_aus.dropna(subset=["ClaveAUS", "Reemplazo_clean"]).drop_duplicates("ClaveAUS").set_index("ClaveAUS")["Reemplazo_clean"]
+        
+        df["Reemplazo"] = df["ClaveAUS_Carga"].map(aus_map).combine_first(df["ClaveAUS_Entrega"].map(aus_map))
+        df["CodVendedorOperativo"] = df["Reemplazo"].combine_first(df["CodVendedor"]).astype("Int64")
+    else:
+        df["Reemplazo"] = pd.NA
+        df["CodVendedorOperativo"] = df["CodVendedor"]
+
+    return df
+
 def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal):
     hoja_ccc = hoja_ccc_param.copy() if hoja_ccc_param is not None and not hoja_ccc_param.empty else pd.DataFrame(columns=["Taxonomia", "OBJ_CCC"])
     if not hoja_ccc.empty:
@@ -939,56 +1053,13 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     else:
         hoja_ccc = pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"], "OBJ_CCC": [0.0, 0.0, 0.0, 0.0]})
 
-    # Procesamiento nativo e independiente de ventas para CCC (basado en CantBase y períodos)
-    df_v = df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame()
-    if not df_v.empty:
-        if "TipoDeVenta" in df_v.columns:
-            tipos_excluidos = ["Comodato Devolución", "Comodato Ficticio", "Comodato Ficticio Devolución", "Comodato Préstamo"]
-            df_v = df_v[~df_v["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)]
+    try:
+        df_ausencias = db.cargar_tabla_sql("SELECT * FROM ausencias")
+    except Exception:
+        df_ausencias = pd.DataFrame()
 
-        if "Proveedor" in df_v.columns:
-            df_v = df_v[df_v["Proveedor"].fillna("").astype(str).str.strip().str.upper().str.contains("PEPSICO", na=False)]
-
-        if "Subramo" in df_v.columns:
-            subramo_clean = df_v["Subramo"].fillna("").astype(str).str.strip().str.upper()
-            df_v = df_v[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
-
-        df_v["FechaCarga_dt"] = parsear_fecha_robusta(df_v.get("FechaCarga"))
-        df_v["FechaEntrega_dt"] = parsear_fecha_robusta(df_v.get("FechaEntrega"))
-
-        dia_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
-        if pd.notna(dia_mat_dt):
-            es_mes_en_curso = (dia_mat_dt.year == anio_op and dia_mat_dt.month in [mes_op, mes_op + 1])
-            if es_mes_en_curso:
-                df_v = df_v[df_v["FechaCarga_dt"].dt.date < dia_mat_dt.date()]
-
-        col_vend = next((c for c in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if c in df_v.columns), "CodVendedor")
-        df_v["CodVendedor"] = pd.to_numeric(df_v[col_vend], errors="coerce").astype("Int64")
-
-        df_v["MesCarga"] = df_v["FechaCarga_dt"].dt.month
-        df_v["AñoCarga"] = df_v["FechaCarga_dt"].dt.year
-        df_v["MesEntrega"] = df_v["FechaEntrega_dt"].dt.month
-        df_v["AñoEntrega"] = df_v["FechaEntrega_dt"].dt.year
-
-        mes_ant = 12 if mes_op == 1 else mes_op - 1
-        anio_ant = anio_op - 1 if mes_op == 1 else anio_op
-        mes_sig = 1 if mes_op == 12 else mes_op + 1
-        anio_sig = anio_op + 1 if mes_op == 1 else anio_op
-
-        def asignar_periodo(row):
-            ac, mc = row["AñoCarga"], row["MesCarga"]
-            ae, me = row["AñoEntrega"], row["MesEntrega"]
-            if ac == anio_ant and mc == mes_ant and ae == anio_op and me == mes_op:
-                return "Arrastre"
-            elif ac == anio_op and mc == mes_op and ae == anio_op and me == mes_op:
-                return "Actual"
-            elif ac == anio_op and mc == mes_op and ae == anio_sig and me == mes_sig:
-                return "Futuro"
-            return "Fuera de Periodo"
-
-        df_v["Periodo"] = df_v.apply(asignar_periodo, axis=1)
-
-    ventas_periodo = df_v[df_v["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_v.empty and "Periodo" in df_v.columns else df_v.copy()
+    df_vta_prep = preparar_ventas_ccc(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
+    ventas_periodo = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else df_vta_prep.copy()
 
     dia_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
     if pd.notna(dia_mat_dt) and not ventas_periodo.empty and "FechaEntrega_dt" in ventas_periodo.columns:
@@ -1000,9 +1071,21 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
         
         col_cant = next((c for c in ["CantBase", "CANTBASE", "Cantidad", "CANTIDAD", "Unidades", "UNIDADES"] if c in ventas_periodo.columns), "CantBase")
         ventas_periodo["_cant_calc"] = pd.to_numeric(ventas_periodo[col_cant], errors="coerce").fillna(0.0)
+        
+        col_imp = next((c for c in ["ImporteNetoItem", "ImporteNeto", "IMIMPORTENETO", "Neto"] if c in ventas_periodo.columns), None)
+        if col_imp:
+            ventas_periodo["_imp_calc"] = pd.to_numeric(ventas_periodo[col_imp], errors="coerce").fillna(0.0)
+        else:
+            ventas_periodo["_imp_calc"] = 0.0
 
-        clientes_g = ventas_periodo.groupby("Cliente", as_index=False).agg(Total_Cant=("_cant_calc", "sum"))
-        clientes_g["Es_CCC"] = clientes_g["Total_Cant"].gt(0)
+        # Agregación neta de unidades e importe por cliente
+        clientes_g = ventas_periodo.groupby("Cliente", as_index=False).agg(
+            Total_Cant=("_cant_calc", "sum"),
+            Total_Imp=("_imp_calc", "sum")
+        )
+        
+        # Criterio estricto CCC: unidades netas >= 3 E importe neto >= 1
+        clientes_g["Es_CCC"] = clientes_g["Total_Cant"].ge(3) & clientes_g["Total_Imp"].ge(1)
     else:
         clientes_g = pd.DataFrame(columns=["Cliente", "Es_CCC"])
 
@@ -1106,14 +1189,14 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
 def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_param, filtros_globales=None):
     anio_op = int(filtros_globales.get("anio", 2026)) if filtros_globales else 2026
     mes_op = int(filtros_globales.get("mes", 9)) if filtros_globales else 9
-    dia_matinal = filtros_globales.get("dia_matinal", "09/09/2026") if filtros_globales else "09/09/2026"
+    dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026") if filtros_globales else "02/09/2026"
     sup_filtro = str(filtros_globales.get("supervisor", "TODOS")).strip() if filtros_globales else "TODOS"
 
     keys_to_delete = [k for k in st.session_state.keys() if "_ccc_motor_cache_" in k]
     for k in keys_to_delete:
         del st.session_state[k]
 
-    clave_cache_estado = f"_ccc_motor_cache_v37_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
+    clave_cache_estado = f"_ccc_motor_cache_v40_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
     if clave_cache_estado not in st.session_state:
         rep, det = _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal)
         st.session_state[clave_cache_estado] = (rep, det)
@@ -1446,18 +1529,124 @@ def render_rep_ccc(df_vta, df_universo, filtros_globales=None):
 
 # modules/rep_cob_marca.py
 import io
+import urllib.parse
+import unicodedata
 import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode, JsCode
 from modules import database as db
-from modules.rep_kilos import preparar_datos_ventas_segmento
+
+def parsear_fecha_robusta(serie):
+    """Estandariza parseo de fechas considerando formatos ISO, DD/MM/YYYY y genérico sin advertencias."""
+    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
+        return pd.Series(dtype="datetime64[ns]")
+    if not isinstance(serie, pd.Series):
+        serie = pd.Series([serie])
+    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
+    
+    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
+    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
+    dt_gen = pd.to_datetime(s, errors="coerce")
+    
+    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
+
+def _extraer_dia_de_ruta_vectorial(serie):
+    """Normalización y extracción vectorial rápida de días de visita sin bucles lentos en Python puro."""
+    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
+        return pd.Series(dtype="object")
+    s_upper = serie.astype(str).str.upper()
+    dias_map = pd.Series("SIN DÍA", index=serie.index)
+    dias_map[s_upper.str.contains("LUN", na=False)] = "LUNES"
+    dias_map[s_upper.str.contains("MAR", na=False)] = "MARTES"
+    dias_map[s_upper.str.contains("MIE", na=False)] = "MIERCOLES"
+    dias_map[s_upper.str.contains("JUE", na=False)] = "JUEVES"
+    dias_map[s_upper.str.contains("VIE", na=False)] = "VIERNES"
+    dias_map[s_upper.str.contains("SAB", na=False)] = "SABADO"
+    dias_map[s_upper.str.contains("DOM", na=False)] = "DOMINGO"
+    return dias_map
+
+def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_matinal):
+    """
+    Pipeline de ventas nativo para Cobertura por Marca:
+    Aplica exclusivamente los filtros de cabecera válidos sin agrupar ni descartar filas por segmentos de kilos.
+    """
+    df = df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame()
+    if df.empty:
+        return df
+
+    col_cant = next((c for c in ["CantBase", "CANTBASE", "Cantidad", "CANTIDAD", "Unidades", "UNIDADES"] if c in df.columns), df.columns[0])
+    df["cantbase"] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0.0)
+
+    if "TipoDeVenta" in df.columns:
+        tipos_excluidos = [
+            "Comodato Devolución", 
+            "Comodato Ficticio", 
+            "Comodato Ficticio Devolución", 
+            "Comodato Préstamo"
+        ]
+        df = df[~df["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)]
+
+    if "Proveedor" in df.columns:
+        df = df[
+            df["Proveedor"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .str.contains("PEPSICO", na=False)
+        ]
+
+    if "Subramo" in df.columns:
+        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
+        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
+
+    df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
+    df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
+
+    dia_matinal_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
+    if pd.notna(dia_matinal_dt):
+        es_mes_en_curso = (dia_matinal_dt.year == anio_operativo and dia_matinal_dt.month in [mes_operativo, mes_operativo + 1])
+        if es_mes_en_curso:
+            df = df[df["FechaCarga_dt"].dt.date < dia_matinal_dt.date()]
+
+    col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
+    df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
+
+    df["MesCarga"] = df["FechaCarga_dt"].dt.month
+    df["AñoCarga"] = df["FechaCarga_dt"].dt.year
+    df["MesEntrega"] = df["FechaEntrega_dt"].dt.month
+    df["AñoEntrega"] = df["FechaEntrega_dt"].dt.year
+
+    mes_ant = 12 if mes_operativo == 1 else mes_operativo - 1
+    anio_ant = anio_operativo - 1 if mes_operativo == 1 else anio_operativo
+
+    mes_sig = 1 if mes_operativo == 12 else mes_operativo + 1
+    anio_sig = anio_operativo + 1 if mes_operativo == 12 else anio_operativo
+
+    def asignar_periodo(row):
+        ac, mc = row["AñoCarga"], row["MesCarga"]
+        ae, me = row["AñoEntrega"], row["MesEntrega"]
+        
+        if ac == anio_ant and mc == mes_ant and ae == anio_operativo and me == mes_operativo:
+            return "Arrastre"
+        elif ac == anio_operativo and mc == mes_operativo and ae == anio_operativo and me == mes_operativo:
+            return "Actual"
+        elif ac == anio_operativo and mc == mes_operativo and ae == anio_sig and me == mes_sig:
+            return "Futuro"
+        return "Fuera de Periodo"
+
+    df["Periodo"] = df.apply(asignar_periodo, axis=1)
+
+    col_m = next((c for c in ["Marca", "MARCA", "marca"] if c in df.columns), None)
+    df["Marca"] = df[col_m].fillna("").astype(str).str.strip().str.upper() if col_m else "SIN MARCA"
+
+    return df
 
 def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas):
     """
-    Genera la matriz analítica de Cobertura por Marca utilizando el código de vendedor original de ventas,
-    calculando la cartera propia por preventista y evaluando la sumatoria de unidades por cliente (>= 3).
+    Genera la matriz analítica de Cobertura por Marca estructurando la base analítica en memoria
+    para posibilitar recalculo instantáneo de cobertura ante cambios de Vendedor, Marca o Día de Visita.
     """
-    # 1. Obtención de parámetros operativos vigentes
     df_params = db.cargar_tabla_sql("SELECT * FROM parametros")
     params_map = {}
     if not df_params.empty and "PARAMETRO" in df_params.columns and "VALOR" in df_params.columns:
@@ -1470,15 +1659,8 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
     dia_matinal_obj = st.session_state.get("sel_dia_matinal", dia_matinal_default)
     dia_matinal = dia_matinal_obj.strftime("%d/%m/%Y") if hasattr(dia_matinal_obj, "strftime") else str(dia_matinal_obj)
 
-    # 2. Preparación de ventas estándar con el pipeline oficial
-    try:
-        df_ausencias = db.cargar_tabla_sql("SELECT * FROM ausencias")
-    except Exception:
-        df_ausencias = pd.DataFrame()
+    df_vta_prep = preparar_ventas_cobertura_marca(df_vtas_operativo, anio_op, mes_op, dia_matinal)
 
-    df_vta_prep = preparar_datos_ventas_segmento(df_vtas_operativo, df_ausencias, anio_op, mes_op, dia_matinal)
-
-    # 3. Procesamiento del maestro de vendedores oficial
     df_vend = vendedores.copy() if vendedores is not None and not vendedores.empty else pd.DataFrame(columns=["CodVend", "Nombre", "SUP"])
     col_cod_v = next((c for c in ["CodVend", "Codigo_Vendedor", "CodVendedor"] if c in df_vend.columns), df_vend.columns[0])
     col_nom_v = next((c for c in df_vend.columns if "nombre" in str(c).strip().lower()), df_vend.columns[1] if len(df_vend.columns) > 1 else df_vend.columns[0])
@@ -1488,7 +1670,6 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
     df_vend["CodVendedor"] = pd.to_numeric(df_vend["CodVendedor"], errors="coerce").astype("Int64")
     df_vend = df_vend[~df_vend["CodVendedor"].isin([20, 99])].drop_duplicates(subset=["CodVendedor"])
 
-    # 4. Extracción estricta del padrón oficial de marcas (maestro_marcas_cebe)
     df_marcas_oficial = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
     if df_marcas_oficial is None or df_marcas_oficial.empty:
         df_marcas_oficial = df_marcas if df_marcas is not None else pd.DataFrame()
@@ -1506,14 +1687,9 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
                 marcas.append(m)
                 mapa_objetivos[m] = 80.0
 
-    marcas = sorted(marcas)
-
-    # 5. Filtrado de ventas por períodos operativos (Arrastre / Actual)
     vtas = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else pd.DataFrame()
 
-    # 6. Procesamiento de Cartera (Universo) para obtener la cartera propia por vendedor
     cartera = df_cartera.copy() if df_cartera is not None and not df_cartera.empty else pd.DataFrame()
-    total_cartera = pd.DataFrame(columns=["CodVendedor", "Total_Cartera"])
     
     if not cartera.empty:
         cols_c_str = [str(c).strip().lower() for c in cartera.columns]
@@ -1539,188 +1715,184 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
         elif len(cartera.columns) > 0:
             cartera["CodVendedor"] = pd.to_numeric(cartera.iloc[:, 0], errors="coerce").astype("Int64")
             
-        if "CodVendedor" in cartera.columns:
-            total_cartera = cartera.groupby("CodVendedor").size().reset_index(name="Total_Cartera")
-    
+        col_cod_cliente_c = next((c for c in cartera.columns if "cliente" in c.lower() or "nro" in c.lower() or "codigo" in c.lower()), cartera.columns[0])
+        cartera["Cliente_Cod"] = pd.to_numeric(cartera[col_cod_cliente_c], errors="coerce").astype("Int64")
+        
+        col_desc_cliente = next((c for c in cartera.columns if any(k in c.lower() for k in ["razon", "nombre", "desc", "cliente"]) and c != col_cod_cliente_c), None)
+        if col_desc_cliente is None:
+            col_desc_cliente = col_cod_cliente_c
+        cartera["Cliente_Desc"] = cartera[col_desc_cliente].fillna("").astype(str)
+
+        col_dir_c = next((c for c in cartera.columns if any(k in c.lower() for k in ["dir", "domicilio", "direccion"])), None)
+        cartera["Cliente_Dir"] = cartera[col_dir_c].fillna("").astype(str) if col_dir_c else ""
+
+        col_ruta_c = next((c for c in cartera.columns if str(c).strip().lower() in ["ruta", "dia_visita", "visita", "dia"]), None)
+        if col_ruta_c is not None:
+            cartera["DiaVisita"] = _extraer_dia_de_ruta_vectorial(cartera[col_ruta_c])
+        else:
+            cartera["DiaVisita"] = "SIN DÍA"
+
+        cartera = cartera.dropna(subset=["CodVendedor", "Cliente_Cod"]).drop_duplicates(subset=["CodVendedor", "Cliente_Cod"])
+        cartera = cartera.merge(df_vend[["CodVendedor", "Nombre", "SUP"]], on="CodVendedor", how="inner")
+
     cliente_col_vtas = next((c for c in ["Cliente", "NroCliente", "CodCliente", "CLIENTE"] if not vtas.empty and c in vtas.columns), "Cliente")
 
-    # 7. Evaluación estricta de Cobertura (Sumatoria por Cliente y Marca >= 3 unidades)
     if not vtas.empty and marcas:
-        col_cv = next((c for c in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor", "CodVend"] if c in vtas.columns), "CodVendedor")
-        vtas["CodVendedor"] = pd.to_numeric(vtas[col_cv], errors="coerce").astype("Int64")
-        
-        col_cant = next((c for c in ["CantBase", "CANTBASE", "Cantidad", "CANTIDAD", "Unidades", "UNIDADES", "PesoKg"] if c in vtas.columns), vtas.columns[0])
-        vtas["cantbase"] = pd.to_numeric(vtas[col_cant], errors="coerce").fillna(0.0)
-        vtas["Marca"] = vtas["Marca"].astype(str).str.strip().str.upper()
-        
+        vtas["CodVendedor"] = pd.to_numeric(vtas["CodVendedor"], errors="coerce").astype("Int64")
         vtas["Cliente"] = pd.to_numeric(vtas[cliente_col_vtas], errors="coerce").astype("Int64")
         vtas = vtas[vtas["Marca"].isin(marcas)].copy()
 
         vtas_agrupadas = vtas.groupby(["CodVendedor", "Cliente", "Marca"], as_index=False).agg(
             Total_Cant=("cantbase", "sum")
         )
-
-        vtas_filtradas = vtas_agrupadas[
-            vtas_agrupadas["Total_Cant"].ge(3)
-        ].copy() if not vtas_agrupadas.empty else pd.DataFrame()
     else:
-        vtas_filtradas = pd.DataFrame()
-    
-    # 8. Construcción de la matriz pivote de cobertura por vendedor
-    if not vtas_filtradas.empty and "CodVendedor" in vtas_filtradas.columns and "Marca" in vtas_filtradas.columns and "Cliente" in vtas_filtradas.columns:
-        conteo_cubiertos = vtas_filtradas.groupby(["CodVendedor", "Marca"])["Cliente"].nunique().reset_index(name="Clientes_Cubiertos")
-        pivot_cubiertos = conteo_cubiertos.pivot_table(index="CodVendedor", columns="Marca", values="Clientes_Cubiertos", fill_value=0).reset_index()
-        pivot_cubiertos.columns.name = None
-    else:
-        pivot_cubiertos = pd.DataFrame(columns=["CodVendedor"])
-    
-    reporte = df_vend[["CodVendedor", "Nombre", "SUP"]].copy()
-        
-    if not reporte.empty and not total_cartera.empty and "CodVendedor" in total_cartera.columns:
-        reporte = reporte.merge(total_cartera, on="CodVendedor", how="left")
-    
-    reporte["Total_Cartera"] = reporte["Total_Cartera"].fillna(0) if "Total_Cartera" in reporte.columns else 0
-    
-    if not pivot_cubiertos.empty and "CodVendedor" in pivot_cubiertos.columns:
-        reporte = reporte.merge(pivot_cubiertos, on="CodVendedor", how="left")
-        
-    for marca in marcas:
-        if marca not in reporte.columns:
-            reporte[marca] = 0.0
-        else:
-            reporte[marca] = reporte[marca].fillna(0.0)
-            
-    for marca in marcas:
-        if "Total_Cartera" in reporte.columns:
-            total_c = reporte["Total_Cartera"].replace(0, pd.NA)
-            # Cálculo porcentual exacto escala 0 a 100 frente a la cartera propia del vendedor
-            reporte[marca] = (reporte[marca] / total_c).fillna(0.0) * 100.0
-        else:
-            reporte[marca] = 0.0
-        
-    base_cols = ["CodVendedor", "Nombre", "SUP", "Total_Cartera"]
-    columnas_finales = base_cols + [m for m in marcas if m in reporte.columns]
-    reporte = reporte[[c for c in columnas_finales if c in reporte.columns]].rename(columns={"Total_Cartera": "Cartera"})
+        vtas_agrupadas = pd.DataFrame(columns=["CodVendedor", "Cliente", "Marca", "Total_Cant"])
 
-    # 9. Guardado en caché de sesión para el detalle interactivo de clientes
-    if not cartera.empty and not vtas.empty:
-        c_cartera = cartera.copy()
-        col_cod_cliente_c = next((c for c in c_cartera.columns if "cliente" in c.lower() or "nro" in c.lower() or "codigo" in c.lower()), c_cartera.columns[0])
-        c_cartera["Cliente_Cod"] = pd.to_numeric(c_cartera[col_cod_cliente_c], errors="coerce").astype("Int64")
-        
-        col_desc_cliente = next((c for c in c_cartera.columns if any(k in c.lower() for k in ["razon", "nombre", "desc", "cliente"]) and c != col_cod_cliente_c), col_cod_cliente_c)
-        c_cartera["Cliente_Desc"] = c_cartera[col_desc_cliente].fillna("").astype(str)
+    st.session_state["_cob_cartera_base"] = cartera
+    st.session_state["_cob_vtas_agrupadas"] = vtas_agrupadas
+    st.session_state["_cob_marcas"] = marcas
+    st.session_state["_cob_mapa_objetivos"] = mapa_objetivos
+    st.session_state["_cob_vendedores_df"] = df_vend
 
-        enc_vend_c = next((c for c in ["codvendedor", "codvend", "vendedor", "vend"] if c in c_cartera.columns.str.lower()), None)
-        if enc_vend_c:
-            real_col_v = [c for c in c_cartera.columns if c.lower() == enc_vend_c][0]
-            c_cartera["CodVendedor"] = pd.to_numeric(c_cartera[real_col_v], errors="coerce").astype("Int64")
+    return pd.DataFrame(), marcas, mapa_objetivos
 
-        if "CodVendedor" in c_cartera.columns:
-            lista_clientes_cartera = c_cartera[["CodVendedor", "Cliente_Cod", "Cliente_Desc"]].drop_duplicates().copy()
-            lista_clientes_cartera = lista_clientes_cartera.merge(df_vend[["CodVendedor", "Nombre"]], on="CodVendedor", how="inner")
-
-            df_expansion = []
-            for marca in marcas:
-                tmp = lista_clientes_cartera.copy()
-                tmp["Marca"] = marca
-                df_expansion.append(tmp)
-            
-            if df_expansion:
-                df_matriz_potencial = pd.concat(df_expansion, ignore_index=True)
-                vtas_agrup_det = vtas.groupby(["CodVendedor", "Cliente", "Marca"], as_index=False).agg(Unidades_Ultimo_Mes=("cantbase", "sum"))
-                
-                df_det_merged = df_matriz_potencial.merge(
-                    vtas_agrup_det,
-                    left_on=["CodVendedor", "Cliente_Cod", "Marca"],
-                    right_on=["CodVendedor", "Cliente", "Marca"],
-                    how="left"
-                )
-                df_det_merged["Unidades_Ultimo_Mes"] = df_det_merged["Unidades_Ultimo_Mes"].fillna(0.0)
-                df_det_cumplen = df_det_merged[df_det_merged["Unidades_Ultimo_Mes"] >= 3.0].copy()
-                df_det_cumplen["Estado"] = "Cumple Objetivo (>= 3 u.)"
-
-                df_det_final = df_det_cumplen[[
-                    "Nombre", "Cliente_Cod", "Cliente_Desc", "Marca", "Unidades_Ultimo_Mes", "Estado"
-                ]].rename(columns={
-                    "Nombre": "Vendedor",
-                    "Cliente_Cod": "Cód. Cliente",
-                    "Cliente_Desc": "Cliente",
-                    "Unidades_Ultimo_Mes": "Unidades"
-                }).reset_index(drop=True)
-                
-                st.session_state["_cache_detalle_clientes_cob"] = df_det_final
-    
-    return reporte, marcas, mapa_objetivos
+def _tarjeta_metrica_marca_html(label, valor, border_color="#3b82f6"):
+    """Genera tarjetas HTML con estilo idéntico a rep_ccc.py, texto en negrita y borde de color."""
+    return f"""
+    <div style="
+        background-color: #1e293b;
+        border: 2px solid {border_color};
+        border-radius: 8px;
+        padding: 10px 14px;
+        text-align: center;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        margin-bottom: 8px;
+    ">
+        <div style="font-size: 0.95rem; color: #f8fafc; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">{label}</div>
+        <div style="font-size: 1.4rem; color: #f8fafc; font-weight: 700;">{valor}</div>
+    </div>
+    """
 
 @st.fragment
-def render_fragmento_interactivo_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, supervisores_seleccionados):
-    """
-    Fragmento interactivo de velocidad instantánea. Realiza filtrado vectorial en memoria
-    sobre el DataFrame precalculado, eliminando cualquier latencia al operar los multiselects.
-    """
+def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas_param, mapa_objetivos_param, supervisores_seleccionados):
+    cartera_base = st.session_state.get("_cob_cartera_base", pd.DataFrame())
+    vtas_agrup = st.session_state.get("_cob_vtas_agrupadas", pd.DataFrame())
+    marcas = st.session_state.get("_cob_marcas", marcas_param)
+    mapa_objetivos = st.session_state.get("_cob_mapa_objetivos", mapa_objetivos_param)
+    df_vend = st.session_state.get("_cob_vendedores_df", pd.DataFrame())
+
+    if cartera_base.empty:
+        st.info("No hay datos de cartera disponibles para procesar la Cobertura por Marca.")
+        return
+
     sup_str = [str(s).strip() for s in supervisores_seleccionados]
-    if reporte_cobertura is not None and not reporte_cobertura.empty and "SUP" in reporte_cobertura.columns:
-        df_filtrado = reporte_cobertura[
-            reporte_cobertura["SUP"].astype(str).str.strip().isin(sup_str)
-        ].copy()
-    else:
-        df_filtrado = pd.DataFrame(columns=["CodVendedor", "Nombre", "Cartera", "SUP"])
+    cartera_filtrada = cartera_base[cartera_base["SUP"].astype(str).str.strip().isin(sup_str)].copy() if sup_str and "SUP" in cartera_base.columns else cartera_base.copy()
 
-    v_dispo = sorted(df_filtrado["Nombre"].dropna().astype(str).str.strip().unique().tolist()) if not df_filtrado.empty and "Nombre" in df_filtrado.columns else []
+    if cartera_filtrada.empty:
+        st.info("No se encontraron registros para los supervisores seleccionados.")
+        return
 
-    col_f1, col_f2 = st.columns(2)
+    v_dispo = sorted(cartera_filtrada["Nombre"].dropna().astype(str).str.strip().unique().tolist())
+    orden_dias = ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO", "SIN DÍA"]
+    dias_en_datos = cartera_filtrada["DiaVisita"].dropna().astype(str).str.strip().unique().tolist() if "DiaVisita" in cartera_filtrada.columns else []
+    dia_visita_dispo = [d for d in orden_dias if d in dias_en_datos]
+    for d in dias_en_datos:
+        if d not in dia_visita_dispo:
+            dia_visita_dispo.append(d)
+
+    col_f1, col_f2, col_f3 = st.columns(3)
     with col_f1:
         v_selec = st.multiselect("Vendedor", options=v_dispo, default=[], placeholder="Seleccionar preventistas...", key="frag_cob_vendedor")
     with col_f2:
         m_selec = st.multiselect("Marca", options=marcas, default=[], placeholder="Seleccionar marcas...", key="frag_cob_marca")
+    with col_f3:
+        dia_visita_selec = st.multiselect("Día de Visita", options=dia_visita_dispo, default=[], placeholder="Seleccionar días de visita...", key="frag_cob_dia_visita")
 
     if not v_selec:
         v_selec = v_dispo
     if not m_selec:
         m_selec = marcas
+    if not dia_visita_selec:
+        dia_visita_selec = dia_visita_dispo
 
-    if not df_filtrado.empty and v_dispo:
-        df_filtrado = df_filtrado[
-            df_filtrado["Nombre"].astype(str).str.strip().isin(v_selec)
-        ].copy()
+    mask_cartera = (
+        cartera_filtrada["Nombre"].astype(str).str.strip().isin(v_selec) &
+        cartera_filtrada["DiaVisita"].astype(str).str.strip().isin(dia_visita_selec)
+    )
+    cartera_activa = cartera_filtrada[mask_cartera].copy()
 
-    # Métricas y objetivos globales calculados de forma instantánea sobre el DataFrame filtrado
-    if marcas and not df_filtrado.empty:
-        suma_cartera_global = df_filtrado["Cartera"].sum()
-        
-        cols_obj_ui = st.columns(min(len(m_selec), 6)) if m_selec else st.columns(1)
-        for idx, marca in enumerate(m_selec):
+    if cartera_activa.empty:
+        st.info("No se encontraron clientes para los filtros seleccionados.")
+        return
+
+    cartera_por_vendedor = cartera_activa.groupby(["CodVendedor", "Nombre", "SUP"], as_index=False).agg(
+        Cartera=("Cliente_Cod", "nunique")
+    )
+
+    clientes_activos = set(cartera_activa["Cliente_Cod"].unique())
+    vtas_activas = vtas_agrup[
+        vtas_agrup["Cliente"].isin(clientes_activos) &
+        vtas_agrup["Marca"].isin(m_selec) &
+        vtas_agrup["Total_Cant"].ge(3)
+    ].copy() if not vtas_agrup.empty else pd.DataFrame()
+
+    if not vtas_activas.empty:
+        cubiertos_pivot = vtas_activas.groupby(["CodVendedor", "Marca"])["Cliente"].nunique().unstack(fill_value=0).reset_index()
+        cubiertos_pivot.columns.name = None
+    else:
+        cubiertos_pivot = pd.DataFrame(columns=["CodVendedor"])
+
+    reporte_matriz = cartera_por_vendedor.merge(cubiertos_pivot, on="CodVendedor", how="left")
+
+    for m in m_selec:
+        if m not in reporte_matriz.columns:
+            reporte_matriz[m] = 0.0
+        else:
+            reporte_matriz[m] = reporte_matriz[m].fillna(0.0)
+            
+        total_c = reporte_matriz["Cartera"].replace(0, pd.NA)
+        reporte_matriz[m] = ((reporte_matriz[m] / total_c).fillna(0.0) * 100.0).round(2)
+
+    reporte_matriz = reporte_matriz.sort_values(by="CodVendedor").reset_index(drop=True)
+
+    colores_tarjetas = [
+        "#3b82f6", "#ef4444", "#f97316", "#eab308", "#22c55e", "#a855f7", 
+        "#ec4899", "#14b8a6", "#6366f1", "#84cc16", "#06b6d4", "#f43f5e"
+    ]
+    
+    suma_cartera_global = reporte_matriz["Cartera"].sum()
+    m_selec_ordenadas = [m for m in marcas if m in m_selec]
+
+    if m_selec_ordenadas:
+        cols_obj_ui = st.columns(min(len(m_selec_ordenadas), 5))
+        for idx, marca in enumerate(m_selec_ordenadas):
             col_target = cols_obj_ui[idx % len(cols_obj_ui)]
             obj_val = mapa_objetivos.get(marca, 80.0)
             
-            if suma_cartera_global > 0 and marca in df_filtrado.columns:
-                clientes_cubiertos_ponderados = (df_filtrado[marca] / 100.0 * df_filtrado["Cartera"]).sum()
-                cobertura_global_pct = (clientes_cubiertos_ponderados / suma_cartera_global) * 100.0
+            if suma_cartera_global > 0 and marca in reporte_matriz.columns:
+                cubiertos_totales = (reporte_matriz[marca] / 100.0 * reporte_matriz["Cartera"]).sum()
+                cobertura_global_pct = (cubiertos_totales / suma_cartera_global) * 100.0
             else:
                 cobertura_global_pct = 0.0
                 
-            cumplida = cobertura_global_pct >= obj_val
-            color_estilo = "color: #28a745;" if cumplida else "color: #dc3545;"
-            
+            color_borde = colores_tarjetas[idx % len(colores_tarjetas)]
             with col_target:
-                st.markdown(f"""
-                <div style="font-size: 14px; font-weight: 600; color: #a0a0a0;">{marca} (Obj: {obj_val:g}%)</div>
-                <div style="font-size: 24px; font-weight: bold; {color_estilo}">{cobertura_global_pct:.2f}%</div>
-                """, unsafe_allow_html=True)
-                
+                st.markdown(_tarjeta_metrica_marca_html(f"{marca} (Obj: {obj_val:g}%)", f"{cobertura_global_pct:.2f}%", color_borde), unsafe_allow_html=True)
+            
         st.divider()
 
-    base_cols = ["CodVendedor", "Nombre", "Cartera", "SUP"]
-    columnas_finales = base_cols + [m for m in marcas if m in df_filtrado.columns and m in m_selec]
-    df_render = df_filtrado[[c for c in columnas_finales if c in df_filtrado.columns]].copy()
+    columnas_finales = ["CodVendedor", "Nombre", "Cartera", "SUP"] + [m for m in m_selec_ordenadas if m in reporte_matriz.columns]
+    df_render = reporte_matriz[columnas_finales].copy()
 
     if not df_render.empty:
         gb = GridOptionsBuilder.from_dataframe(df_render)
-        gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=140)
+        gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=140, cellStyle={'textAlign': 'center'}, headerClass='centered-header')
+        gb.configure_column("CodVendedor", headerName="Cód. Vend", width=100)
+        gb.configure_column("Nombre", headerName="Nombre", minWidth=200, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+        gb.configure_column("Cartera", headerName="Cartera", width=110)
+        gb.configure_column("SUP", headerName="SUP", width=90)
         
         js_objetivos = str(mapa_objetivos)
-        
         cell_style_conditional = JsCode(f"""
         function(params) {{
             const mapaObj = {js_objetivos};
@@ -1729,27 +1901,52 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura, marcas, mapa
                 const objetivo = Number(mapaObj[col]) || 80.0;
                 const valorReal = Number(params.value) || 0;
                 if (valorReal >= objetivo) {{
-                    return {{'backgroundColor': '#d4edda', 'fontWeight': 'bold', 'color': '#155724'}};
+                    return {{'backgroundColor': '#d4edda', 'fontWeight': 'bold', 'color': '#155724', 'textAlign': 'center'}};
                 }} else {{
-                    return {{'backgroundColor': '#f8d7da', 'fontWeight': 'bold', 'color': '#721c24'}};
+                    return {{'backgroundColor': '#f8d7da', 'fontWeight': 'bold', 'color': '#721c24', 'textAlign': 'center'}};
                 }}
             }}
-            return null;
+            return {{'textAlign': 'center'}};
         }}
         """)
         
-        for marca in marcas:
+        val_fmt_2dec = JsCode("""
+        function(params) {
+            if (params.value == null || isNaN(params.value)) {
+                return '0,00%';
+            }
+            return Number(params.value).toLocaleString('es-AR', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }) + '%';
+        }
+        """)
+
+        for marca in m_selec_ordenadas:
             if marca in df_render.columns:
                 gb.configure_column(
                     marca,
                     headerName=marca,
-                    valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%' : '0,00%'",
+                    valueFormatter=val_fmt_2dec,
                     cellStyle=cell_style_conditional
                 )
                 
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
         grid_options = gb.build()
         
+        st.markdown("""
+        <style>
+        .ag-header-cell-label {
+            justify-content: center !important;
+            text-align: center !important;
+        }
+        .left-header .ag-header-cell-label {
+            justify-content: flex-start !important;
+            text-align: left !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
         AgGrid(
             df_render,
             gridOptions=grid_options,
@@ -1761,9 +1958,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura, marcas, mapa
             fit_columns_on_grid_load=False,
             allow_unsafe_jscode=True
         )
-    else:
-        st.info("No se encontraron registros de Cobertura por Marca con los filtros seleccionados.")
-        
+
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         df_render.to_excel(writer, index=False, sheet_name="Cobertura_Por_Marca")
@@ -1777,36 +1972,126 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura, marcas, mapa
         key="cob_marca_btn_dl"
     )
 
-    # Detalle de clientes instantáneo vía sesión
-    st.markdown("### ✅ Detalle de Clientes que Alcanzan el Objetivo de Cobertura")
-    st.markdown("Clientes activos en cartera que sí alcanzan el volumen mínimo de compra ($\ge 3$ unidades) en las marcas seleccionadas.")
+    st.markdown("### ⚔️ Batalla Cobertura por Marca")
+    st.markdown("Clientes activos en cartera que no alcanzan el volumen mínimo de compra (< 3 unidades) en las marcas seleccionadas.")
 
-    df_detalle_clientes = st.session_state.get("_cache_detalle_clientes_cob", pd.DataFrame())
-    if not df_detalle_clientes.empty:
-        df_det_view = df_detalle_clientes[
-            df_detalle_clientes["Vendedor"].isin(v_selec) & 
-            df_detalle_clientes["Marca"].isin(m_selec)
-        ].copy()
+    ventas_unidades_map = vtas_agrup.set_index(["CodVendedor", "Cliente", "Marca"])["Total_Cant"].to_dict() if not vtas_agrup.empty else {}
 
-        if not df_det_view.empty:
-            st.dataframe(df_det_view, use_container_width=True, hide_index=True)
+    registros_nc = []
+    for m in m_selec_ordenadas:
+        for row in cartera_activa.itertuples(index=False):
+            cv = int(row.CodVendedor)
+            cli = int(row.Cliente_Cod)
+            und = ventas_unidades_map.get((cv, cli, m), 0.0)
+            if und < 3.0:
+                registros_nc.append({
+                    "Vendedor": row.Nombre,
+                    "Cód. Cliente": cli,
+                    "Cliente": row.Cliente_Desc,
+                    "Dirección": row.Cliente_Dir,
+                    "Día Visita": row.DiaVisita,
+                    "Marca": m,
+                    "Unidades": und,
+                    "Estado": "No Cubierto (< 3 u.)"
+                })
 
+    df_det_view = pd.DataFrame(registros_nc)
+    total_registros_batalla = len(df_det_view)
+    st.caption(f"📊 Registros encontrados: **{total_registros_batalla}**")
+
+    if not df_det_view.empty:
+        gb_batalla = GridOptionsBuilder.from_dataframe(df_det_view)
+        gb_batalla.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130, cellStyle={'textAlign': 'center'}, headerClass='centered-header')
+        gb_batalla.configure_column("Vendedor", headerName="Vendedor", minWidth=180, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+        gb_batalla.configure_column("Cliente", headerName="Cliente", minWidth=180, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+        gb_batalla.configure_column("Dirección", headerName="Dirección", minWidth=180, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+        gb_batalla.configure_column("Cód. Cliente", headerName="Cód. Cliente", width=110)
+        gb_batalla.configure_column("Día Visita", headerName="Día Visita", width=110)
+        gb_batalla.configure_column("Marca", headerName="Marca", width=120)
+        
+        # Formateador numérico exacto para unidades reales (incluyendo negativos) con 2 decimales y coma
+        val_fmt_unidades = JsCode("""
+        function(params) {
+            if (params.value == null || isNaN(params.value)) {
+                return '0,00';
+            }
+            return Number(params.value).toLocaleString('es-AR', {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            });
+        }
+        """)
+        gb_batalla.configure_column("Unidades", headerName="Unidades", width=100, valueFormatter=val_fmt_unidades)
+        gb_batalla.configure_column("Estado", headerName="Estado", width=160)
+        
+        gb_batalla.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
+        grid_options_batalla = gb_batalla.build()
+
+        AgGrid(
+            df_det_view,
+            gridOptions=grid_options_batalla,
+            height=400,
+            width="100%",
+            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+            update_mode=GridUpdateMode.MODEL_CHANGED,
+            theme="streamlit",
+            fit_columns_on_grid_load=False,
+            allow_unsafe_jscode=True
+        )
+
+        col_dl1, col_dl2, col_dl3 = st.columns(3)
+        with col_dl1:
             buffer_batalla = io.BytesIO()
             with pd.ExcelWriter(buffer_batalla, engine="openpyxl") as writer:
-                df_det_view.to_excel(writer, index=False, sheet_name="Clientes_Cumplen_Objetivo")
+                df_det_view.to_excel(writer, index=False, sheet_name="Clientes_No_Cubiertos")
             buffer_batalla.seek(0)
 
             st.download_button(
-                label="📥 Descargar Clientes Cubiertos a Excel",
+                label="📥 Descargar Clientes No Cubiertos a Excel",
                 data=buffer_batalla,
-                file_name="Clientes_Cumplen_Objetivo.xlsx",
+                file_name="Clientes_No_Cubiertos_Marca.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="btn_dl_batalla"
+                key="btn_dl_batalla_nc"
             )
-        else:
-            st.info("No se registran clientes que cumplan con el mínimo de 3 unidades para los filtros seleccionados.")
+
+        with col_dl2:
+            pass
+
+        with col_dl3:
+            df_wa_limit = df_det_view.head(30)
+            lista_nc_formateada = []
+            for idx, row in df_wa_limit.iterrows():
+                cli = row.get("Cód. Cliente", "")
+                nom = row.get("Cliente", "")
+                dir_c = row.get("Dirección", "")
+                dia_v = row.get("Día Visita", "")
+                marca_c = row.get("Marca", "")
+                und = row.get("Unidades", 0.0)
+                lista_nc_formateada.append(f"[{cli}] {nom} - {dir_c} - {dia_v} - Marca: {marca_c} (U: {und:,.2f})")
+
+            detalle_texto = "%0A".join(lista_nc_formateada)
+            aviso_limite = f"%0A(Mostrando 30 de {total_registros_batalla} en WA)" if total_registros_batalla > 30 else ""
+            texto_wa = f"NC:{total_registros_batalla}%0A{detalle_texto}{aviso_limite}"
+            url_wa = f"https://wa.me/?text={texto_wa}"
+            
+            st.markdown(f'''
+                <div style="display: flex; justify-content: center; align-items: center; height: 100%; padding-top: 5px;">
+                    <a href="{url_wa}" target="_blank" style="
+                        display: inline-block;
+                        padding: 4px 10px;
+                        background-color: #25d366;
+                        color: white;
+                        text-align: center;
+                        text-decoration: none;
+                        font-weight: 600;
+                        font-size: 0.75rem;
+                        border-radius: 4px;
+                        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+                    ">💬 WhatsApp NC</a>
+                </div>
+            ''', unsafe_allow_html=True)
     else:
-        st.info("No hay datos de clientes suficientes para calcular el detalle.")
+        st.info("No se registran clientes sin cobertura para los filtros seleccionados.")
 
 def dibujar_pestana_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, supervisores_seleccionados, df_vtas_operativo=None, df_cartera=None):
     st.subheader("🎯 Cobertura Por Marca y Detalle de Clientes")
@@ -1985,17 +2270,19 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     codigos_validos_padron = set(vendedores_rep["CodVend"].dropna().tolist())
     sup_map = vendedores_rep.set_index("CodVend")["SUP"].to_dict()
 
-    orden_segmentos_maestro = []
-    if maestro_seg is not None and not maestro_seg.empty:
-        col_s = "Segmento" if "Segmento" in maestro_seg.columns else (maestro_seg.columns[0] if len(maestro_seg.columns) > 0 else None)
-        if col_s:
-            for s in maestro_seg[col_s].dropna().astype(str).str.strip():
-                if s and s not in ["", "nan"] and s not in orden_segmentos_maestro:
-                    orden_segmentos_maestro.append(s)
+    # ORDEN HARDCODEADO ESTRICTO DE SEGMENTOS
+    orden_segmentos_maestro = [
+        "GOLD Salty",
+        "GOLD Crakers",
+        "SILVER Salty",
+        "SILVER Crakers",
+        "SILVER Cereals"
+    ]
 
-    if not orden_segmentos_maestro:
-        segs_presentes = df_vta_prep["SEGMENTO"].dropna().unique()
-        orden_segmentos_maestro = [str(s).strip() for s in segs_presentes if str(s).strip() != ""]
+    segs_vta_unicos = df_vta_prep["SEGMENTO"].dropna().astype(str).str.strip().unique()
+    for s_v in segs_vta_unicos:
+        if s_v not in orden_segmentos_maestro:
+            orden_segmentos_maestro.append(s_v)
 
     segmentos_rep = pd.DataFrame({"SEGMENTO": orden_segmentos_maestro})
 
@@ -2174,6 +2461,17 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte["Ajuste_Reemp_Arrastre"] = reporte.get("Ajuste_Reemp_Arrastre", 0.0).fillna(0.0)
     reporte["Ajuste_Reemp_Actual"] = reporte.get("Ajuste_Reemp_Actual", 0.0).fillna(0.0)
     reporte["Ajuste_Por_Reemp"] = reporte["Ajuste_Reemp_Arrastre"] + reporte["Ajuste_Reemp_Actual"]
+
+    # ORDENAMIENTO ESTRICTO Y GARANTIZADO POR DICCIONARIO DE ÍNDICES HARDCODEADO
+    if orden_segmentos_maestro:
+        mapping_orden = {str(seg).strip(): i for i, seg in enumerate(orden_segmentos_maestro)}
+        reporte["SEGMENTO_STR"] = reporte["SEGMENTO"].astype(str).str.strip()
+        reporte["_orden_idx"] = reporte["SEGMENTO_STR"].map(mapping_orden).fillna(999)
+        reporte = reporte.sort_values(by=["CodVend", "_orden_idx"]).drop(columns=["_orden_idx", "SEGMENTO_STR"]).reset_index(drop=True)
+    else:
+        reporte = reporte.sort_values(by=["CodVend", "SEGMENTO"]).reset_index(drop=True)
+
+    reporte["SEGMENTO"] = reporte["SEGMENTO"].astype(str)
     
     clave_vtas_op = f"_df_vtas_op_{anio_operativo}_{mes_operativo}_{sup_filtro}"
     st.session_state[clave_vtas_op] = df_vtas_op
@@ -2184,7 +2482,54 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
 
 @st.fragment
 def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro, df_vta_prep, dia_matinal):
-    """Fragmento aislado de alta velocidad. Multiselects vacíos por defecto (muestran todo automáticamente)."""
+    """Fragmento aislado de alta velocidad con estilo visual de tarjetas idéntico a Avance CCC y tamaño de fuente ampliado 50%."""
+    
+    # Inyección de Estilos CSS idénticos al formato de Avance CCC pero con fuente ampliada un 50% (títulos ~21px, valores ~39px)
+    st.markdown("""
+        <style>
+            div.card-azul {
+                background-color: #0e1117;
+                border: 2px solid #1f6feb;
+                border-radius: 10px;
+                padding: 15px 20px;
+                text-align: center;
+                margin-bottom: 10px;
+            }
+            div.card-azul p {
+                color: #8b949e;
+                font-size: 21px;
+                margin-bottom: 5px;
+                font-weight: 600;
+            }
+            div.card-azul h2 {
+                color: #ffffff;
+                font-size: 39px;
+                margin: 0;
+                font-weight: 700;
+            }
+            div.card-rojo {
+                background-color: #0e1117;
+                border: 2px solid #da3633;
+                border-radius: 10px;
+                padding: 15px 20px;
+                text-align: center;
+                margin-bottom: 10px;
+            }
+            div.card-rojo p {
+                color: #8b949e;
+                font-size: 21px;
+                margin-bottom: 5px;
+                font-weight: 600;
+            }
+            div.card-rojo h2 {
+                color: #ffffff;
+                font-size: 39px;
+                margin: 0;
+                font-weight: 700;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         v_selec = st.multiselect("Vendedor", options=v_dispo, default=[], key=f"frag_kilos_v_{anio_op}_{mes_op}_{sup_filtro}")
@@ -2235,29 +2580,13 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
         total_arrastre = total_arrastre_vend + arrastre_reemp
         total_actual = total_actual_vend + actual_reemp
         total_neto_operativo = total_arrastre + total_actual
-
-        if sup_filtro == "TODOS":
-            df_dep = df_comodines_Rows[(df_comodines_Rows["CodVendedor"] == -999) & (df_comodines_Rows["SEGMENTO"].astype(str).str.strip().isin(s_selec))]
-            kilos_deposito = float(df_dep["Actual"].sum() + df_dep["Arrastre"].sum())
-        else:
-            kilos_deposito = 0.0
     else:
         total_arrastre = total_arrastre_vend
         total_actual = total_actual_vend
         total_neto_operativo = float(rep_detalle["OPERATIVO"].sum())
-        kilos_deposito = 0.0
 
     total_objetivo_mes = float(rep_detalle["Objetivo Mes Corriente"].sum())
     pct_avance = (total_neto_operativo / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
-
-    mcol1, mcol2, mcol3, mcol4, mcol5, mcol6 = st.columns(6)
-    mcol1.metric(label="🎯 Objetivo Mes", value=f"{total_objetivo_mes:,.1f} kg")
-    mcol2.metric(label="📊 Neto Operativo", value=f"{total_neto_operativo:,.1f} kg")
-    mcol3.metric(label="📈 % Avance", value=f"{pct_avance:,.2f}%")
-    mcol4.metric(label="📦 Arrastre", value=f"{total_arrastre:,.1f} kg")
-    mcol5.metric(label="🚚 Actual", value=f"{total_actual:,.1f} kg")
-    mcol6.metric(label="🏢 Depósito", value=f"{kilos_deposito:,.1f} kg")
-    st.divider()
 
     fecha_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
     if pd.notna(fecha_mat_dt):
@@ -2285,13 +2614,55 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     rep_detalle[["Ultima_Vta", "Penultima_Vta"]] = rep_detalle[["Ultima_Vta", "Penultima_Vta"]].fillna(0.0)
 
     dp_s = rep_detalle["Días Pasados"].astype(float).replace(0, 1.0)
-    dr_s = rep_detalle["Días Restantes"].astype(float).replace(0, 1.0)
+    dr_s = rep_detalle["Días Restantes"].astype(float)
 
     p_diario = (rep_detalle["Actual"] + rep_detalle["Ajuste_Reemp_Actual"]) / dp_s
     rep_detalle["Promedio_Diario"] = p_diario
-    rep_detalle["Tendencia_Total_Kg"] = (p_diario * dr_s) + rep_detalle["OPERATIVO"]
+    
+    rep_detalle["Tendencia_Total_Kg"] = rep_detalle["OPERATIVO"]
+    mask_activos = dr_s > 0
+    if mask_activos.any():
+        rep_detalle.loc[mask_activos, "Tendencia_Total_Kg"] = (p_diario[mask_activos] * dr_s[mask_activos]) + rep_detalle.loc[mask_activos, "OPERATIVO"]
+
     rep_detalle["Cumplimiento_Proyectado_Pct"] = ((rep_detalle["Tendencia_Total_Kg"]) / rep_detalle["Objetivo Mes Corriente"].replace(0, pd.NA)).mul(100).fillna(0.0)
-    rep_detalle["Media_Necesaria_Diaria"] = ((rep_detalle["Objetivo Mes Corriente"] - rep_detalle["OPERATIVO"]) / dr_s).clip(lower=0)
+    
+    rep_detalle["Media_Necesaria_Diaria"] = 0.0
+    if mask_activos.any():
+        rep_detalle.loc[mask_activos, "Media_Necesaria_Diaria"] = ((rep_detalle.loc[mask_activos, "Objetivo Mes Corriente"] - rep_detalle.loc[mask_activos, "OPERATIVO"]) / dr_s[mask_activos]).clip(lower=0)
+
+    if rep_detalle["Días Restantes"].sum() == 0:
+        total_tendencia = total_neto_operativo
+        pct_cumplimiento_obj = pct_avance
+    else:
+        total_tendencia = float(rep_detalle["Tendencia_Total_Kg"].sum())
+        pct_cumplimiento_obj = (total_tendencia / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
+
+    # RENDERIZADO DE MÉTRICAS CON ESTILO DE TARJETAS (Nivel 1 y Nivel 2 en Azul, Tendencia Kgs en Rojo)
+    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+    with mcol1:
+        st.markdown(f"""<div class="card-azul"><p>📦 Arrastre</p><h2>{total_arrastre:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with mcol2:
+        st.markdown(f"""<div class="card-azul"><p>🚚 Actual</p><h2>{total_actual:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with mcol3:
+        st.markdown(f"""<div class="card-azul"><p>📊 Neto Operativo</p><h2>{total_neto_operativo:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with mcol4:
+        st.markdown(f"""<div class="card-azul"><p>📈 % Avance</p><h2>{pct_avance:,.2f}%</h2></div>""", unsafe_allow_html=True)
+
+    tcol1, tcol2, tcol3 = st.columns(3)
+    with tcol1:
+        st.markdown(f"""<div class="card-azul"><p>🎯 Objetivo del Mes</p><h2>{total_objetivo_mes:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with tcol2:
+        st.markdown(f"""<div class="card-rojo"><p>📈 Tendencia Kgs</p><h2>{total_tendencia:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with tcol3:
+        st.markdown(f"""<div class="card-azul"><p>🎯 Tendencia %</p><h2>{pct_cumplimiento_obj:,.2f}%</h2></div>""", unsafe_allow_html=True)
+    
+    st.divider()
+
+    # Redondeo general a 2 decimales para todas las columnas excepto Días Pasados, Rutas y Días Restantes
+    cols_excepcion = ["CodVendedor", "Nombre", "SUP", "SEGMENTO", "Días Pasados", "Rutas", "Días Restantes"]
+    for col in rep_detalle.columns:
+        if col not in cols_excepcion and pd.api.types.is_numeric_dtype(rep_detalle[col]):
+            rep_detalle[col] = pd.to_numeric(rep_detalle[col], errors="coerce").round(2)
 
     columnas_ordenadas = [
         "CodVendedor", "Nombre", "SUP", "SEGMENTO", "Objetivo Mes Corriente", "Arrastre", "Actual", 
@@ -2386,7 +2757,7 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
     try:
         maestro_cebe = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
         if not maestro_cebe.empty and "Mes" in maestro_cebe.columns:
-            mc_per = maestro_cebe[(maestro_cebe["Mes"].astype(str) == str(mes_op)) & (mc_per["Anio"].astype(str) == str(anio_op))]
+            mc_per = maestro_cebe[(mc_per["Mes"].astype(str) == str(mes_op)) & (mc_per["Anio"].astype(str) == str(anio_op))]
             if not mc_per.empty:
                 maestro_cebe = mc_per
     except Exception:
@@ -2396,7 +2767,7 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en SQLite. Verifique en la solapa de Parámetros.")
         return
 
-    cache_key_rep = f"_cache_kilos_v31_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
+    cache_key_rep = f"_cache_kilos_v47_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
     if cache_key_rep not in st.session_state:
         df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
         reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro)
@@ -2609,22 +2980,25 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
 
     df_reporte = df_reporte.drop(columns=["Total_Kilos_Marca"], errors="ignore")
     
-    # Ordenar estrictamente según el orden definido en el padrón de segmentos (`maestro_segmentos`)
     if segmentos_orden_lista:
         df_reporte["SEGMENTO"] = pd.Categorical(df_reporte["SEGMENTO"], categories=segmentos_orden_lista, ordered=True)
 
     df_reporte = df_reporte.sort_values(by=["Supervisor", "Nombre", "Marca", "SEGMENTO"]).reset_index(drop=True)
     df_reporte["SEGMENTO"] = df_reporte["SEGMENTO"].astype(str)
 
+    # Inyección de columnas de control temporal para versión de base de datos
+    df_reporte["Anio"] = int(anio_operativo)
+    df_reporte["Mes"] = int(mes_operativo)
+
     columnas_finales = [
-        "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", 
+        "Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO", 
         "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", 
-        "Obj_Macro_Marca_Kg", "Obj_Sugerido_Kg"
+        "Obj_Sugerido_Kg"
     ]
     return df_reporte[columnas_finales], segmentos_orden_lista
 
 def render_rep_obj_kilos(df_vta, filtros_globales=None):
-    st.subheader("📦 Generador Tentativo de Objetivos")
+    st.subheader("📦 Generador Tentativo de Objetivos por Vendedor y Segmento")
 
     if filtros_globales is None:
         anio_op = 2026
@@ -2690,7 +3064,7 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en la base de datos.")
         return
 
-    cache_key = f"_cache_rep_obj_distribucion_v10_{anio_op}_{mes_op}_{sup_filtro}"
+    cache_key = f"_cache_rep_obj_distribucion_v12_{anio_op}_{mes_op}_{sup_filtro}"
     if cache_key not in st.session_state:
         with st.spinner("Calculando distribución proporcional de objetivos macro en Kilos..."):
             df_base, seg_orden = generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_op, mes_op)
@@ -2702,7 +3076,7 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         st.info("No se encontraron registros coincidentes con los maestros oficiales para el período de referencia.")
         return
 
-    if "Obj_Macro_Marca_Kg" not in df_base.columns:
+    if "Obj_Sugerido_Kg" not in df_base.columns:
         df_base, seg_orden = generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_op, mes_op)
         st.session_state[cache_key] = (df_base, seg_orden)
 
@@ -2712,17 +3086,43 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
 
     df_filtrado["Obj_Sugerido_Kg"] = df_filtrado["Obj_Sugerido_Kg"] * factor_multiplicador
 
-    total_kilos_ant = df_filtrado["Kilos_Mes_Anterior"].sum() if "Kilos_Mes_Anterior" in df_filtrado.columns else 0.0
-    total_obj_sugerido = df_filtrado["Obj_Sugerido_Kg"].sum() if "Obj_Sugerido_Kg" in df_filtrado.columns else 0.0
-    total_macro_compania = df_filtrado[["Marca", "Obj_Macro_Marca_Kg"]].drop_duplicates()["Obj_Macro_Marca_Kg"].sum() if "Obj_Macro_Marca_Kg" in df_filtrado.columns and "Marca" in df_filtrado.columns else 0.0
+    # Agrupación por Vendedor y Segmento (consolidando todas las marcas)
+    df_agrupado = df_filtrado.groupby(
+        ["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO"],
+        as_index=False
+    ).agg({
+        "Kilos_Mes_Anterior": "sum",
+        "Objetivo_Mes_Anterior_Kg": "sum",
+        "Obj_Sugerido_Kg": "sum"
+    })
+
+    df_agrupado["Logro_Anterior_Pct"] = (
+        df_agrupado["Kilos_Mes_Anterior"] / df_agrupado["Objetivo_Mes_Anterior_Kg"].replace(0, pd.NA)
+    ).mul(100).fillna(0.0)
+
+    if seg_orden:
+        df_agrupado["SEGMENTO"] = pd.Categorical(df_agrupado["SEGMENTO"], categories=seg_orden, ordered=True)
+
+    df_agrupado = df_agrupado.sort_values(by=["Supervisor", "Nombre", "SEGMENTO"]).reset_index(drop=True)
+    df_agrupado["SEGMENTO"] = df_agrupado["SEGMENTO"].astype(str)
+
+    total_kilos_ant = df_agrupado["Kilos_Mes_Anterior"].sum()
+    total_obj_sugerido = df_agrupado["Obj_Sugerido_Kg"].sum()
+    
+    # Intentar obtener total macro compañía de las marcas operativas
+    total_macro_compania = 0.0
+    if not maestro_cebe_act.empty:
+        co_act = next((c for c in maestro_cebe_act.columns if "obj_tn" in str(c).strip().lower() or "tn" in str(c).strip().lower() or "obj" in str(c).strip().lower()), None)
+        if co_act:
+            total_macro_compania = pd.to_numeric(maestro_cebe_act[co_act], errors="coerce").sum()
 
     m1, m2, m3 = st.columns(3)
     m1.metric("📦 Total Kilos Históricos", f"{total_kilos_ant:,.1f} kg")
     m2.metric("🏢 Total Macro Compañía", f"{total_macro_compania:,.1f} kg")
     m3.metric("🎯 Total Objetivo Sugerido", f"{total_obj_sugerido:,.1f} kg")
 
-    if not df_filtrado.empty and "SEGMENTO" in df_filtrado.columns:
-        tot_por_seg = df_filtrado.groupby("SEGMENTO")["Obj_Sugerido_Kg"].sum()
+    if not df_agrupado.empty and "SEGMENTO" in df_agrupado.columns:
+        tot_por_seg = df_agrupado.groupby("SEGMENTO")["Obj_Sugerido_Kg"].sum()
         if seg_orden:
             tot_por_seg = tot_por_seg.reindex([s for s in seg_orden if s in tot_por_seg.index])
         
@@ -2732,15 +3132,16 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
 
     st.divider()
 
-    gb = GridOptionsBuilder.from_dataframe(df_filtrado)
-    gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
+    gb = GridOptionsBuilder.from_dataframe(df_agrupado)
+    gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130, cellStyle={'textAlign': 'center'}, headerClass='centered-header')
     
+    gb.configure_column("Anio", headerName="Año", width=80)
+    gb.configure_column("Mes", headerName="Mes", width=70)
     gb.configure_column("CodVendedor", headerName="Cód. Vend", width=100)
-    gb.configure_column("Nombre", headerName="Vendedor", width=180)
-    gb.configure_column("Supervisor", headerName="Supervisor", width=140)
-    gb.configure_column("Marca", headerName="Marca", width=150)
-    gb.configure_column("CEBE", headerName="CEBE", width=140)
-    gb.configure_column("SEGMENTO", headerName="Segmento", width=160, rowGroup=True)
+    gb.configure_column("Nombre", headerName="Vendedor", minWidth=180, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+    gb.configure_column("Supervisor", headerName="Supervisor", minWidth=140, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+    gb.configure_column("SEGMENTO", headerName="Segmento", minWidth=160, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+    
     gb.configure_column(
         "Kilos_Mes_Anterior", 
         headerName="Kilos Mes Ant.",
@@ -2757,11 +3158,6 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%' : '0.00%'"
     )
     gb.configure_column(
-        "Obj_Macro_Marca_Kg", 
-        headerName="Obj. Macro Marca (Kg)",
-        valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'"
-    )
-    gb.configure_column(
         "Obj_Sugerido_Kg", 
         headerName="Obj. Sugerido (Kg)",
         valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'"
@@ -2770,22 +3166,36 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
     grid_options = gb.build()
 
+    st.markdown("""
+    <style>
+    .ag-header-cell-label {
+        justify-content: center !important;
+        text-align: center !important;
+    }
+    .left-header .ag-header-cell-label {
+        justify-content: flex-start !important;
+        text-align: left !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     AgGrid(
-        df_filtrado,
+        df_agrupado,
         gridOptions=grid_options,
         height=450,
         width="100%",
         data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
         update_mode=GridUpdateMode.MODEL_CHANGED,
         theme="streamlit",
-        fit_columns_on_grid_load=False
+        fit_columns_on_grid_load=False,
+        allow_unsafe_jscode=True
     )
 
     st.divider()
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_filtrado.to_excel(writer, index=False, sheet_name="Propuesta_Objetivos")
+        df_agrupado.to_excel(writer, index=False, sheet_name="Objetivos_Vendedor_Segmento")
     buffer.seek(0)
 
     st.download_button(
