@@ -4,19 +4,7 @@ import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
-
-def parsear_fecha_robusta(serie):
-    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
-        return pd.Series(dtype="datetime64[ns]")
-    if not isinstance(serie, pd.Series):
-        serie = pd.Series([serie])
-    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-    
-    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-    dt_gen = pd.to_datetime(s, errors="coerce")
-    
-    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
+from modules.utils import parsear_fecha_robusta
 
 def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
     df = df_vta.copy()
@@ -166,7 +154,6 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     codigos_validos_padron = set(vendedores_rep["CodVend"].dropna().tolist())
     sup_map = vendedores_rep.set_index("CodVend")["SUP"].to_dict()
 
-    # ORDEN HARDCODEADO ESTRICTO DE SEGMENTOS
     orden_segmentos_maestro = [
         "GOLD Salty",
         "GOLD Crakers",
@@ -358,7 +345,6 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte["Ajuste_Reemp_Actual"] = reporte.get("Ajuste_Reemp_Actual", 0.0).fillna(0.0)
     reporte["Ajuste_Por_Reemp"] = reporte["Ajuste_Reemp_Arrastre"] + reporte["Ajuste_Reemp_Actual"]
 
-    # ORDENAMIENTO ESTRICTO Y GARANTIZADO POR DICCIONARIO DE ÍNDICES HARDCODEADO
     if orden_segmentos_maestro:
         mapping_orden = {str(seg).strip(): i for i, seg in enumerate(orden_segmentos_maestro)}
         reporte["SEGMENTO_STR"] = reporte["SEGMENTO"].astype(str).str.strip()
@@ -378,53 +364,7 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
 
 @st.fragment
 def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro, df_vta_prep, dia_matinal):
-    """Fragmento aislado de alta velocidad con estilo visual de tarjetas idéntico a Avance CCC y tamaño de fuente ampliado 50%."""
-    
-    # Inyección de Estilos CSS idénticos al formato de Avance CCC pero con fuente ampliada un 50% (títulos ~21px, valores ~39px)
-    st.markdown("""
-        <style>
-            div.card-azul {
-                background-color: #0e1117;
-                border: 2px solid #1f6feb;
-                border-radius: 10px;
-                padding: 15px 20px;
-                text-align: center;
-                margin-bottom: 10px;
-            }
-            div.card-azul p {
-                color: #8b949e;
-                font-size: 21px;
-                margin-bottom: 5px;
-                font-weight: 600;
-            }
-            div.card-azul h2 {
-                color: #ffffff;
-                font-size: 39px;
-                margin: 0;
-                font-weight: 700;
-            }
-            div.card-rojo {
-                background-color: #0e1117;
-                border: 2px solid #da3633;
-                border-radius: 10px;
-                padding: 15px 20px;
-                text-align: center;
-                margin-bottom: 10px;
-            }
-            div.card-rojo p {
-                color: #8b949e;
-                font-size: 21px;
-                margin-bottom: 5px;
-                font-weight: 600;
-            }
-            div.card-rojo h2 {
-                color: #ffffff;
-                font-size: 39px;
-                margin: 0;
-                font-weight: 700;
-            }
-        </style>
-    """, unsafe_allow_html=True)
+    from modules.utils import tarjeta_metrica_html
 
     col_f1, col_f2 = st.columns(2)
     with col_f1:
@@ -533,28 +473,27 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
         total_tendencia = float(rep_detalle["Tendencia_Total_Kg"].sum())
         pct_cumplimiento_obj = (total_tendencia / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
 
-    # RENDERIZADO DE MÉTRICAS CON ESTILO DE TARJETAS (Nivel 1 y Nivel 2 en Azul, Tendencia Kgs en Rojo)
+    # RENDERIZADO DE MÉTRICAS UTILIZANDO LA UTILIDAD COMPARTIDA
     mcol1, mcol2, mcol3, mcol4 = st.columns(4)
     with mcol1:
-        st.markdown(f"""<div class="card-azul"><p>📦 Arrastre</p><h2>{total_arrastre:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("📦 Arrastre", f"{total_arrastre:,.1f} kg", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     with mcol2:
-        st.markdown(f"""<div class="card-azul"><p>🚚 Actual</p><h2>{total_actual:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("🚚 Actual", f"{total_actual:,.1f} kg", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     with mcol3:
-        st.markdown(f"""<div class="card-azul"><p>📊 Neto Operativo</p><h2>{total_neto_operativo:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("📊 Neto Operativo", f"{total_neto_operativo:,.1f} kg", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     with mcol4:
-        st.markdown(f"""<div class="card-azul"><p>📈 % Avance</p><h2>{pct_avance:,.2f}%</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("📈 % Avance", f"{pct_avance:,.2f}%", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
 
     tcol1, tcol2, tcol3 = st.columns(3)
     with tcol1:
-        st.markdown(f"""<div class="card-azul"><p>🎯 Objetivo del Mes</p><h2>{total_objetivo_mes:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("🎯 Objetivo del Mes", f"{total_objetivo_mes:,.1f} kg", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     with tcol2:
-        st.markdown(f"""<div class="card-rojo"><p>📈 Tendencia Kgs</p><h2>{total_tendencia:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("📈 Tendencia Kgs", f"{total_tendencia:,.1f} kg", "#ef4444", "39px", "21px"), unsafe_allow_html=True)
     with tcol3:
-        st.markdown(f"""<div class="card-azul"><p>🎯 Tendencia %</p><h2>{pct_cumplimiento_obj:,.2f}%</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("🎯 Tendencia %", f"{pct_cumplimiento_obj:,.2f}%", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     
     st.divider()
 
-    # Redondeo general a 2 decimales para todas las columnas excepto Días Pasados, Rutas y Días Restantes
     cols_excepcion = ["CodVendedor", "Nombre", "SUP", "SEGMENTO", "Días Pasados", "Rutas", "Días Restantes"]
     for col in rep_detalle.columns:
         if col not in cols_excepcion and pd.api.types.is_numeric_dtype(rep_detalle[col]):

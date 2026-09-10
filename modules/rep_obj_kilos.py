@@ -4,28 +4,15 @@ import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
-
-def parsear_fecha_robusta(serie):
-    """Estandariza parseo de fechas considerando formatos ISO, DD/MM/YYYY y genérico sin advertencias."""
-    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
-        return pd.Series(dtype="datetime64[ns]")
-    if not isinstance(serie, pd.Series):
-        serie = pd.Series([serie])
-    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-    
-    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-    dt_gen = pd.to_datetime(s, errors="coerce")
-    
-    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
+from modules.utils import parsear_fecha_robusta
 
 def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_operativo, mes_operativo):
     """
     Calcula la distribución proporcional del objetivo macro de la compañía en Kilos 
-    tomando los valores directamente en Kilos y basándose en la participación histórica global por Marca.
+    tomando los valores directamente en Kilos (sin multiplicar por 1000) y basándose en la participación histórica global por Marca.
     """
     if maestro_v is None or maestro_v.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), []
 
     col_cod_v = "Codigo_Vendedor" if "Codigo_Vendedor" in maestro_v.columns else maestro_v.columns[0]
     col_nom_v = "Nombre_Vendedor" if "Nombre_Vendedor" in maestro_v.columns else maestro_v.columns[1]
@@ -46,27 +33,26 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
         mes_ant = mes_operativo - 1
         anio_ant = anio_operativo
 
-    # 1. Extraer objetivos macro del mes actual (maestro_cebe_act) directamente en Kilos
     obj_act_map = {}
     cebe_map = {}
     if maestro_cebe_act is not None and not maestro_cebe_act.empty:
         cm_act = next((c for c in maestro_cebe_act.columns if "marca" in str(c).strip().lower()), maestro_cebe_act.columns[0])
-        cc_act = next((c for c in maestro_cebe_act.columns if "cebe" in str(c).strip().lower()), maestro_cebe_act.columns[1])
-        co_act = next((c for c in maestro_cebe_act.columns if "obj_tn" in str(c).strip().lower() or "tn" in str(c).strip().lower() or "obj" in str(c).strip().lower()), None)
+        cc_act = next((c for c in maestro_cebe_act.columns if "cebe" in str(c).strip().lower()), maestro_cebe_act.columns[1] if len(maestro_cebe_act.columns) > 1 else maestro_cebe_act.columns[0])
+        co_act = next((c for c in maestro_cebe_act.columns if any(k in str(c).strip().lower() for k in ["obj_tn", "tn", "obj_mes", "objetivo", "obj"])), None)
         
         for _, r in maestro_cebe_act.iterrows():
             m = str(r.get(cm_act, "")).strip().upper()
             c = str(r.get(cc_act, "")).strip()
             val_kg = pd.to_numeric(r.get(co_act, 0.0), errors="coerce") if co_act else 0.0
             if m and m != "NAN":
+                # Lectura directa en Kilos (sin factores adicionales de 1000)
                 obj_act_map[m] = val_kg if pd.notna(val_kg) else 0.0
                 cebe_map[m] = c if c and c != "NAN" else "GLOBAL"
 
-    # 2. Extraer objetivos macro del mes anterior (maestro_cebe_ant) directamente en Kilos
     obj_ant_map = {}
     if maestro_cebe_ant is not None and not maestro_cebe_ant.empty:
         cm_ant = next((c for c in maestro_cebe_ant.columns if "marca" in str(c).strip().lower()), maestro_cebe_ant.columns[0])
-        co_ant = next((c for c in maestro_cebe_ant.columns if "obj_tn" in str(c).strip().lower() or "tn" in str(c).strip().lower() or "obj" in str(c).strip().lower()), None)
+        co_ant = next((c for c in maestro_cebe_ant.columns if any(k in str(c).strip().lower() for k in ["obj_tn", "tn", "obj_mes", "objetivo", "obj"])), None)
         
         for _, r in maestro_cebe_ant.iterrows():
             m = str(r.get(cm_ant, "")).strip().upper()
@@ -86,11 +72,11 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
                     segmentos_orden_lista.append(seg)
 
     if not segmentos_validos:
-        segmentos_validos = {"GOLD", "SILVER"}
-        segmentos_orden_lista = ["GOLD", "SILVER"]
+        segmentos_validos = {"GOLD Salty", "GOLD Crakers", "SILVER Salty", "SILVER Crakers", "SILVER Cereals"}
+        segmentos_orden_lista = ["GOLD Salty", "GOLD Crakers", "SILVER Salty", "SILVER Crakers", "SILVER Cereals"]
 
     if df_vta is None or df_vta.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), segmentos_orden_lista
 
     vta = df_vta.copy()
     
@@ -116,13 +102,16 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
     ].copy()
 
     if vta_mes_ant.empty:
-        return pd.DataFrame()
+        vta_mes_ant = vta.copy()
+
+    if vta_mes_ant.empty:
+        return pd.DataFrame(), segmentos_orden_lista
 
     col_vend = next((c for c in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if c in vta_mes_ant.columns), None)
     vta_mes_ant["CodVendedor"] = pd.to_numeric(vta_mes_ant[col_vend], errors="coerce").astype("Int64") if col_vend else pd.NA
 
     col_m = next((c for c in ["Marca", "MARCA", "marca"] if c in vta_mes_ant.columns), None)
-    vta_mes_ant["Marca"] = vta_mes_ant[col_m].fillna("").astype(str).str.strip().str.upper() if col_m else ""
+    vta_mes_ant["Marca"] = vta_mes_ant[col_m].fillna("").astype(str).str.strip().str.upper() if col_m else "SIN MARCA"
 
     col_rent = "SegmentoRentabilidad" if "SegmentoRentabilidad" in vta_mes_ant.columns else None
     col_rubro = "Rubro" if "Rubro" in vta_mes_ant.columns else None
@@ -135,52 +124,54 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
         elif sr in ["Silver", "Bronze"]:
             seg = f"SILVER {rubro}".strip()
         else:
-            seg = sr
-        return seg if seg in segmentos_validos else None
+            seg = sr if sr else (list(segmentos_validos)[0] if segmentos_validos else "GOLD Salty")
+        return seg if seg in segmentos_validos else (list(segmentos_validos)[0] if segmentos_validos else seg)
 
     vta_mes_ant["SEGMENTO"] = vta_mes_ant.apply(resolver_segmento, axis=1)
 
     col_kg = next((c for c in ["PesoKg", "PESOKG", "Kilos", "KILOS"] if c in vta_mes_ant.columns), None)
     vta_mes_ant["Kilos"] = pd.to_numeric(vta_mes_ant[col_kg], errors="coerce").fillna(0.0) if col_kg else 0.0
 
-    marcas_validas = set(obj_act_map.keys()) | set(obj_ant_map.keys())
-
-    vta_mes_ant = vta_mes_ant[
-        vta_mes_ant["Marca"].isin(marcas_validas) & 
-        vta_mes_ant["SEGMENTO"].isin(segmentos_validos) &
-        vta_mes_ant["CodVendedor"].notna()
-    ].copy()
+    vta_mes_ant = vta_mes_ant.dropna(subset=["CodVendedor"]).copy()
 
     if vta_mes_ant.empty:
-        return pd.DataFrame()
+        df_padron_k = df_padron.copy()
+        df_padron_k["_k"] = 1
+        df_seg_k = pd.DataFrame({"SEGMENTO": list(segmentos_validos)})
+        df_seg_k["_k"] = 1
+        df_reporte = df_padron_k.merge(df_seg_k, on="_k").drop(columns="_k")
+        df_reporte["Kilos_Mes_Anterior"] = 0.0
+        df_reporte["Objetivo_Mes_Anterior_Kg"] = 0.0
+        df_reporte["Logro_Anterior_Pct"] = 0.0
+        df_reporte["Obj_Sugerido_Kg"] = 0.0
+    else:
+        vta_agrup = vta_mes_ant.groupby(
+            ["CodVendedor", "Marca", "SEGMENTO"], 
+            as_index=False
+        )["Kilos"].sum().rename(columns={"Kilos": "Kilos_Mes_Anterior"})
 
-    vta_agrup = vta_mes_ant.groupby(
-        ["CodVendedor", "Marca", "SEGMENTO"], 
-        as_index=False
-    )["Kilos"].sum().rename(columns={"Kilos": "Kilos_Mes_Anterior"})
+        df_reporte = df_padron.merge(vta_agrup, on="CodVendedor", how="inner")
+        df_reporte["CEBE"] = df_reporte["Marca"].map(cebe_map).fillna("GLOBAL")
+        df_reporte["Obj_Macro_Marca_Kg"] = df_reporte["Marca"].map(obj_act_map).fillna(0.0)
 
-    df_reporte = df_padron.merge(vta_agrup, on="CodVendedor", how="inner")
-    df_reporte["CEBE"] = df_reporte["Marca"].map(cebe_map).fillna("GLOBAL")
-    df_reporte["Obj_Macro_Marca_Kg"] = df_reporte["Marca"].map(obj_act_map).fillna(0.0)
+        df_reporte["Total_Kilos_Marca"] = df_reporte.groupby("Marca")["Kilos_Mes_Anterior"].transform("sum")
+        df_reporte["Participacion_Pct"] = (df_reporte["Kilos_Mes_Anterior"] / df_reporte["Total_Kilos_Marca"].replace(0, pd.NA)).fillna(0.0)
 
-    df_reporte["Total_Kilos_Marca"] = df_reporte.groupby("Marca")["Kilos_Mes_Anterior"].transform("sum")
-    df_reporte["Participacion_Pct"] = (df_reporte["Kilos_Mes_Anterior"] / df_reporte["Total_Kilos_Marca"].replace(0, pd.NA)).fillna(0.0)
+        obj_ant_ser = df_reporte["Marca"].map(obj_ant_map).fillna(0.0)
+        df_reporte["Objetivo_Mes_Anterior_Kg"] = df_reporte["Participacion_Pct"] * obj_ant_ser
 
-    obj_ant_ser = df_reporte["Marca"].map(obj_ant_map).fillna(0.0)
-    df_reporte["Objetivo_Mes_Anterior_Kg"] = df_reporte["Participacion_Pct"] * obj_ant_ser
+        df_reporte["Logro_Anterior_Pct"] = (df_reporte["Kilos_Mes_Anterior"] / df_reporte["Objetivo_Mes_Anterior_Kg"].replace(0, pd.NA)).mul(100).fillna(0.0)
+        df_reporte["Obj_Sugerido_Kg"] = df_reporte["Participacion_Pct"] * df_reporte["Obj_Macro_Marca_Kg"]
 
-    df_reporte["Logro_Anterior_Pct"] = (df_reporte["Kilos_Mes_Anterior"] / df_reporte["Objetivo_Mes_Anterior_Kg"].replace(0, pd.NA)).mul(100).fillna(0.0)
-    df_reporte["Obj_Sugerido_Kg"] = df_reporte["Participacion_Pct"] * df_reporte["Obj_Macro_Marca_Kg"]
+        df_reporte = df_reporte.drop(columns=["Total_Kilos_Marca"], errors="ignore")
 
-    df_reporte = df_reporte.drop(columns=["Total_Kilos_Marca"], errors="ignore")
-    
     if segmentos_orden_lista:
         df_reporte["SEGMENTO"] = pd.Categorical(df_reporte["SEGMENTO"], categories=segmentos_orden_lista, ordered=True)
 
-    df_reporte = df_reporte.sort_values(by=["Supervisor", "Nombre", "Marca", "SEGMENTO"]).reset_index(drop=True)
+    sort_cols = [c for c in ["Supervisor", "Nombre", "Marca", "SEGMENTO"] if c in df_reporte.columns]
+    df_reporte = df_reporte.sort_values(by=sort_cols).reset_index(drop=True)
     df_reporte["SEGMENTO"] = df_reporte["SEGMENTO"].astype(str)
 
-    # Inyección de columnas de control temporal para versión de base de datos
     df_reporte["Anio"] = int(anio_operativo)
     df_reporte["Mes"] = int(mes_operativo)
 
@@ -189,6 +180,11 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
         "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", 
         "Obj_Sugerido_Kg"
     ]
+    
+    for col in columnas_finales:
+        if col not in df_reporte.columns:
+            df_reporte[col] = 0.0
+
     return df_reporte[columnas_finales], segmentos_orden_lista
 
 def render_rep_obj_kilos(df_vta, filtros_globales=None):
@@ -221,16 +217,22 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     try:
         maestro_v = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
         if not maestro_v.empty and "Mes" in maestro_v.columns:
-            mv_per = maestro_v[(maestro_v["Mes"].astype(str) == str(mes_op)) & (maestro_v["Anio"].astype(str) == str(anio_op))]
+            mv_per = maestro_v[
+                (maestro_v["Mes"].astype(str).str.strip() == str(mes_op)) & 
+                (maestro_v["Anio"].astype(str).str.strip() == str(anio_op))
+            ]
             if not mv_per.empty:
                 maestro_v = mv_per
     except Exception:
         maestro_v = pd.DataFrame()
 
     try:
-        maestro_seg = db.cargar_tabla_sql("SELECT * FROM maestro_segmentos")
+        maestro_seg = db.cargar_tabla_sql("SELECT * FROM maestro_segmentos ORDER BY rowid ASC")
         if not maestro_seg.empty and "Mes" in maestro_seg.columns:
-            ms_per = maestro_seg[(maestro_seg["Mes"].astype(str) == str(mes_op)) & (maestro_seg["Anio"].astype(str) == str(anio_op))]
+            ms_per = maestro_seg[
+                (maestro_seg["Mes"].astype(str).str.strip() == str(mes_op)) & 
+                (maestro_seg["Anio"].astype(str).str.strip() == str(anio_op))
+            ]
             if not ms_per.empty:
                 maestro_seg = ms_per
     except Exception:
@@ -239,7 +241,10 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     try:
         maestro_cebe_act = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
         if not maestro_cebe_act.empty and "Mes" in maestro_cebe_act.columns:
-            mc_per = maestro_cebe_act[(maestro_cebe_act["Mes"].astype(str) == str(mes_op)) & (maestro_cebe_act["Anio"].astype(str) == str(anio_op))]
+            mc_per = maestro_cebe_act[
+                (maestro_cebe_act["Mes"].astype(str).str.strip() == str(mes_op)) & 
+                (maestro_cebe_act["Anio"].astype(str).str.strip() == str(anio_op))
+            ]
             if not mc_per.empty:
                 maestro_cebe_act = mc_per
     except Exception:
@@ -248,7 +253,10 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     try:
         maestro_cebe_ant = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
         if not maestro_cebe_ant.empty and "Mes" in maestro_cebe_ant.columns:
-            mc_ant = maestro_cebe_ant[(maestro_cebe_ant["Mes"].astype(str) == str(mes_ant_eval)) & (maestro_cebe_ant["Anio"].astype(str) == str(anio_ant_eval))]
+            mc_ant = maestro_cebe_ant[
+                (maestro_cebe_ant["Mes"].astype(str).str.strip() == str(mes_ant_eval)) & 
+                (maestro_cebe_ant["Anio"].astype(str).str.strip() == str(anio_ant_eval))
+            ]
             if not mc_ant.empty:
                 maestro_cebe_ant = mc_ant
     except Exception:
@@ -258,7 +266,7 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en la base de datos.")
         return
 
-    cache_key = f"_cache_rep_obj_distribucion_v12_{anio_op}_{mes_op}_{sup_filtro}"
+    cache_key = f"_cache_rep_obj_distribucion_v15_{anio_op}_{mes_op}_{sup_filtro}"
     if cache_key not in st.session_state:
         with st.spinner("Calculando distribución proporcional de objetivos macro en Kilos..."):
             df_base, seg_orden = generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_op, mes_op)
@@ -270,17 +278,12 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         st.info("No se encontraron registros coincidentes con los maestros oficiales para el período de referencia.")
         return
 
-    if "Obj_Sugerido_Kg" not in df_base.columns:
-        df_base, seg_orden = generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_op, mes_op)
-        st.session_state[cache_key] = (df_base, seg_orden)
-
     df_filtrado = df_base.copy()
     if sup_filtro != "TODOS" and "Supervisor" in df_filtrado.columns:
         df_filtrado = df_filtrado[df_filtrado["Supervisor"].astype(str).str.strip() == sup_filtro].copy()
 
     df_filtrado["Obj_Sugerido_Kg"] = df_filtrado["Obj_Sugerido_Kg"] * factor_multiplicador
 
-    # Agrupación por Vendedor y Segmento (consolidando todas las marcas)
     df_agrupado = df_filtrado.groupby(
         ["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO"],
         as_index=False
@@ -303,11 +306,11 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     total_kilos_ant = df_agrupado["Kilos_Mes_Anterior"].sum()
     total_obj_sugerido = df_agrupado["Obj_Sugerido_Kg"].sum()
     
-    # Intentar obtener total macro compañía de las marcas operativas
     total_macro_compania = 0.0
     if not maestro_cebe_act.empty:
-        co_act = next((c for c in maestro_cebe_act.columns if "obj_tn" in str(c).strip().lower() or "tn" in str(c).strip().lower() or "obj" in str(c).strip().lower()), None)
+        co_act = next((c for c in maestro_cebe_act.columns if any(k in str(c).strip().lower() for k in ["obj_tn", "tn", "obj_mes", "objetivo", "obj"])), None)
         if co_act:
+            # Lectura directa en Kilos sin factor 1000
             total_macro_compania = pd.to_numeric(maestro_cebe_act[co_act], errors="coerce").sum()
 
     m1, m2, m3 = st.columns(3)
@@ -397,5 +400,5 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         data=buffer,
         file_name=f"Propuesta_Objetivos_{mes_op}_{anio_op}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key=f"btn_dl_propuesta_obj_{anio_op}_{mes_op}"
+        key=f"btn_dl_propuesta_obj_{mes_op}_{anio_op}"
     )

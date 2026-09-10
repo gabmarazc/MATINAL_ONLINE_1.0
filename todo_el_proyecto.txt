@@ -1535,35 +1535,7 @@ import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode, JsCode
 from modules import database as db
-
-def parsear_fecha_robusta(serie):
-    """Estandariza parseo de fechas considerando formatos ISO, DD/MM/YYYY y genérico sin advertencias."""
-    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
-        return pd.Series(dtype="datetime64[ns]")
-    if not isinstance(serie, pd.Series):
-        serie = pd.Series([serie])
-    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-    
-    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-    dt_gen = pd.to_datetime(s, errors="coerce")
-    
-    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
-
-def _extraer_dia_de_ruta_vectorial(serie):
-    """Normalización y extracción vectorial rápida de días de visita sin bucles lentos en Python puro."""
-    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
-        return pd.Series(dtype="object")
-    s_upper = serie.astype(str).str.upper()
-    dias_map = pd.Series("SIN DÍA", index=serie.index)
-    dias_map[s_upper.str.contains("LUN", na=False)] = "LUNES"
-    dias_map[s_upper.str.contains("MAR", na=False)] = "MARTES"
-    dias_map[s_upper.str.contains("MIE", na=False)] = "MIERCOLES"
-    dias_map[s_upper.str.contains("JUE", na=False)] = "JUEVES"
-    dias_map[s_upper.str.contains("VIE", na=False)] = "VIERNES"
-    dias_map[s_upper.str.contains("SAB", na=False)] = "SABADO"
-    dias_map[s_upper.str.contains("DOM", na=False)] = "DOMINGO"
-    return dias_map
+from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta_vectorial, tarjeta_metrica_html
 
 def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_matinal):
     """
@@ -1642,22 +1614,27 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
 
     return df
 
-def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas):
+def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, filtros_globales=None):
     """
     Genera la matriz analítica de Cobertura por Marca estructurando la base analítica en memoria
     para posibilitar recalculo instantáneo de cobertura ante cambios de Vendedor, Marca o Día de Visita.
     """
-    df_params = db.cargar_tabla_sql("SELECT * FROM parametros")
-    params_map = {}
-    if not df_params.empty and "PARAMETRO" in df_params.columns and "VALOR" in df_params.columns:
-        params_map = dict(zip(df_params["PARAMETRO"], df_params["VALOR"]))
+    if filtros_globales:
+        anio_op = int(filtros_globales.get("anio", 2026))
+        mes_op = int(filtros_globales.get("mes", 9))
+        dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026")
+    else:
+        df_params = db.cargar_tabla_sql("SELECT * FROM parametros")
+        params_map = {}
+        if not df_params.empty and "PARAMETRO" in df_params.columns and "VALOR" in df_params.columns:
+            params_map = dict(zip(df_params["PARAMETRO"], df_params["VALOR"]))
 
-    anio_op = int(st.session_state.get("sel_anio_op", params_map.get("Año", 2026)))
-    mes_op = int(st.session_state.get("sel_mes_op", params_map.get("Mes", 9)))
-    
-    dia_matinal_default = params_map.get("Dia Matinal", "02/09/2026")
-    dia_matinal_obj = st.session_state.get("sel_dia_matinal", dia_matinal_default)
-    dia_matinal = dia_matinal_obj.strftime("%d/%m/%Y") if hasattr(dia_matinal_obj, "strftime") else str(dia_matinal_obj)
+        anio_op = int(st.session_state.get("sel_anio_op", params_map.get("Año", 2026)))
+        mes_op = int(st.session_state.get("sel_mes_op", params_map.get("Mes", 9)))
+        
+        dia_matinal_default = params_map.get("Dia Matinal", "02/09/2026")
+        dia_matinal_obj = st.session_state.get("sel_dia_matinal", dia_matinal_default)
+        dia_matinal = dia_matinal_obj.strftime("%d/%m/%Y") if hasattr(dia_matinal_obj, "strftime") else str(dia_matinal_obj)
 
     df_vta_prep = preparar_ventas_cobertura_marca(df_vtas_operativo, anio_op, mes_op, dia_matinal)
 
@@ -1728,7 +1705,7 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
 
         col_ruta_c = next((c for c in cartera.columns if str(c).strip().lower() in ["ruta", "dia_visita", "visita", "dia"]), None)
         if col_ruta_c is not None:
-            cartera["DiaVisita"] = _extraer_dia_de_ruta_vectorial(cartera[col_ruta_c])
+            cartera["DiaVisita"] = extraer_dia_de_ruta_vectorial(cartera[col_ruta_c])
         else:
             cartera["DiaVisita"] = "SIN DÍA"
 
@@ -1756,30 +1733,12 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
 
     return pd.DataFrame(), marcas, mapa_objetivos
 
-def _tarjeta_metrica_marca_html(label, valor, border_color="#3b82f6"):
-    """Genera tarjetas HTML con estilo idéntico a rep_ccc.py, texto en negrita y borde de color."""
-    return f"""
-    <div style="
-        background-color: #1e293b;
-        border: 2px solid {border_color};
-        border-radius: 8px;
-        padding: 10px 14px;
-        text-align: center;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        margin-bottom: 8px;
-    ">
-        <div style="font-size: 0.95rem; color: #f8fafc; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">{label}</div>
-        <div style="font-size: 1.4rem; color: #f8fafc; font-weight: 700;">{valor}</div>
-    </div>
-    """
-
 @st.fragment
 def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas_param, mapa_objetivos_param, supervisores_seleccionados):
     cartera_base = st.session_state.get("_cob_cartera_base", pd.DataFrame())
     vtas_agrup = st.session_state.get("_cob_vtas_agrupadas", pd.DataFrame())
     marcas = st.session_state.get("_cob_marcas", marcas_param)
     mapa_objetivos = st.session_state.get("_cob_mapa_objetivos", mapa_objetivos_param)
-    df_vend = st.session_state.get("_cob_vendedores_df", pd.DataFrame())
 
     if cartera_base.empty:
         st.info("No hay datos de cartera disponibles para procesar la Cobertura por Marca.")
@@ -1877,7 +1836,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
                 
             color_borde = colores_tarjetas[idx % len(colores_tarjetas)]
             with col_target:
-                st.markdown(_tarjeta_metrica_marca_html(f"{marca} (Obj: {obj_val:g}%)", f"{cobertura_global_pct:.2f}%", color_borde), unsafe_allow_html=True)
+                st.markdown(tarjeta_metrica_html(f"{marca} (Obj: {obj_val:g}%)", f"{cobertura_global_pct:.2f}%", color_borde, "1.4rem", "0.95rem"), unsafe_allow_html=True)
             
         st.divider()
 
@@ -2009,7 +1968,6 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
         gb_batalla.configure_column("Día Visita", headerName="Día Visita", width=110)
         gb_batalla.configure_column("Marca", headerName="Marca", width=120)
         
-        # Formateador numérico exacto para unidades reales (incluyendo negativos) con 2 decimales y coma
         val_fmt_unidades = JsCode("""
         function(params) {
             if (params.value == null || isNaN(params.value)) {
@@ -2093,7 +2051,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
     else:
         st.info("No se registran clientes sin cobertura para los filtros seleccionados.")
 
-def dibujar_pestana_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, supervisores_seleccionados, df_vtas_operativo=None, df_cartera=None):
+def dibujar_pestana_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, supervisores_seleccionados, df_vtas_operativo=None, df_cartera=None, filtros_globales=None):
     st.subheader("🎯 Cobertura Por Marca y Detalle de Clientes")
     sup_sel_efectivo = supervisores_seleccionados if isinstance(supervisores_seleccionados, list) else [supervisores_seleccionados]
     render_fragmento_interactivo_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, sup_sel_efectivo)
@@ -2108,19 +2066,7 @@ import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
-
-def parsear_fecha_robusta(serie):
-    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
-        return pd.Series(dtype="datetime64[ns]")
-    if not isinstance(serie, pd.Series):
-        serie = pd.Series([serie])
-    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-    
-    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-    dt_gen = pd.to_datetime(s, errors="coerce")
-    
-    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
+from modules.utils import parsear_fecha_robusta
 
 def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
     df = df_vta.copy()
@@ -2270,7 +2216,6 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     codigos_validos_padron = set(vendedores_rep["CodVend"].dropna().tolist())
     sup_map = vendedores_rep.set_index("CodVend")["SUP"].to_dict()
 
-    # ORDEN HARDCODEADO ESTRICTO DE SEGMENTOS
     orden_segmentos_maestro = [
         "GOLD Salty",
         "GOLD Crakers",
@@ -2462,7 +2407,6 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte["Ajuste_Reemp_Actual"] = reporte.get("Ajuste_Reemp_Actual", 0.0).fillna(0.0)
     reporte["Ajuste_Por_Reemp"] = reporte["Ajuste_Reemp_Arrastre"] + reporte["Ajuste_Reemp_Actual"]
 
-    # ORDENAMIENTO ESTRICTO Y GARANTIZADO POR DICCIONARIO DE ÍNDICES HARDCODEADO
     if orden_segmentos_maestro:
         mapping_orden = {str(seg).strip(): i for i, seg in enumerate(orden_segmentos_maestro)}
         reporte["SEGMENTO_STR"] = reporte["SEGMENTO"].astype(str).str.strip()
@@ -2482,53 +2426,7 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
 
 @st.fragment
 def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro, df_vta_prep, dia_matinal):
-    """Fragmento aislado de alta velocidad con estilo visual de tarjetas idéntico a Avance CCC y tamaño de fuente ampliado 50%."""
-    
-    # Inyección de Estilos CSS idénticos al formato de Avance CCC pero con fuente ampliada un 50% (títulos ~21px, valores ~39px)
-    st.markdown("""
-        <style>
-            div.card-azul {
-                background-color: #0e1117;
-                border: 2px solid #1f6feb;
-                border-radius: 10px;
-                padding: 15px 20px;
-                text-align: center;
-                margin-bottom: 10px;
-            }
-            div.card-azul p {
-                color: #8b949e;
-                font-size: 21px;
-                margin-bottom: 5px;
-                font-weight: 600;
-            }
-            div.card-azul h2 {
-                color: #ffffff;
-                font-size: 39px;
-                margin: 0;
-                font-weight: 700;
-            }
-            div.card-rojo {
-                background-color: #0e1117;
-                border: 2px solid #da3633;
-                border-radius: 10px;
-                padding: 15px 20px;
-                text-align: center;
-                margin-bottom: 10px;
-            }
-            div.card-rojo p {
-                color: #8b949e;
-                font-size: 21px;
-                margin-bottom: 5px;
-                font-weight: 600;
-            }
-            div.card-rojo h2 {
-                color: #ffffff;
-                font-size: 39px;
-                margin: 0;
-                font-weight: 700;
-            }
-        </style>
-    """, unsafe_allow_html=True)
+    from modules.utils import tarjeta_metrica_html
 
     col_f1, col_f2 = st.columns(2)
     with col_f1:
@@ -2637,28 +2535,27 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
         total_tendencia = float(rep_detalle["Tendencia_Total_Kg"].sum())
         pct_cumplimiento_obj = (total_tendencia / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
 
-    # RENDERIZADO DE MÉTRICAS CON ESTILO DE TARJETAS (Nivel 1 y Nivel 2 en Azul, Tendencia Kgs en Rojo)
+    # RENDERIZADO DE MÉTRICAS UTILIZANDO LA UTILIDAD COMPARTIDA
     mcol1, mcol2, mcol3, mcol4 = st.columns(4)
     with mcol1:
-        st.markdown(f"""<div class="card-azul"><p>📦 Arrastre</p><h2>{total_arrastre:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("📦 Arrastre", f"{total_arrastre:,.1f} kg", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     with mcol2:
-        st.markdown(f"""<div class="card-azul"><p>🚚 Actual</p><h2>{total_actual:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("🚚 Actual", f"{total_actual:,.1f} kg", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     with mcol3:
-        st.markdown(f"""<div class="card-azul"><p>📊 Neto Operativo</p><h2>{total_neto_operativo:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("📊 Neto Operativo", f"{total_neto_operativo:,.1f} kg", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     with mcol4:
-        st.markdown(f"""<div class="card-azul"><p>📈 % Avance</p><h2>{pct_avance:,.2f}%</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("📈 % Avance", f"{pct_avance:,.2f}%", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
 
     tcol1, tcol2, tcol3 = st.columns(3)
     with tcol1:
-        st.markdown(f"""<div class="card-azul"><p>🎯 Objetivo del Mes</p><h2>{total_objetivo_mes:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("🎯 Objetivo del Mes", f"{total_objetivo_mes:,.1f} kg", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     with tcol2:
-        st.markdown(f"""<div class="card-rojo"><p>📈 Tendencia Kgs</p><h2>{total_tendencia:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("📈 Tendencia Kgs", f"{total_tendencia:,.1f} kg", "#ef4444", "39px", "21px"), unsafe_allow_html=True)
     with tcol3:
-        st.markdown(f"""<div class="card-azul"><p>🎯 Tendencia %</p><h2>{pct_cumplimiento_obj:,.2f}%</h2></div>""", unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("🎯 Tendencia %", f"{pct_cumplimiento_obj:,.2f}%", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
     
     st.divider()
 
-    # Redondeo general a 2 decimales para todas las columnas excepto Días Pasados, Rutas y Días Restantes
     cols_excepcion = ["CodVendedor", "Nombre", "SUP", "SEGMENTO", "Días Pasados", "Rutas", "Días Restantes"]
     for col in rep_detalle.columns:
         if col not in cols_excepcion and pd.api.types.is_numeric_dtype(rep_detalle[col]):
@@ -2810,20 +2707,7 @@ import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
-
-def parsear_fecha_robusta(serie):
-    """Estandariza parseo de fechas considerando formatos ISO, DD/MM/YYYY y genérico sin advertencias."""
-    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
-        return pd.Series(dtype="datetime64[ns]")
-    if not isinstance(serie, pd.Series):
-        serie = pd.Series([serie])
-    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-    
-    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-    dt_gen = pd.to_datetime(s, errors="coerce")
-    
-    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
+from modules.utils import parsear_fecha_robusta
 
 def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_operativo, mes_operativo):
     """
@@ -2852,7 +2736,6 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
         mes_ant = mes_operativo - 1
         anio_ant = anio_operativo
 
-    # 1. Extraer objetivos macro del mes actual (maestro_cebe_act) directamente en Kilos
     obj_act_map = {}
     cebe_map = {}
     if maestro_cebe_act is not None and not maestro_cebe_act.empty:
@@ -2868,7 +2751,6 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
                 obj_act_map[m] = val_kg if pd.notna(val_kg) else 0.0
                 cebe_map[m] = c if c and c != "NAN" else "GLOBAL"
 
-    # 2. Extraer objetivos macro del mes anterior (maestro_cebe_ant) directamente en Kilos
     obj_ant_map = {}
     if maestro_cebe_ant is not None and not maestro_cebe_ant.empty:
         cm_ant = next((c for c in maestro_cebe_ant.columns if "marca" in str(c).strip().lower()), maestro_cebe_ant.columns[0])
@@ -2986,7 +2868,6 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
     df_reporte = df_reporte.sort_values(by=["Supervisor", "Nombre", "Marca", "SEGMENTO"]).reset_index(drop=True)
     df_reporte["SEGMENTO"] = df_reporte["SEGMENTO"].astype(str)
 
-    # Inyección de columnas de control temporal para versión de base de datos
     df_reporte["Anio"] = int(anio_operativo)
     df_reporte["Mes"] = int(mes_operativo)
 
@@ -3036,7 +2917,7 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     try:
         maestro_seg = db.cargar_tabla_sql("SELECT * FROM maestro_segmentos")
         if not maestro_seg.empty and "Mes" in maestro_seg.columns:
-            ms_per = maestro_seg[(maestro_seg["Mes"].astype(str) == str(mes_op)) & (maestro_seg["Anio"].astype(str) == str(anio_op))]
+            ms_per = maestro_seg[(ms_per["Mes"].astype(str) == str(mes_op)) & (ms_per["Anio"].astype(str) == str(anio_op))]
             if not ms_per.empty:
                 maestro_seg = ms_per
     except Exception:
@@ -3086,7 +2967,6 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
 
     df_filtrado["Obj_Sugerido_Kg"] = df_filtrado["Obj_Sugerido_Kg"] * factor_multiplicador
 
-    # Agrupación por Vendedor y Segmento (consolidando todas las marcas)
     df_agrupado = df_filtrado.groupby(
         ["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO"],
         as_index=False
@@ -3109,7 +2989,6 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     total_kilos_ant = df_agrupado["Kilos_Mes_Anterior"].sum()
     total_obj_sugerido = df_agrupado["Obj_Sugerido_Kg"].sum()
     
-    # Intentar obtener total macro compañía de las marcas operativas
     total_macro_compania = 0.0
     if not maestro_cebe_act.empty:
         co_act = next((c for c in maestro_cebe_act.columns if "obj_tn" in str(c).strip().lower() or "tn" in str(c).strip().lower() or "obj" in str(c).strip().lower()), None)
@@ -3205,6 +3084,77 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"btn_dl_propuesta_obj_{anio_op}_{mes_op}"
     )
+
+==================================================
+
+=== MÓDULO: utils.py ===
+
+# modules/utils.py
+import pandas as pd
+import unicodedata
+
+def parsear_fecha_robusta(serie):
+    """Estandariza parseo de fechas considerando formatos ISO, DD/MM/YYYY y genérico sin advertencias."""
+    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
+        return pd.Series(dtype="datetime64[ns]")
+    if not isinstance(serie, pd.Series):
+        serie = pd.Series([serie])
+    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
+    
+    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
+    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
+    dt_gen = pd.to_datetime(s, errors="coerce")
+    
+    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
+
+def extraer_dia_de_ruta(val):
+    """Extrae y normaliza el día de visita a partir del texto de la ruta."""
+    if pd.isna(val):
+        return "SIN DÍA"
+    nfkd = unicodedata.normalize('NFKD', str(val))
+    val_clean = "".join([c for c in nfkd if not unicodedata.combining(c)]).upper()
+    
+    if "LUN" in val_clean: return "LUNES"
+    if "MAR" in val_clean: return "MARTES"
+    if "MIE" in val_clean: return "MIERCOLES"
+    if "JUE" in val_clean: return "JUEVES"
+    if "VIE" in val_clean: return "VIERNES"
+    if "SAB" in val_clean: return "SABADO"
+    if "DOM" in val_clean: return "DOMINGO"
+    return "SIN DÍA"
+
+def extraer_dia_de_ruta_vectorial(serie):
+    """Normalización y extracción vectorial rápida de días de visita sin bucles en Python."""
+    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
+        return pd.Series(dtype="object")
+    s_upper = serie.astype(str).str.upper()
+    dias_map = pd.Series("SIN DÍA", index=serie.index)
+    dias_map[s_upper.str.contains("LUN", na=False)] = "LUNES"
+    dias_map[s_upper.str.contains("MAR", na=False)] = "MARTES"
+    dias_map[s_upper.str.contains("MIE", na=False)] = "MIERCOLES"
+    dias_map[s_upper.str.contains("JUE", na=False)] = "JUEVES"
+    dias_map[s_upper.str.contains("VIE", na=False)] = "VIERNES"
+    dias_map[s_upper.str.contains("SAB", na=False)] = "SABADO"
+    dias_map[s_upper.str.contains("DOM", na=False)] = "DOMINGO"
+    return dias_map
+
+def tarjeta_metrica_html(label, valor, border_color="#475569", font_val="1.4rem", font_lbl="0.75rem"):
+    """Genera contenedores HTML unificados para tarjetas de métricas."""
+    return f"""
+    <div style="
+        background-color: #1e293b;
+        border: 2px solid {border_color};
+        border-radius: 8px;
+        padding: 10px 14px;
+        text-align: center;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        margin-bottom: 8px;
+    ">
+        <div style="font-size: {font_lbl}; color: #94a3b8; font-weight: 600; margin-bottom: 4px; text-transform: uppercase;">{label}</div>
+        <div style="font-size: {font_val}; color: #f8fafc; font-weight: 700;">{valor}</div>
+    </div>
+    """
+
 
 ==================================================
 

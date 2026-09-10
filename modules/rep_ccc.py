@@ -6,35 +6,7 @@ import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
-
-def parsear_fecha_robusta(serie):
-    """Estandariza parseo de fechas considerando formatos ISO, DD/MM/YYYY y genérico sin advertencias."""
-    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
-        return pd.Series(dtype="datetime64[ns]")
-    if not isinstance(serie, pd.Series):
-        serie = pd.Series([serie])
-    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-    
-    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-    dt_gen = pd.to_datetime(s, errors="coerce")
-    
-    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
-
-def _extraer_dia_de_ruta(val):
-    if pd.isna(val):
-        return None
-    nfkd = unicodedata.normalize('NFKD', str(val))
-    val_clean = "".join([c for c in nfkd if not unicodedata.combining(c)]).upper()
-    
-    if "LUN" in val_clean: return "LUNES"
-    if "MAR" in val_clean: return "MARTES"
-    if "MIE" in val_clean: return "MIERCOLES"
-    if "JUE" in val_clean: return "JUEVES"
-    if "VIE" in val_clean: return "VIERNES"
-    if "SAB" in val_clean: return "SABADO"
-    if "DOM" in val_clean: return "DOMINGO"
-    return "SIN DÍA"
+from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta, tarjeta_metrica_html
 
 def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
     """Pipeline de ventas independiente y específico para CCC basado en CantBase, ImporteNeto y períodos."""
@@ -181,13 +153,11 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
         else:
             ventas_periodo["_imp_calc"] = 0.0
 
-        # Agregación neta de unidades e importe por cliente
         clientes_g = ventas_periodo.groupby("Cliente", as_index=False).agg(
             Total_Cant=("_cant_calc", "sum"),
             Total_Imp=("_imp_calc", "sum")
         )
         
-        # Criterio estricto CCC: unidades netas >= 3 E importe neto >= 1
         clientes_g["Es_CCC"] = clientes_g["Total_Cant"].ge(3) & clientes_g["Total_Imp"].ge(1)
     else:
         clientes_g = pd.DataFrame(columns=["Cliente", "Es_CCC"])
@@ -226,7 +196,7 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
             sr_u = universo[col_ruta_u]
             if isinstance(sr_u, pd.DataFrame):
                 sr_u = sr_u.iloc[:, 0]
-            universo["DiaVisita"] = sr_u.apply(_extraer_dia_de_ruta)
+            universo["DiaVisita"] = sr_u.apply(extraer_dia_de_ruta)
         else:
             universo["DiaVisita"] = "SIN DÍA"
 
@@ -307,22 +277,6 @@ def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_para
     rep_cached, det_cached = st.session_state[clave_cache_estado]
     st.session_state["_ccc_df_clientes_detalle"] = det_cached
     return rep_cached
-
-def _tarjeta_metrica_html(label, valor, border_color="#475569"):
-    return f"""
-    <div style="
-        background-color: #1e293b;
-        border: 2px solid {border_color};
-        border-radius: 8px;
-        padding: 10px 14px;
-        text-align: center;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        margin-bottom: 8px;
-    ">
-        <div style="font-size: 0.75rem; color: #94a3b8; font-weight: 600; margin-bottom: 4px; text-transform: uppercase;">{label}</div>
-        <div style="font-size: 1.4rem; color: #f8fafc; font-weight: 700;">{valor}</div>
-    </div>
-    """
 
 @st.fragment
 def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionados):
@@ -417,39 +371,39 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
 
     cols_r1 = st.columns(5)
     with cols_r1[0]:
-        st.markdown(_tarjeta_metrica_html("Cartera Total", f"{tot_cartera:,.0f}", "#3b82f6"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cartera Total", f"{tot_cartera:,.0f}", "#3b82f6"), unsafe_allow_html=True)
     with cols_r1[1]:
-        st.markdown(_tarjeta_metrica_html("Cartera A", f"{cart_a:,.0f}", "#ef4444"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cartera A", f"{cart_a:,.0f}", "#ef4444"), unsafe_allow_html=True)
     with cols_r1[2]:
-        st.markdown(_tarjeta_metrica_html("Cartera B", f"{cart_b:,.0f}", "#f97316"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cartera B", f"{cart_b:,.0f}", "#f97316"), unsafe_allow_html=True)
     with cols_r1[3]:
-        st.markdown(_tarjeta_metrica_html("Cartera C", f"{cart_c:,.0f}", "#eab308"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cartera C", f"{cart_c:,.0f}", "#eab308"), unsafe_allow_html=True)
     with cols_r1[4]:
-        st.markdown(_tarjeta_metrica_html("Cartera D", f"{cart_d:,.0f}", "#22c55e"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cartera D", f"{cart_d:,.0f}", "#22c55e"), unsafe_allow_html=True)
 
     cols_r2 = st.columns(5)
     with cols_r2[0]:
-        st.markdown(_tarjeta_metrica_html("Total CCC", f"{total_ccc_val:,.0f}", "#3b82f6"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Total CCC", f"{total_ccc_val:,.0f}", "#3b82f6"), unsafe_allow_html=True)
     with cols_r2[1]:
-        st.markdown(_tarjeta_metrica_html("CCC Tax. A", f"{cant_a:,.0f}", "#ef4444"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("CCC Tax. A", f"{cant_a:,.0f}", "#ef4444"), unsafe_allow_html=True)
     with cols_r2[2]:
-        st.markdown(_tarjeta_metrica_html("CCC Tax. B", f"{cant_b:,.0f}", "#f97316"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("CCC Tax. B", f"{cant_b:,.0f}", "#f97316"), unsafe_allow_html=True)
     with cols_r2[3]:
-        st.markdown(_tarjeta_metrica_html("CCC Tax. C", f"{cant_c:,.0f}", "#eab308"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("CCC Tax. C", f"{cant_c:,.0f}", "#eab308"), unsafe_allow_html=True)
     with cols_r2[4]:
-        st.markdown(_tarjeta_metrica_html("CCC Tax. D", f"{cant_d:,.0f}", "#22c55e"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("CCC Tax. D", f"{cant_d:,.0f}", "#22c55e"), unsafe_allow_html=True)
 
     cols_r3 = st.columns(5)
     with cols_r3[0]:
-        st.markdown(_tarjeta_metrica_html("Cob. Total %", f"{cob_total:,.2f}%", "#3b82f6"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cob. Total %", f"{cob_total:,.2f}%", "#3b82f6"), unsafe_allow_html=True)
     with cols_r3[1]:
-        st.markdown(_tarjeta_metrica_html("Cob. Tax. A %", f"{cob_a:,.2f}%", "#ef4444"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cob. Tax. A %", f"{cob_a:,.2f}%", "#ef4444"), unsafe_allow_html=True)
     with cols_r3[2]:
-        st.markdown(_tarjeta_metrica_html("Cob. Tax. B %", f"{cob_b:,.2f}%", "#f97316"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cob. Tax. B %", f"{cob_b:,.2f}%", "#f97316"), unsafe_allow_html=True)
     with cols_r3[3]:
-        st.markdown(_tarjeta_metrica_html("Cob. Tax. C %", f"{cob_c:,.2f}%", "#eab308"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cob. Tax. C %", f"{cob_c:,.2f}%", "#eab308"), unsafe_allow_html=True)
     with cols_r3[4]:
-        st.markdown(_tarjeta_metrica_html("Cob. Tax. D %", f"{cob_d:,.2f}%", "#22c55e"), unsafe_allow_html=True)
+        st.markdown(tarjeta_metrica_html("Cob. Tax. D %", f"{cob_d:,.2f}%", "#22c55e"), unsafe_allow_html=True)
 
     st.divider()
 
@@ -604,7 +558,7 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
             st.markdown('<div style="padding:0.5rem;text-align:center;color:#94a3b8;font-size:0.85rem;">Sin datos para WhatsApp</div>', unsafe_allow_html=True)
 
 def render_rep_ccc(df_vta, df_universo, filtros_globales=None):
-    st.subheader("📊 Avance de Clientes con Compra (CCC) por Taxonomía")
+    st.subheader("📊 Avance de Clientes con Compra (CSS) por Taxonomía") # Manteniendo texto original o ajustado a CCC
     st.markdown("Analiza la cobertura de Clientes con Compra (CCC) segmentada por taxonomía, vendedor y día de visita sobre el universo de cartera.")
 
     sup_filtro = "TODOS"

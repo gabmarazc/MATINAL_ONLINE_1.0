@@ -6,35 +6,7 @@ import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode, JsCode
 from modules import database as db
-
-def parsear_fecha_robusta(serie):
-    """Estandariza parseo de fechas considerando formatos ISO, DD/MM/YYYY y genérico sin advertencias."""
-    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
-        return pd.Series(dtype="datetime64[ns]")
-    if not isinstance(serie, pd.Series):
-        serie = pd.Series([serie])
-    s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-    
-    dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
-    dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-    dt_gen = pd.to_datetime(s, errors="coerce")
-    
-    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
-
-def _extraer_dia_de_ruta_vectorial(serie):
-    """Normalización y extracción vectorial rápida de días de visita sin bucles lentos en Python puro."""
-    if serie is None or (isinstance(serie, pd.Series) and serie.empty):
-        return pd.Series(dtype="object")
-    s_upper = serie.astype(str).str.upper()
-    dias_map = pd.Series("SIN DÍA", index=serie.index)
-    dias_map[s_upper.str.contains("LUN", na=False)] = "LUNES"
-    dias_map[s_upper.str.contains("MAR", na=False)] = "MARTES"
-    dias_map[s_upper.str.contains("MIE", na=False)] = "MIERCOLES"
-    dias_map[s_upper.str.contains("JUE", na=False)] = "JUEVES"
-    dias_map[s_upper.str.contains("VIE", na=False)] = "VIERNES"
-    dias_map[s_upper.str.contains("SAB", na=False)] = "SABADO"
-    dias_map[s_upper.str.contains("DOM", na=False)] = "DOMINGO"
-    return dias_map
+from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta_vectorial, tarjeta_metrica_html
 
 def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_matinal):
     """
@@ -113,22 +85,27 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
 
     return df
 
-def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas):
+def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, filtros_globales=None):
     """
     Genera la matriz analítica de Cobertura por Marca estructurando la base analítica en memoria
     para posibilitar recalculo instantáneo de cobertura ante cambios de Vendedor, Marca o Día de Visita.
     """
-    df_params = db.cargar_tabla_sql("SELECT * FROM parametros")
-    params_map = {}
-    if not df_params.empty and "PARAMETRO" in df_params.columns and "VALOR" in df_params.columns:
-        params_map = dict(zip(df_params["PARAMETRO"], df_params["VALOR"]))
+    if filtros_globales:
+        anio_op = int(filtros_globales.get("anio", 2026))
+        mes_op = int(filtros_globales.get("mes", 9))
+        dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026")
+    else:
+        df_params = db.cargar_tabla_sql("SELECT * FROM parametros")
+        params_map = {}
+        if not df_params.empty and "PARAMETRO" in df_params.columns and "VALOR" in df_params.columns:
+            params_map = dict(zip(df_params["PARAMETRO"], df_params["VALOR"]))
 
-    anio_op = int(st.session_state.get("sel_anio_op", params_map.get("Año", 2026)))
-    mes_op = int(st.session_state.get("sel_mes_op", params_map.get("Mes", 9)))
-    
-    dia_matinal_default = params_map.get("Dia Matinal", "02/09/2026")
-    dia_matinal_obj = st.session_state.get("sel_dia_matinal", dia_matinal_default)
-    dia_matinal = dia_matinal_obj.strftime("%d/%m/%Y") if hasattr(dia_matinal_obj, "strftime") else str(dia_matinal_obj)
+        anio_op = int(st.session_state.get("sel_anio_op", params_map.get("Año", 2026)))
+        mes_op = int(st.session_state.get("sel_mes_op", params_map.get("Mes", 9)))
+        
+        dia_matinal_default = params_map.get("Dia Matinal", "02/09/2026")
+        dia_matinal_obj = st.session_state.get("sel_dia_matinal", dia_matinal_default)
+        dia_matinal = dia_matinal_obj.strftime("%d/%m/%Y") if hasattr(dia_matinal_obj, "strftime") else str(dia_matinal_obj)
 
     df_vta_prep = preparar_ventas_cobertura_marca(df_vtas_operativo, anio_op, mes_op, dia_matinal)
 
@@ -199,7 +176,7 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
 
         col_ruta_c = next((c for c in cartera.columns if str(c).strip().lower() in ["ruta", "dia_visita", "visita", "dia"]), None)
         if col_ruta_c is not None:
-            cartera["DiaVisita"] = _extraer_dia_de_ruta_vectorial(cartera[col_ruta_c])
+            cartera["DiaVisita"] = extraer_dia_de_ruta_vectorial(cartera[col_ruta_c])
         else:
             cartera["DiaVisita"] = "SIN DÍA"
 
@@ -227,30 +204,12 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
 
     return pd.DataFrame(), marcas, mapa_objetivos
 
-def _tarjeta_metrica_marca_html(label, valor, border_color="#3b82f6"):
-    """Genera tarjetas HTML con estilo idéntico a rep_ccc.py, texto en negrita y borde de color."""
-    return f"""
-    <div style="
-        background-color: #1e293b;
-        border: 2px solid {border_color};
-        border-radius: 8px;
-        padding: 10px 14px;
-        text-align: center;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        margin-bottom: 8px;
-    ">
-        <div style="font-size: 0.95rem; color: #f8fafc; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">{label}</div>
-        <div style="font-size: 1.4rem; color: #f8fafc; font-weight: 700;">{valor}</div>
-    </div>
-    """
-
 @st.fragment
 def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas_param, mapa_objetivos_param, supervisores_seleccionados):
     cartera_base = st.session_state.get("_cob_cartera_base", pd.DataFrame())
     vtas_agrup = st.session_state.get("_cob_vtas_agrupadas", pd.DataFrame())
     marcas = st.session_state.get("_cob_marcas", marcas_param)
     mapa_objetivos = st.session_state.get("_cob_mapa_objetivos", mapa_objetivos_param)
-    df_vend = st.session_state.get("_cob_vendedores_df", pd.DataFrame())
 
     if cartera_base.empty:
         st.info("No hay datos de cartera disponibles para procesar la Cobertura por Marca.")
@@ -348,7 +307,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
                 
             color_borde = colores_tarjetas[idx % len(colores_tarjetas)]
             with col_target:
-                st.markdown(_tarjeta_metrica_marca_html(f"{marca} (Obj: {obj_val:g}%)", f"{cobertura_global_pct:.2f}%", color_borde), unsafe_allow_html=True)
+                st.markdown(tarjeta_metrica_html(f"{marca} (Obj: {obj_val:g}%)", f"{cobertura_global_pct:.2f}%", color_borde, "1.4rem", "0.95rem"), unsafe_allow_html=True)
             
         st.divider()
 
@@ -480,7 +439,6 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
         gb_batalla.configure_column("Día Visita", headerName="Día Visita", width=110)
         gb_batalla.configure_column("Marca", headerName="Marca", width=120)
         
-        # Formateador numérico exacto para unidades reales (incluyendo negativos) con 2 decimales y coma
         val_fmt_unidades = JsCode("""
         function(params) {
             if (params.value == null || isNaN(params.value)) {
@@ -564,7 +522,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
     else:
         st.info("No se registran clientes sin cobertura para los filtros seleccionados.")
 
-def dibujar_pestana_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, supervisores_seleccionados, df_vtas_operativo=None, df_cartera=None):
+def dibujar_pestana_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, supervisores_seleccionados, df_vtas_operativo=None, df_cartera=None, filtros_globales=None):
     st.subheader("🎯 Cobertura Por Marca y Detalle de Clientes")
     sup_sel_efectivo = supervisores_seleccionados if isinstance(supervisores_seleccionados, list) else [supervisores_seleccionados]
     render_fragmento_interactivo_cobertura_marca(reporte_cobertura, marcas, mapa_objetivos, sup_sel_efectivo)
