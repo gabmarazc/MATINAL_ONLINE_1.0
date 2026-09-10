@@ -208,29 +208,30 @@ def main():
 
     es_local = es_entorno_local()
     
-    # Restricción y definición de solapas según el nivel autenticado
+    # Restricción y definición de solapas según el orden solicitado y el nivel autenticado
+    # Orden: Avance Kilos, Avance CCC, Cobertura Marca, Parámetros, Composición Obj Kilos
     if "Nivel 1" in nivel_actual:
         if es_local:
             tab1, tab2, tab3, tab4, tab5 = st.tabs([
                 "📊 Avance Kilos", 
-                "📦 Composición Obj Kilos",
                 "📈 Avance CCC", 
                 "🎯 Cobertura Marca", 
-                "⚙️ Parámetros"
+                "⚙️ Parámetros",
+                "📦 Composición Obj Kilos"
             ])
         else:
             tab1, tab2, tab3, tab4 = st.tabs([
                 "📊 Avance Kilos", 
-                "📦 Composición Obj Kilos",
                 "📈 Avance CCC", 
-                "🎯 Cobertura Marca"
+                "🎯 Cobertura Marca", 
+                "📦 Composición Obj Kilos"
             ])
     elif "Nivel 2" in nivel_actual:
         tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Avance Kilos", 
-            "📦 Composición Obj Kilos",
             "📈 Avance CCC", 
-            "🎯 Cobertura Marca"
+            "🎯 Cobertura Marca", 
+            "📦 Composición Obj Kilos"
         ])
     else:
         # Nivel 3: Supervisión (Sin Composición Obj Kilos)
@@ -246,28 +247,31 @@ def main():
     sup_sel_efectivo = supervisores_disponibles[1:] if filtros_globales["supervisor"] == "TODOS" else [filtros_globales["supervisor"]]
     rep_cob, marcas_lst, mapa_obj = generar_reporte_cobertura_marca(df_vta, df_universo, df_vend_maestro, df_marcas_maestro)
 
-    # Renderizado de pestañas acorde al perfil activo
+    # Renderizado de pestañas acorde al perfil activo y al nuevo orden de solapas
     if "Nivel 1" in nivel_actual:
         with tab1:
             render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
         with tab2:
-            render_rep_obj_kilos(df_vta, filtros_globales)
-        with tab3:
             render_rep_ccc(df_vta, df_universo, filtros_globales)
-        with tab4:
+        with tab3:
             dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
         if es_local:
-            with tab5:
+            with tab4:
                 render_parametros_view(filtros_globales)
+            with tab5:
+                render_rep_obj_kilos(df_vta, filtros_globales)
+        else:
+            with tab4:
+                render_rep_obj_kilos(df_vta, filtros_globales)
     elif "Nivel 2" in nivel_actual:
         with tab1:
             render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
         with tab2:
-            render_rep_obj_kilos(df_vta, filtros_globales)
-        with tab3:
             render_rep_ccc(df_vta, df_universo, filtros_globales)
-        with tab4:
+        with tab3:
             dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
+        with tab4:
+            render_rep_obj_kilos(df_vta, filtros_globales)
     else:
         # Nivel 3: Supervisión
         with tab1:
