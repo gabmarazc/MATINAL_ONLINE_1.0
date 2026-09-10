@@ -378,7 +378,54 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
 
 @st.fragment
 def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro, df_vta_prep, dia_matinal):
-    """Fragmento aislado de alta velocidad. Multiselects vacíos por defecto (muestran todo automáticamente)."""
+    """Fragmento aislado de alta velocidad con estilo visual de tarjetas idéntico a Avance CCC."""
+    
+    # Inyección de Estilos CSS idénticos al formato de Avance CCC
+    st.markdown("""
+        <style>
+            div.card-azul {
+                background-color: #0e1117;
+                border: 2px solid #1f6feb;
+                border-radius: 10px;
+                padding: 15px 20px;
+                text-align: center;
+                margin-bottom: 10px;
+            }
+            div.card-azul p {
+                color: #8b949e;
+                font-size: 14px;
+                margin-bottom: 5px;
+                font-weight: 600;
+            }
+            div.card-azul h2 {
+                color: #ffffff;
+                font-size: 26px;
+                margin: 0;
+                font-weight: 700;
+            }
+            div.card-rojo {
+                background-color: #0e1117;
+                border: 2px solid #da3633;
+                border-radius: 10px;
+                padding: 15px 20px;
+                text-align: center;
+                margin-bottom: 10px;
+            }
+            div.card-rojo p {
+                color: #8b949e;
+                font-size: 14px;
+                margin-bottom: 5px;
+                font-weight: 600;
+            }
+            div.card-rojo h2 {
+                color: #ffffff;
+                font-size: 26px;
+                margin: 0;
+                font-weight: 700;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         v_selec = st.multiselect("Vendedor", options=v_dispo, default=[], key=f"frag_kilos_v_{anio_op}_{mes_op}_{sup_filtro}")
@@ -418,7 +465,7 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
             if sup_filtro != "TODOS":
                 df_reemp_trans = df_reemp_trans[df_reemp_trans["SUP_Transaccion"].astype(str).str.strip() == sup_filtro]
             if s_dispo:
-                df_reemp_trans = df_reemp_trans[df_reemp_trans["SEGMENTO"].astype(str).str.strip().isin(s_selec)]
+                df_reemp_trans = df_reemp_trans[df_reemp_trans["SEGMENTO"].astype(str).str.strip().isin(s_dispo)]
             
             arrastre_reemp = float(df_reemp_trans[df_reemp_trans["Periodo"] == "Arrastre"]["PesoKg"].sum())
             actual_reemp = float(df_reemp_trans[df_reemp_trans["Periodo"] == "Actual"]["PesoKg"].sum())
@@ -429,29 +476,13 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
         total_arrastre = total_arrastre_vend + arrastre_reemp
         total_actual = total_actual_vend + actual_reemp
         total_neto_operativo = total_arrastre + total_actual
-
-        if sup_filtro == "TODOS":
-            df_dep = df_comodines_Rows[(df_comodines_Rows["CodVendedor"] == -999) & (df_comodines_Rows["SEGMENTO"].astype(str).str.strip().isin(s_selec))]
-            kilos_deposito = float(df_dep["Actual"].sum() + df_dep["Arrastre"].sum())
-        else:
-            kilos_deposito = 0.0
     else:
         total_arrastre = total_arrastre_vend
         total_actual = total_actual_vend
         total_neto_operativo = float(rep_detalle["OPERATIVO"].sum())
-        kilos_deposito = 0.0
 
     total_objetivo_mes = float(rep_detalle["Objetivo Mes Corriente"].sum())
     pct_avance = (total_neto_operativo / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
-
-    mcol1, mcol2, mcol3, mcol4, mcol5, mcol6 = st.columns(6)
-    mcol1.metric(label="🎯 Objetivo Mes", value=f"{total_objetivo_mes:,.1f} kg")
-    mcol2.metric(label="📊 Neto Operativo", value=f"{total_neto_operativo:,.1f} kg")
-    mcol3.metric(label="📈 % Avance", value=f"{pct_avance:,.2f}%")
-    mcol4.metric(label="📦 Arrastre", value=f"{total_arrastre:,.1f} kg")
-    mcol5.metric(label="🚚 Actual", value=f"{total_actual:,.1f} kg")
-    mcol6.metric(label="🏢 Depósito", value=f"{kilos_deposito:,.1f} kg")
-    st.divider()
 
     fecha_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
     if pd.notna(fecha_mat_dt):
@@ -479,13 +510,49 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     rep_detalle[["Ultima_Vta", "Penultima_Vta"]] = rep_detalle[["Ultima_Vta", "Penultima_Vta"]].fillna(0.0)
 
     dp_s = rep_detalle["Días Pasados"].astype(float).replace(0, 1.0)
-    dr_s = rep_detalle["Días Restantes"].astype(float).replace(0, 1.0)
+    dr_s = rep_detalle["Días Restantes"].astype(float)
 
     p_diario = (rep_detalle["Actual"] + rep_detalle["Ajuste_Reemp_Actual"]) / dp_s
     rep_detalle["Promedio_Diario"] = p_diario
-    rep_detalle["Tendencia_Total_Kg"] = (p_diario * dr_s) + rep_detalle["OPERATIVO"]
+    
+    rep_detalle["Tendencia_Total_Kg"] = rep_detalle["OPERATIVO"]
+    mask_activos = dr_s > 0
+    if mask_activos.any():
+        rep_detalle.loc[mask_activos, "Tendencia_Total_Kg"] = (p_diario[mask_activos] * dr_s[mask_activos]) + rep_detalle.loc[mask_activos, "OPERATIVO"]
+
     rep_detalle["Cumplimiento_Proyectado_Pct"] = ((rep_detalle["Tendencia_Total_Kg"]) / rep_detalle["Objetivo Mes Corriente"].replace(0, pd.NA)).mul(100).fillna(0.0)
-    rep_detalle["Media_Necesaria_Diaria"] = ((rep_detalle["Objetivo Mes Corriente"] - rep_detalle["OPERATIVO"]) / dr_s).clip(lower=0)
+    
+    rep_detalle["Media_Necesaria_Diaria"] = 0.0
+    if mask_activos.any():
+        rep_detalle.loc[mask_activos, "Media_Necesaria_Diaria"] = ((rep_detalle.loc[mask_activos, "Objetivo Mes Corriente"] - rep_detalle.loc[mask_activos, "OPERATIVO"]) / dr_s[mask_activos]).clip(lower=0)
+
+    if rep_detalle["Días Restantes"].sum() == 0:
+        total_tendencia = total_neto_operativo
+        pct_cumplimiento_obj = pct_avance
+    else:
+        total_tendencia = float(rep_detalle["Tendencia_Total_Kg"].sum())
+        pct_cumplimiento_obj = (total_tendencia / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
+
+    # RENDERIZADO DE MÉTRICAS CON ESTILO DE TARJETAS (Nivel 1 y Nivel 2)
+    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+    with mcol1:
+        st.markdown(f"""<div class="card-azul"><p>📦 Arrastre</p><h2>{total_arrastre:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with mcol2:
+        st.markdown(f"""<div class="card-azul"><p>🚚 Actual</p><h2>{total_actual:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with mcol3:
+        st.markdown(f"""<div class="card-azul"><p>📊 Neto Operativo</p><h2>{total_neto_operativo:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with mcol4:
+        st.markdown(f"""<div class="card-azul"><p>📈 % Avance</p><h2>{pct_avance:,.2f}%</h2></div>""", unsafe_allow_html=True)
+
+    tcol1, tcol2, tcol3 = st.columns(3)
+    with tcol1:
+        st.markdown(f"""<div class="card-azul"><p>🎯 Objetivo del Mes</p><h2>{total_objetivo_mes:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with tcol2:
+        st.markdown(f"""<div class="card-rojo"><p>📈 Tendencia Kgs</p><h2>{total_tendencia:,.1f} kg</h2></div>""", unsafe_allow_html=True)
+    with tcol3:
+        st.markdown(f"""<div class="card-azul"><p>🎯 Tendencia %</p><h2>{pct_cumplimiento_obj:,.2f}%</h2></div>""", unsafe_allow_html=True)
+    
+    st.divider()
 
     # Redondeo general a 2 decimales para todas las columnas excepto Días Pasados, Rutas y Días Restantes
     cols_excepcion = ["CodVendedor", "Nombre", "SUP", "SEGMENTO", "Días Pasados", "Rutas", "Días Restantes"]
@@ -586,7 +653,7 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
     try:
         maestro_cebe = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
         if not maestro_cebe.empty and "Mes" in maestro_cebe.columns:
-            mc_per = maestro_cebe[(maestro_cebe["Mes"].astype(str) == str(mes_op)) & (mc_per["Anio"].astype(str) == str(anio_op))]
+            mc_per = maestro_cebe[(mc_per["Mes"].astype(str) == str(mes_op)) & (mc_per["Anio"].astype(str) == str(anio_op))]
             if not mc_per.empty:
                 maestro_cebe = mc_per
     except Exception:
@@ -596,7 +663,7 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en SQLite. Verifique en la solapa de Parámetros.")
         return
 
-    cache_key_rep = f"_cache_kilos_v38_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
+    cache_key_rep = f"_cache_kilos_v46_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
     if cache_key_rep not in st.session_state:
         df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
         reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro)

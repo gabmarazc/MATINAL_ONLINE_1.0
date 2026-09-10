@@ -103,7 +103,7 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
     """
     Lee el Excel exportado desde rep_obj_kilos.py, valida sus columnas esenciales agrupadas
     por vendedor y segmento, y guarda o reemplaza los objetivos definitivos en la tabla 
-    'objetivos_vendedores' para el período (Anio, Mes) asegurando control de versión.
+    'objetivos_vendedores' para el período (Anio, Mes) asegurando control de versión multimes.
     """
     try:
         df_subida = pd.read_excel(file_buffer_or_path)
@@ -140,10 +140,7 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
     try:
         cursor = conn.cursor()
         
-        # Recrear la tabla para adaptarla a la nueva estructura compacta por vendedor y segmento
-        cursor.execute("DROP TABLE IF EXISTS objetivos_vendedores;")
-        conn.commit()
-
+        # Crear la tabla si no existe, preservando los datos de otros meses ya cargados
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS objetivos_vendedores (
                 Anio INTEGER,
@@ -161,9 +158,11 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
         """)
         conn.commit()
 
+        # Eliminar únicamente los registros del período específico que se está actualizando
         cursor.execute("DELETE FROM objetivos_vendedores WHERE Anio = ? AND Mes = ?", (anio_int, mes_int))
         conn.commit()
 
+        # Anexar los nuevos objetivos sin afectar los meses históricos
         df_subida.to_sql("objetivos_vendedores", conn, if_exists="append", index=False, chunksize=10000)
     finally:
         conn.close()
