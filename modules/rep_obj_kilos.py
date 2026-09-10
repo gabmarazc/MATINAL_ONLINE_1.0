@@ -174,22 +174,25 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
 
     df_reporte = df_reporte.drop(columns=["Total_Kilos_Marca"], errors="ignore")
     
-    # Ordenar estrictamente según el orden definido en el padrón de segmentos (`maestro_segmentos`)
     if segmentos_orden_lista:
         df_reporte["SEGMENTO"] = pd.Categorical(df_reporte["SEGMENTO"], categories=segmentos_orden_lista, ordered=True)
 
     df_reporte = df_reporte.sort_values(by=["Supervisor", "Nombre", "Marca", "SEGMENTO"]).reset_index(drop=True)
     df_reporte["SEGMENTO"] = df_reporte["SEGMENTO"].astype(str)
 
+    # Inyección de columnas de control temporal para versión de base de datos
+    df_reporte["Anio"] = int(anio_operativo)
+    df_reporte["Mes"] = int(mes_operativo)
+
     columnas_finales = [
-        "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", 
+        "Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO", 
         "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", 
-        "Obj_Macro_Marca_Kg", "Obj_Sugerido_Kg"
+        "Obj_Sugerido_Kg"
     ]
     return df_reporte[columnas_finales], segmentos_orden_lista
 
 def render_rep_obj_kilos(df_vta, filtros_globales=None):
-    st.subheader("📦 Generador Tentativo de Objetivos")
+    st.subheader("📦 Generador Tentativo de Objetivos por Vendedor y Segmento")
 
     if filtros_globales is None:
         anio_op = 2026
@@ -255,7 +258,7 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en la base de datos.")
         return
 
-    cache_key = f"_cache_rep_obj_distribucion_v10_{anio_op}_{mes_op}_{sup_filtro}"
+    cache_key = f"_cache_rep_obj_distribucion_v12_{anio_op}_{mes_op}_{sup_filtro}"
     if cache_key not in st.session_state:
         with st.spinner("Calculando distribución proporcional de objetivos macro en Kilos..."):
             df_base, seg_orden = generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_op, mes_op)
@@ -267,7 +270,7 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         st.info("No se encontraron registros coincidentes con los maestros oficiales para el período de referencia.")
         return
 
-    if "Obj_Macro_Marca_Kg" not in df_base.columns:
+    if "Obj_Sugerido_Kg" not in df_base.columns:
         df_base, seg_orden = generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_op, mes_op)
         st.session_state[cache_key] = (df_base, seg_orden)
 
@@ -277,17 +280,43 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
 
     df_filtrado["Obj_Sugerido_Kg"] = df_filtrado["Obj_Sugerido_Kg"] * factor_multiplicador
 
-    total_kilos_ant = df_filtrado["Kilos_Mes_Anterior"].sum() if "Kilos_Mes_Anterior" in df_filtrado.columns else 0.0
-    total_obj_sugerido = df_filtrado["Obj_Sugerido_Kg"].sum() if "Obj_Sugerido_Kg" in df_filtrado.columns else 0.0
-    total_macro_compania = df_filtrado[["Marca", "Obj_Macro_Marca_Kg"]].drop_duplicates()["Obj_Macro_Marca_Kg"].sum() if "Obj_Macro_Marca_Kg" in df_filtrado.columns and "Marca" in df_filtrado.columns else 0.0
+    # Agrupación por Vendedor y Segmento (consolidando todas las marcas)
+    df_agrupado = df_filtrado.groupby(
+        ["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO"],
+        as_index=False
+    ).agg({
+        "Kilos_Mes_Anterior": "sum",
+        "Objetivo_Mes_Anterior_Kg": "sum",
+        "Obj_Sugerido_Kg": "sum"
+    })
+
+    df_agrupado["Logro_Anterior_Pct"] = (
+        df_agrupado["Kilos_Mes_Anterior"] / df_agrupado["Objetivo_Mes_Anterior_Kg"].replace(0, pd.NA)
+    ).mul(100).fillna(0.0)
+
+    if seg_orden:
+        df_agrupado["SEGMENTO"] = pd.Categorical(df_agrupado["SEGMENTO"], categories=seg_orden, ordered=True)
+
+    df_agrupado = df_agrupado.sort_values(by=["Supervisor", "Nombre", "SEGMENTO"]).reset_index(drop=True)
+    df_agrupado["SEGMENTO"] = df_agrupado["SEGMENTO"].astype(str)
+
+    total_kilos_ant = df_agrupado["Kilos_Mes_Anterior"].sum()
+    total_obj_sugerido = df_agrupado["Obj_Sugerido_Kg"].sum()
+    
+    # Intentar obtener total macro compañía de las marcas operativas
+    total_macro_compania = 0.0
+    if not maestro_cebe_act.empty:
+        co_act = next((c for c in maestro_cebe_act.columns if "obj_tn" in str(c).strip().lower() or "tn" in str(c).strip().lower() or "obj" in str(c).strip().lower()), None)
+        if co_act:
+            total_macro_compania = pd.to_numeric(maestro_cebe_act[co_act], errors="coerce").sum()
 
     m1, m2, m3 = st.columns(3)
     m1.metric("📦 Total Kilos Históricos", f"{total_kilos_ant:,.1f} kg")
     m2.metric("🏢 Total Macro Compañía", f"{total_macro_compania:,.1f} kg")
     m3.metric("🎯 Total Objetivo Sugerido", f"{total_obj_sugerido:,.1f} kg")
 
-    if not df_filtrado.empty and "SEGMENTO" in df_filtrado.columns:
-        tot_por_seg = df_filtrado.groupby("SEGMENTO")["Obj_Sugerido_Kg"].sum()
+    if not df_agrupado.empty and "SEGMENTO" in df_agrupado.columns:
+        tot_por_seg = df_agrupado.groupby("SEGMENTO")["Obj_Sugerido_Kg"].sum()
         if seg_orden:
             tot_por_seg = tot_por_seg.reindex([s for s in seg_orden if s in tot_por_seg.index])
         
@@ -297,15 +326,16 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
 
     st.divider()
 
-    gb = GridOptionsBuilder.from_dataframe(df_filtrado)
-    gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
+    gb = GridOptionsBuilder.from_dataframe(df_agrupado)
+    gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130, cellStyle={'textAlign': 'center'}, headerClass='centered-header')
     
+    gb.configure_column("Anio", headerName="Año", width=80)
+    gb.configure_column("Mes", headerName="Mes", width=70)
     gb.configure_column("CodVendedor", headerName="Cód. Vend", width=100)
-    gb.configure_column("Nombre", headerName="Vendedor", width=180)
-    gb.configure_column("Supervisor", headerName="Supervisor", width=140)
-    gb.configure_column("Marca", headerName="Marca", width=150)
-    gb.configure_column("CEBE", headerName="CEBE", width=140)
-    gb.configure_column("SEGMENTO", headerName="Segmento", width=160, rowGroup=True)
+    gb.configure_column("Nombre", headerName="Vendedor", minWidth=180, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+    gb.configure_column("Supervisor", headerName="Supervisor", minWidth=140, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+    gb.configure_column("SEGMENTO", headerName="Segmento", minWidth=160, cellStyle={'textAlign': 'left'}, headerClass='left-header')
+    
     gb.configure_column(
         "Kilos_Mes_Anterior", 
         headerName="Kilos Mes Ant.",
@@ -322,11 +352,6 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
         valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%' : '0.00%'"
     )
     gb.configure_column(
-        "Obj_Macro_Marca_Kg", 
-        headerName="Obj. Macro Marca (Kg)",
-        valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'"
-    )
-    gb.configure_column(
         "Obj_Sugerido_Kg", 
         headerName="Obj. Sugerido (Kg)",
         valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'"
@@ -335,22 +360,36 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=20)
     grid_options = gb.build()
 
+    st.markdown("""
+    <style>
+    .ag-header-cell-label {
+        justify-content: center !important;
+        text-align: center !important;
+    }
+    .left-header .ag-header-cell-label {
+        justify-content: flex-start !important;
+        text-align: left !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     AgGrid(
-        df_filtrado,
+        df_agrupado,
         gridOptions=grid_options,
         height=450,
         width="100%",
         data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
         update_mode=GridUpdateMode.MODEL_CHANGED,
         theme="streamlit",
-        fit_columns_on_grid_load=False
+        fit_columns_on_grid_load=False,
+        allow_unsafe_jscode=True
     )
 
     st.divider()
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_filtrado.to_excel(writer, index=False, sheet_name="Propuesta_Objetivos")
+        df_agrupado.to_excel(writer, index=False, sheet_name="Objetivos_Vendedor_Segmento")
     buffer.seek(0)
 
     st.download_button(

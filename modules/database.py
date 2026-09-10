@@ -101,26 +101,28 @@ def inicializar_bd_desde_excel(archivos_dict):
 
 def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
     """
-    Lee el Excel exportado desde rep_obj_kilos.py, valida sus columnas esenciales
-    y guarda o reemplaza los objetivos definitivos en la tabla 'objetivos_vendedores' 
-    para el período (Anio, Mes) asegurando control de versión.
+    Lee el Excel exportado desde rep_obj_kilos.py, valida sus columnas esenciales agrupadas
+    por vendedor y segmento, y guarda o reemplaza los objetivos definitivos en la tabla 
+    'objetivos_vendedores' para el período (Anio, Mes) asegurando control de versión.
     """
     try:
         df_subida = pd.read_excel(file_buffer_or_path)
     except Exception as e:
         return False, f"Error al leer el archivo Excel: {e}"
 
-    columnas_requeridas = ["CodVendedor", "Marca", "SEGMENTO", "Obj_Sugerido_Kg"]
+    columnas_requeridas = ["CodVendedor", "SEGMENTO", "Obj_Sugerido_Kg"]
     faltantes = [c for c in columnas_requeridas if c not in df_subida.columns]
     if faltantes:
         return False, f"El archivo Excel no tiene el formato correcto. Faltan las columnas: {', '.join(faltantes)}"
 
     df_subida["CodVendedor"] = pd.to_numeric(df_subida["CodVendedor"], errors="coerce").astype("Int64")
-    df_subida["Marca"] = df_subida["Marca"].fillna("").astype(str).str.strip().str.upper()
+    if "Nombre" in df_subida.columns:
+        df_subida["Nombre"] = df_subida["Nombre"].fillna("").astype(str).str.strip()
+    if "Supervisor" in df_subida.columns:
+        df_subida["Supervisor"] = df_subida["Supervisor"].fillna("").astype(str).str.strip()
     df_subida["SEGMENTO"] = df_subida["SEGMENTO"].fillna("").astype(str).str.strip()
     df_subida["Obj_Sugerido_Kg"] = pd.to_numeric(df_subida["Obj_Sugerido_Kg"], errors="coerce").fillna(0.0)
 
-    # Conversión segura y robusta a enteros para evitar el error de formato 'd'
     try:
         anio_int = int(float(str(anio)))
     except Exception:
@@ -137,6 +139,11 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
     conn = obtener_conexion()
     try:
         cursor = conn.cursor()
+        
+        # Recrear la tabla para adaptarla a la nueva estructura compacta por vendedor y segmento
+        cursor.execute("DROP TABLE IF EXISTS objetivos_vendedores;")
+        conn.commit()
+
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS objetivos_vendedores (
                 Anio INTEGER,
@@ -144,15 +151,12 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
                 CodVendedor INTEGER,
                 Nombre TEXT,
                 Supervisor TEXT,
-                Marca TEXT,
-                CEBE TEXT,
                 SEGMENTO TEXT,
                 Kilos_Mes_Anterior REAL,
                 Objetivo_Mes_Anterior_Kg REAL,
                 Logro_Anterior_Pct REAL,
-                Obj_Macro_Marca_Kg REAL,
                 Obj_Sugerido_Kg REAL,
-                PRIMARY KEY (Anio, Mes, CodVendedor, Marca, SEGMENTO)
+                PRIMARY KEY (Anio, Mes, CodVendedor, SEGMENTO)
             )
         """)
         conn.commit()

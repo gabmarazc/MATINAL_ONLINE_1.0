@@ -11,7 +11,7 @@ from modules.rep_cob_marca import generar_reporte_cobertura_marca, dibujar_pesta
 from modules import database as db
 
 st.set_page_config(
-    page_title="Sistema Matinal 2.0",
+    page_title="Sistema de Gestión de Ventas - MABELHERDI S.A",
     page_icon="📊",
     layout="wide"
 )
@@ -55,7 +55,8 @@ def verificar_autenticacion():
         st.session_state["nivel_usuario"] = None
 
     if not st.session_state["autenticado"]:
-        st.title("🔒 Sistema Matinal 2.0 - Acceso Restringido")
+        st.title("🔒 Sistema de Gestión de Ventas - MABELHERDI S.A")
+        st.markdown("### Acceso Restringido")
         
         with st.form("form_login"):
             nivel_sel = st.selectbox(
@@ -86,7 +87,7 @@ def main():
     if not verificar_autenticacion():
         return
 
-    st.title("🚀 Sistema Matinal 2.0 - Panel de Control Comercial")
+    st.title("Sistema de Gestión de Ventas - MABELHERDI S.A")
 
     nivel_actual = st.session_state.get("nivel_usuario", "")
     st.sidebar.info(f"Sesión activa: **{nivel_actual}**")
@@ -108,7 +109,14 @@ def main():
     if st.sidebar.button("🔄 Recargar Bases y Limpiar Caché", width="stretch"):
         st.cache_data.clear()
         st.cache_resource.clear()
+        
+        auth_status = st.session_state.get("autenticado", False)
+        nivel_status = st.session_state.get("nivel_usuario", None)
+        
         st.session_state.clear()
+        
+        st.session_state["autenticado"] = auth_status
+        st.session_state["nivel_usuario"] = nivel_status
         
         h, dv, da = calcular_fechas_operativas_default()
         st.session_state["sel_dia_matinal"] = h

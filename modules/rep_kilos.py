@@ -166,17 +166,19 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     codigos_validos_padron = set(vendedores_rep["CodVend"].dropna().tolist())
     sup_map = vendedores_rep.set_index("CodVend")["SUP"].to_dict()
 
-    orden_segmentos_maestro = []
-    if maestro_seg is not None and not maestro_seg.empty:
-        col_s = "Segmento" if "Segmento" in maestro_seg.columns else (maestro_seg.columns[0] if len(maestro_seg.columns) > 0 else None)
-        if col_s:
-            for s in maestro_seg[col_s].dropna().astype(str).str.strip():
-                if s and s not in ["", "nan"] and s not in orden_segmentos_maestro:
-                    orden_segmentos_maestro.append(s)
+    # ORDEN HARDCODEADO ESTRICTO DE SEGMENTOS
+    orden_segmentos_maestro = [
+        "GOLD Salty",
+        "GOLD Crakers",
+        "SILVER Salty",
+        "SILVER Crakers",
+        "SILVER Cereals"
+    ]
 
-    if not orden_segmentos_maestro:
-        segs_presentes = df_vta_prep["SEGMENTO"].dropna().unique()
-        orden_segmentos_maestro = [str(s).strip() for s in segs_presentes if str(s).strip() != ""]
+    segs_vta_unicos = df_vta_prep["SEGMENTO"].dropna().astype(str).str.strip().unique()
+    for s_v in segs_vta_unicos:
+        if s_v not in orden_segmentos_maestro:
+            orden_segmentos_maestro.append(s_v)
 
     segmentos_rep = pd.DataFrame({"SEGMENTO": orden_segmentos_maestro})
 
@@ -355,6 +357,17 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte["Ajuste_Reemp_Arrastre"] = reporte.get("Ajuste_Reemp_Arrastre", 0.0).fillna(0.0)
     reporte["Ajuste_Reemp_Actual"] = reporte.get("Ajuste_Reemp_Actual", 0.0).fillna(0.0)
     reporte["Ajuste_Por_Reemp"] = reporte["Ajuste_Reemp_Arrastre"] + reporte["Ajuste_Reemp_Actual"]
+
+    # ORDENAMIENTO ESTRICTO Y GARANTIZADO POR DICCIONARIO DE ÍNDICES HARDCODEADO
+    if orden_segmentos_maestro:
+        mapping_orden = {str(seg).strip(): i for i, seg in enumerate(orden_segmentos_maestro)}
+        reporte["SEGMENTO_STR"] = reporte["SEGMENTO"].astype(str).str.strip()
+        reporte["_orden_idx"] = reporte["SEGMENTO_STR"].map(mapping_orden).fillna(999)
+        reporte = reporte.sort_values(by=["CodVend", "_orden_idx"]).drop(columns=["_orden_idx", "SEGMENTO_STR"]).reset_index(drop=True)
+    else:
+        reporte = reporte.sort_values(by=["CodVend", "SEGMENTO"]).reset_index(drop=True)
+
+    reporte["SEGMENTO"] = reporte["SEGMENTO"].astype(str)
     
     clave_vtas_op = f"_df_vtas_op_{anio_operativo}_{mes_operativo}_{sup_filtro}"
     st.session_state[clave_vtas_op] = df_vtas_op
@@ -474,6 +487,12 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     rep_detalle["Cumplimiento_Proyectado_Pct"] = ((rep_detalle["Tendencia_Total_Kg"]) / rep_detalle["Objetivo Mes Corriente"].replace(0, pd.NA)).mul(100).fillna(0.0)
     rep_detalle["Media_Necesaria_Diaria"] = ((rep_detalle["Objetivo Mes Corriente"] - rep_detalle["OPERATIVO"]) / dr_s).clip(lower=0)
 
+    # Redondeo general a 2 decimales para todas las columnas excepto Días Pasados, Rutas y Días Restantes
+    cols_excepcion = ["CodVendedor", "Nombre", "SUP", "SEGMENTO", "Días Pasados", "Rutas", "Días Restantes"]
+    for col in rep_detalle.columns:
+        if col not in cols_excepcion and pd.api.types.is_numeric_dtype(rep_detalle[col]):
+            rep_detalle[col] = pd.to_numeric(rep_detalle[col], errors="coerce").round(2)
+
     columnas_ordenadas = [
         "CodVendedor", "Nombre", "SUP", "SEGMENTO", "Objetivo Mes Corriente", "Arrastre", "Actual", 
         "Ultima_Vta", "Penultima_Vta", "OPERATIVO", "Ajuste_Por_Reemp", "Tendencia_Total_Kg", 
@@ -577,7 +596,7 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en SQLite. Verifique en la solapa de Parámetros.")
         return
 
-    cache_key_rep = f"_cache_kilos_v31_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
+    cache_key_rep = f"_cache_kilos_v38_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
     if cache_key_rep not in st.session_state:
         df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
         reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro)

@@ -95,7 +95,7 @@ def obtener_objetivos_vendedores_sql(anio: str = None, mes: str = None) -> pd.Da
     try:
         df_all = db.cargar_tabla_sql("SELECT * FROM objetivos_vendedores")
         if df_all is None or df_all.empty:
-            return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Obj_Sugerido_Kg"])
+            return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO", "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", "Obj_Sugerido_Kg"])
         
         if not mes or str(mes).strip() == "":
             return df_all
@@ -108,7 +108,7 @@ def obtener_objetivos_vendedores_sql(anio: str = None, mes: str = None) -> pd.Da
             
         return df_all
     except Exception:
-        return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "Marca", "CEBE", "SEGMENTO", "Obj_Sugerido_Kg"])
+        return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO", "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", "Obj_Sugerido_Kg"])
 
 def render_parametros_view(filtros_globales: dict = None):
     if not es_entorno_local():
