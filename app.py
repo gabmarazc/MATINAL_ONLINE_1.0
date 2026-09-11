@@ -7,6 +7,7 @@ from modules.parametros import render_parametros_view, es_entorno_local, obtener
 from modules.rep_kilos import render_rep_kilos
 from modules.rep_obj_kilos import render_rep_obj_kilos
 from modules.rep_ccc import render_rep_ccc
+from modules.rep_MN import render_rep_mn
 from modules.rep_cob_marca import generar_reporte_cobertura_marca, dibujar_pestana_cobertura_marca
 from modules import database as db
 
@@ -208,37 +209,40 @@ def main():
 
     es_local = es_entorno_local()
     
-    # Restricción y definición de solapas según el orden solicitado y el nivel autenticado
-    # Orden: Avance Kilos, Avance CCC, Cobertura Marca, Parámetros, Composición Obj Kilos
+    # Restricción y definición de solapas incluyendo Adopción MiNegocio
     if "Nivel 1" in nivel_actual:
         if es_local:
-            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
                 "📊 Avance Kilos", 
                 "📈 Avance CCC", 
                 "🎯 Cobertura Marca", 
+                "📱 Adopción MiNegocio",
                 "⚙️ Parámetros",
                 "📦 Composición Obj Kilos"
             ])
         else:
-            tab1, tab2, tab3, tab4 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
                 "📊 Avance Kilos", 
                 "📈 Avance CCC", 
                 "🎯 Cobertura Marca", 
+                "📱 Adopción MiNegocio",
                 "📦 Composición Obj Kilos"
             ])
     elif "Nivel 2" in nivel_actual:
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📊 Avance Kilos", 
             "📈 Avance CCC", 
             "🎯 Cobertura Marca", 
+            "📱 Adopción MiNegocio",
             "📦 Composición Obj Kilos"
         ])
     else:
-        # Nivel 3: Supervisión (Sin Composición Obj Kilos)
-        tab1, tab2, tab3 = st.tabs([
+        # Nivel 3: Supervisión
+        tab1, tab2, tab3, tab4 = st.tabs([
             "📊 Avance Kilos", 
             "📈 Avance CCC", 
-            "🎯 Cobertura Marca"
+            "🎯 Cobertura Marca",
+            "📱 Adopción MiNegocio"
         ])
     
     df_vend_maestro = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
@@ -247,7 +251,7 @@ def main():
     sup_sel_efectivo = supervisores_disponibles[1:] if filtros_globales["supervisor"] == "TODOS" else [filtros_globales["supervisor"]]
     rep_cob, marcas_lst, mapa_obj = generar_reporte_cobertura_marca(df_vta, df_universo, df_vend_maestro, df_marcas_maestro)
 
-    # Renderizado de pestañas acorde al perfil activo y al nuevo orden de solapas
+    # Renderizado de pestañas acorde al perfil activo y orden actualizado
     if "Nivel 1" in nivel_actual:
         with tab1:
             render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
@@ -255,13 +259,15 @@ def main():
             render_rep_ccc(df_vta, df_universo, filtros_globales)
         with tab3:
             dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
+        with tab4:
+            render_rep_mn(df_vta, df_universo, filtros_globales)
         if es_local:
-            with tab4:
-                render_parametros_view(filtros_globales)
             with tab5:
+                render_parametros_view(filtros_globales)
+            with tab6:
                 render_rep_obj_kilos(df_vta, filtros_globales)
         else:
-            with tab4:
+            with tab5:
                 render_rep_obj_kilos(df_vta, filtros_globales)
     elif "Nivel 2" in nivel_actual:
         with tab1:
@@ -271,6 +277,8 @@ def main():
         with tab3:
             dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
         with tab4:
+            render_rep_mn(df_vta, df_universo, filtros_globales)
+        with tab5:
             render_rep_obj_kilos(df_vta, filtros_globales)
     else:
         # Nivel 3: Supervisión
@@ -280,6 +288,8 @@ def main():
             render_rep_ccc(df_vta, df_universo, filtros_globales)
         with tab3:
             dibujar_pestana_cobertura_marca(rep_cob, marcas_lst, mapa_obj, sup_sel_efectivo, df_vta, df_universo)
+        with tab4:
+            render_rep_mn(df_vta, df_universo, filtros_globales)
 
 if __name__ == "__main__":
     main()
