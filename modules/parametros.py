@@ -90,6 +90,45 @@ def obtener_maestro_marcas_cebe_sql(anio: str = None, mes: str = None) -> pd.Dat
     except Exception:
         return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
 
+def obtener_maestro_ccc_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
+    """Carga los porcentajes CCC por taxonomía desde SQLite aplicando versionado estricto por período."""
+    try:
+        df_all = db.cargar_tabla_sql("SELECT * FROM maestro_ccc")
+        if df_all is None or df_all.empty:
+            df_default = pd.DataFrame({
+                "Anio": [int(anio) if anio else 2026]*4,
+                "Mes": [int(mes) if mes else 9]*4,
+                "Taxonomia": ["A", "B", "C", "D"],
+                "Porcentaje_Cartera": [80.0, 70.0, 60.0, 50.0]
+            })
+            db.guardar_dataframe_sql(df_default, "maestro_ccc", if_exists='append')
+            return df_default
+        
+        if not mes or str(mes).strip() == "":
+            return df_all
+        
+        if "Anio" in df_all.columns and "Mes" in df_all.columns:
+            cond = (df_all["Mes"].astype(str) == str(mes))
+            if anio and str(anio).strip() != "":
+                cond = cond & (df_all["Anio"].astype(str) == str(anio))
+            res = df_all[cond]
+            if res.empty:
+                return pd.DataFrame({
+                    "Anio": [int(anio) if anio else 2026]*4, 
+                    "Mes": [int(mes)]*4, 
+                    "Taxonomia": ["A", "B", "C", "D"], 
+                    "Porcentaje_Cartera": [80.0, 70.0, 60.0, 50.0]
+                })
+            return res
+            
+        return df_all
+    except Exception:
+        return pd.DataFrame({
+            "Anio": [2026]*4, "Mes": [9]*4, 
+            "Taxonomia": ["A", "B", "C", "D"], 
+            "Porcentaje_Cartera": [80.0, 70.0, 60.0, 50.0]
+        })
+
 def obtener_objetivos_vendedores_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
     """Carga los objetivos calibrados desde SQLite. Si mes está vacío, devuelve la base completa."""
     try:
@@ -116,7 +155,7 @@ def render_parametros_view(filtros_globales: dict = None):
         return
 
     st.subheader("⚙️ Configuración de Dimensiones y Maestros")
-    st.markdown("Los filtros operativos de Año, Mes, Fechas y Supervisor se gestionan desde la barra lateral izquierda. Esta sección permite cargar y mantener los maestros de Vendedores, Segmentos, Marcas / CEBE e importar los objetivos calibrados.")
+    st.markdown("Los filtros operativos de Año, Mes, Fechas y Supervisor se gestionan desde la barra lateral izquierda. Esta sección permite cargar y mantener los maestros de Vendedores, Segmentos, Marcas / CEBE, Porcentajes CCC e importar los objetivos calibrados.")
 
     anio_def = filtros_globales.get("anio", "2026") if filtros_globales else "2026"
     mes_def = filtros_globales.get("mes", "9") if filtros_globales else "9"
@@ -358,6 +397,56 @@ def render_parametros_view(filtros_globales: dict = None):
     st.divider()
 
     # =========================================================================
+    # 3.B SECCIÓN: MAESTRO CCC (% SOBRE CARTERA POR TAXONOMÍA) - VERSIONADO HISTÓRICO
+    # =========================================================================
+    st.markdown("### 📊 3.B Maestro CCC (% sobre Cartera por Taxonomía)")
+    st.markdown("Configure el porcentaje (%) sobre la cartera neta (descontando altas) que conformará el objetivo CCC para cada taxonomía (A, B, C, D) para el período seleccionado.")
+
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        sel_anio_ccc = st.text_input("Año Operativo (CCC)", value=anio_def, key="anio_ccc_param")
+    with col_c2:
+        sel_mes_ccc = st.text_input("Mes Operativo (CCC)", value=mes_def, key="mes_ccc_param")
+
+    df_ccc_actual = obtener_maestro_ccc_sql(sel_anio_ccc, sel_mes_ccc)
+
+    df_editado_ccc = st.data_editor(
+        df_ccc_actual[["Taxonomia", "Porcentaje_Cartera"]],
+        num_rows="fixed",
+        key="editor_maestro_ccc",
+        use_container_width=True
+    )
+
+    if st.button("📥 Registrar y Guardar Porcentajes CCC en Base de Datos"):
+        if not sel_mes_ccc or str(sel_mes_ccc).strip() == "":
+            st.error("⚠️ Debe especificar un Mes Operativo válido para guardar los porcentajes CCC.")
+        else:
+            df_nuevo_ccc = df_editado_ccc.copy()
+            df_nuevo_ccc["Anio"] = int(float(sel_anio_ccc))
+            df_nuevo_ccc["Mes"] = int(float(sel_mes_ccc))
+            df_nuevo_ccc["Porcentaje_Cartera"] = pd.to_numeric(df_nuevo_ccc["Porcentaje_Cartera"], errors="coerce").fillna(0.0)
+
+            query_check = "SELECT name FROM sqlite_master WHERE type='table' AND name='maestro_ccc'"
+            res_check = db.cargar_tabla_sql(query_check)
+
+            if res_check is not None and not res_check.empty:
+                df_existente_ccc = db.cargar_tabla_sql("SELECT * FROM maestro_ccc")
+                df_existente_ccc = df_existente_ccc[~((df_existente_ccc["Anio"].astype(str) == str(sel_anio_ccc)) & (df_existente_ccc["Mes"].astype(str) == str(sel_mes_ccc)))]
+                df_final_ccc = pd.concat([df_existente_ccc, df_nuevo_ccc], ignore_index=True)
+            else:
+                df_final_ccc = df_nuevo_ccc
+
+            db.guardar_dataframe_sql(df_final_ccc, "maestro_ccc", if_exists='replace')
+            st.success(f"¡Porcentajes CCC guardados y versionados exitosamente para el período {sel_mes_ccc}/{sel_anio_ccc}!")
+            st.rerun()
+
+    titulo_tabla_ccc_reg = f"📋 Porcentajes CCC registrados en Base de Datos (Período {sel_mes_ccc}/{sel_anio_ccc})"
+    st.markdown(f"#### {titulo_tabla_ccc_reg}")
+    st.dataframe(df_ccc_actual, width="stretch")
+
+    st.divider()
+
+    # =========================================================================
     # 4. SECCIÓN: IMPORTACIÓN DE OBJETIVOS CALIBRADOS (DEFINITIVOS)
     # =========================================================================
     st.markdown("### 📥 4. Importación de Objetivos Calibrados (Definitivos)")
@@ -409,6 +498,7 @@ def render_parametros_view(filtros_globales: dict = None):
         df_maestro_actual.to_excel(writer, index=False, sheet_name='Maestro_Vendedores')
         df_segmentos_actual.to_excel(writer, index=False, sheet_name='Maestro_Segmentos')
         df_marcas_cebe_actual.to_excel(writer, index=False, sheet_name='Maestro_Marcas_CEBE')
+        df_ccc_actual.to_excel(writer, index=False, sheet_name='Maestro_CCC_Porcentajes')
         df_objetivos_actual.to_excel(writer, index=False, sheet_name='Objetivos_Calibrados')
     
     st.download_button(

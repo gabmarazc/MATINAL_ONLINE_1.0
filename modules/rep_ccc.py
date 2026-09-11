@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
-from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta, tarjeta_metrica_html
+from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta
 
 def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
     """Pipeline de ventas independiente y específico para CCC basado en CantBase, ImporteNeto y períodos."""
@@ -58,6 +58,9 @@ def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia
     col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
 
+    # Excluir estrictamente al vendedor 20 del pipeline de ventas CCC
+    df = df[df["CodVendedor"] != 20]
+
     df["MesCarga"] = df["FechaCarga_dt"].dt.month
     df["AñoCarga"] = df["FechaCarga_dt"].dt.year
     df["MesEntrega"] = df["FechaEntrega_dt"].dt.month
@@ -108,30 +111,61 @@ def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia
     return df
 
 def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal):
-    hoja_ccc = hoja_ccc_param.copy() if hoja_ccc_param is not None and not hoja_ccc_param.empty else pd.DataFrame(columns=["Taxonomia", "OBJ_CCC"])
+    try:
+        df_ccc_db = db.cargar_tabla_sql("SELECT * FROM maestro_ccc")
+        if df_ccc_db is not None and not df_ccc_db.empty and "Anio" in df_ccc_db.columns and "Mes" in df_ccc_db.columns:
+            df_ccc_per = df_ccc_db[(df_ccc_db["Anio"].astype(str) == str(anio_op)) & (df_ccc_db["Mes"].astype(str) == str(mes_op))]
+            if not df_ccc_per.empty:
+                hoja_ccc = df_ccc_per
+            else:
+                hoja_ccc = hoja_ccc_param
+        else:
+            hoja_ccc = hoja_ccc_param
+    except Exception:
+        hoja_ccc = hoja_ccc_param
+
+    hoja_ccc = hoja_ccc.copy() if hoja_ccc is not None and not hoja_ccc.empty else pd.DataFrame(columns=["Taxonomia", "Porcentaje_Cartera"])
     if not hoja_ccc.empty:
         hoja_ccc.columns = hoja_ccc.columns.astype(str).str.strip()
         rename_metas = {}
         for c in hoja_ccc.columns:
-            if str(c).lower() in ["obj", "objetivo", "obj_ccc", "obj_pepsico", "kilos", "cantidad"]:
-                rename_metas[c] = "OBJ_CCC"
+            if str(c).lower() in ["porcentaje_cartera", "porcentaje", "pct", "obj", "objetivo", "obj_ccc"]:
+                rename_metas[c] = "Porcentaje_Cartera"
             if str(c).lower() in ["taxonomia", "taxonomía", "categoria", "categoría"]:
                 rename_metas[c] = "Taxonomia"
         hoja_ccc = hoja_ccc.rename(columns=rename_metas)
         if "Taxonomia" in hoja_ccc.columns:
             hoja_ccc["Taxonomia"] = hoja_ccc["Taxonomia"].astype(str).str.strip().str.upper()
-        if "OBJ_CCC" in hoja_ccc.columns:
-            hoja_ccc["OBJ_CCC"] = pd.to_numeric(hoja_ccc["OBJ_CCC"], errors="coerce").fillna(0.0)
-            hoja_ccc = hoja_ccc[["Taxonomia", "OBJ_CCC"]].drop_duplicates("Taxonomia")
+        if "Porcentaje_Cartera" in hoja_ccc.columns:
+            hoja_ccc["Porcentaje_Cartera"] = pd.to_numeric(hoja_ccc["Porcentaje_Cartera"], errors="coerce").fillna(0.0)
+            hoja_ccc = hoja_ccc[["Taxonomia", "Porcentaje_Cartera"]].drop_duplicates("Taxonomia")
         else:
-            hoja_ccc["OBJ_CCC"] = 0.0
+            hoja_ccc["Porcentaje_Cartera"] = 80.0
     else:
-        hoja_ccc = pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"], "OBJ_CCC": [0.0, 0.0, 0.0, 0.0]})
+        hoja_ccc = pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"], "Porcentaje_Cartera": [80.0, 70.0, 60.0, 50.0]})
 
     try:
         df_ausencias = db.cargar_tabla_sql("SELECT * FROM ausencias")
     except Exception:
         df_ausencias = pd.DataFrame()
+
+    try:
+        df_altas_db = db.cargar_tabla_sql("SELECT * FROM altas")
+    except Exception:
+        df_altas_db = pd.DataFrame()
+
+    altas_periodo_set = set()
+    if not df_altas_db.empty:
+        col_f_altas = next((c for c in df_altas_db.columns if "fecha" in str(c).lower()), None)
+        col_cod_altas = next((c for c in df_altas_db.columns if "codigo" in str(c).lower() or "cliente" in str(c).lower()), df_altas_db.columns[0])
+        if col_f_altas:
+            df_altas_db["Fecha_dt"] = parsear_fecha_robusta(df_altas_db[col_f_altas])
+            altas_mes = df_altas_db[
+                (df_altas_db["Fecha_dt"].dt.year == int(anio_op)) & 
+                (df_altas_db["Fecha_dt"].dt.month == int(mes_op))
+            ].copy()
+            if not altas_mes.empty:
+                altas_periodo_set = set(pd.to_numeric(altas_mes[col_cod_altas], errors="coerce").dropna().astype("Int64").tolist())
 
     df_vta_prep = preparar_ventas_ccc(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
     ventas_periodo = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else df_vta_prep.copy()
@@ -208,6 +242,13 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
 
     if not universo.empty and "CodVendedor" in universo.columns:
         universo["CodVendedor"] = pd.to_numeric(universo["CodVendedor"], errors="coerce").astype("Int64")
+        # Excluir estrictamente al Vendedor 20
+        universo = universo[universo["CodVendedor"] != 20]
+
+    if not universo.empty:
+        universo["Es_Alta_Periodo"] = universo["Cliente"].isin(altas_periodo_set)
+    else:
+        universo["Es_Alta_Periodo"] = False
 
     if not universo.empty and not clientes_g.empty:
         universo = universo.merge(clientes_g[["Cliente", "Es_CCC"]], on="Cliente", how="left")
@@ -215,10 +256,13 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     else:
         universo["Es_CCC"] = False
 
+    # Agrupación por Vendedor y Taxonomía incluyendo Cartera Total, Altas y Cartera Neta
     cartera_matriz = universo.groupby(["CodVendedor", "Taxonomia"], as_index=False).agg(
         Cartera_Total=("Cliente", "count"),
+        Altas=("Es_Alta_Periodo", lambda x: int(x.sum())),
+        Cartera_Neta=("Es_Alta_Periodo", lambda x: int((~x).sum())),
         CCC=("Es_CCC", lambda x: int(x.sum()))
-    ) if not universo.empty and "CodVendedor" in universo.columns else pd.DataFrame(columns=["CodVendedor", "Taxonomia", "Cartera_Total", "CCC"])
+    ) if not universo.empty and "CodVendedor" in universo.columns else pd.DataFrame(columns=["CodVendedor", "Taxonomia", "Cartera_Total", "Altas", "Cartera_Neta", "CCC"])
 
     vendedores_df = pd.DataFrame()
     col_c_v = next((c for c in ["Codigo_Vendedor", "CodVend", "CodVendedor"] if c in vendedores.columns), vendedores.columns[0])
@@ -228,6 +272,9 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     sv_c = vendedores[col_c_v]
     if isinstance(sv_c, pd.DataFrame): sv_c = sv_c.iloc[:, 0]
     vendedores_df["CodVendedor"] = pd.to_numeric(sv_c, errors="coerce").astype("Int64")
+    # Excluir estrictamente al Vendedor 20 del maestro
+    vendedores_df = vendedores_df[vendedores_df["CodVendedor"] != 20]
+
     sv_n = vendedores[col_n_v]
     if isinstance(sv_n, pd.DataFrame): sv_n = sv_n.iloc[:, 0]
     vendedores_df["Nombre"] = sv_n.fillna("").astype(str).str.strip()
@@ -243,21 +290,26 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     matriz_base = vendedores_df.merge(taxonomias_df, on="_k").drop(columns="_k")
 
     reporte = matriz_base.merge(cartera_matriz, on=["CodVendedor", "Taxonomia"], how="left")
-    reporte[["Cartera_Total", "CCC"]] = reporte[["Cartera_Total", "CCC"]].fillna(0).astype("Int64")
+    reporte[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]] = reporte[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]].fillna(0).astype("Int64")
     reporte["NC"] = (reporte["Cartera_Total"] - reporte["CCC"]).clip(lower=0).astype("Int64")
-    reporte["Cobertura_Pct"] = (reporte["CCC"] / reporte["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
-    reporte["Total_Cartera_Cia"] = reporte.groupby("Taxonomia")["Cartera_Total"].transform("sum")
-    reporte["Participacion_Cartera"] = (reporte["Cartera_Total"] / reporte["Total_Cartera_Cia"].replace(0, pd.NA)).fillna(0.0)
+    
+    # % Cartera calculado sobre Cartera Neta para absoluta claridad analítica
+    reporte["% Cartera"] = (reporte["CCC"] / reporte["Cartera_Neta"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
 
     reporte = reporte.merge(hoja_ccc, on="Taxonomia", how="left")
-    reporte["OBJ_CCC"] = reporte["OBJ_CCC"].fillna(0.0)
-    reporte["Objetivo_CCC"] = (reporte["Participacion_Cartera"] * reporte["OBJ_CCC"]).fillna(0.0).round(0).astype("Int64")
-    reporte["% Cumplimiento Objetivo"] = (reporte["CCC"] / reporte["Objetivo_CCC"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
+    reporte["Porcentaje_Cartera"] = reporte["Porcentaje_Cartera"].fillna(80.0)
+    reporte["Objetivo_CCC"] = (reporte["Cartera_Neta"] * (reporte["Porcentaje_Cartera"] / 100.0)).round(0).astype("Int64")
+    reporte["% Objetivo"] = (reporte["CCC"] / reporte["Objetivo_CCC"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
 
     reporte["CodVendedor"] = pd.to_numeric(reporte["CodVendedor"], errors="coerce").astype("Int64")
     reporte = reporte.sort_values(by=["CodVendedor", "Taxonomia"], ascending=[True, True]).reset_index(drop=True)
 
-    return reporte[["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Objetivo_CCC", "CCC", "NC", "Cobertura_Pct", "% Cumplimiento Objetivo"]], df_det_nc
+    columnas_salida = [
+        "CodVendedor", "Nombre", "SUP", "Taxonomia", 
+        "Cartera_Total", "Altas", "Cartera_Neta", 
+        "Objetivo_CCC", "CCC", "NC", "% Cartera", "% Objetivo"
+    ]
+    return reporte[columnas_salida], df_det_nc
 
 def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_param, filtros_globales=None):
     anio_op = int(filtros_globales.get("anio", 2026)) if filtros_globales else 2026
@@ -269,7 +321,7 @@ def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_para
     for k in keys_to_delete:
         del st.session_state[k]
 
-    clave_cache_estado = f"_ccc_motor_cache_v40_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
+    clave_cache_estado = f"_ccc_motor_cache_v54_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
     if clave_cache_estado not in st.session_state:
         rep, det = _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal)
         st.session_state[clave_cache_estado] = (rep, det)
@@ -277,6 +329,22 @@ def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_para
     rep_cached, det_cached = st.session_state[clave_cache_estado]
     st.session_state["_ccc_df_clientes_detalle"] = det_cached
     return rep_cached
+
+def _tarjeta_metrica_compacta_html(label, valor, border_color="#475569", border_width="1px"):
+    return f"""
+    <div style="
+        background-color: #1e293b;
+        border: {border_width} solid {border_color};
+        border-radius: 6px;
+        padding: 4px 6px;
+        text-align: center;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        margin-bottom: 3px;
+    ">
+        <div style="font-size: 0.6rem; color: #94a3b8; font-weight: 600; margin-bottom: 2px; text-transform: uppercase;">{label}</div>
+        <div style="font-size: 1.0rem; color: #f8fafc; font-weight: 700;">{valor}</div>
+    </div>
+    """
 
 @st.fragment
 def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionados):
@@ -333,28 +401,40 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     if not df_cli_filtrado.empty:
         reporte_filtrado = df_cli_filtrado.groupby(["CodVendedor", "Nombre", "SUP", "Taxonomia"], as_index=False).agg(
             Cartera_Total=("Cliente", "count"),
+            Altas=("Es_Alta_Periodo", lambda x: int(x.sum())),
+            Cartera_Neta=("Es_Alta_Periodo", lambda x: int((~x).sum())),
             CCC=("Es_CCC", lambda x: int(x.sum()))
         )
-        reporte_filtrado[["Cartera_Total", "CCC"]] = reporte_filtrado[["Cartera_Total", "CCC"]].fillna(0).astype("Int64")
+        reporte_filtrado[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]] = reporte_filtrado[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]].fillna(0).astype("Int64")
         reporte_filtrado["NC"] = (reporte_filtrado["Cartera_Total"] - reporte_filtrado["CCC"]).clip(lower=0).astype("Int64")
-        reporte_filtrado["Cobertura_Pct"] = (reporte_filtrado["CCC"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
+        reporte_filtrado["% Cartera"] = (reporte_filtrado["CCC"] / reporte_filtrado["Cartera_Neta"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
 
         objs_originales = reporte_ccc_base[["CodVendedor", "Taxonomia", "Objetivo_CCC"]].drop_duplicates(["CodVendedor", "Taxonomia"])
         reporte_filtrado = reporte_filtrado.merge(objs_originales, on=["CodVendedor", "Taxonomia"], how="left")
         reporte_filtrado["Objetivo_CCC"] = reporte_filtrado["Objetivo_CCC"].fillna(0).astype("Int64")
-        reporte_filtrado["% Cumplimiento Objetivo"] = (reporte_filtrado["CCC"] / reporte_filtrado["Objetivo_CCC"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
+        reporte_filtrado["% Objetivo"] = (reporte_filtrado["CCC"] / reporte_filtrado["Objetivo_CCC"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
         
         reporte_filtrado["CodVendedor"] = pd.to_numeric(reporte_filtrado["CodVendedor"], errors="coerce").astype("Int64")
         reporte_filtrado = reporte_filtrado.sort_values(by=["CodVendedor", "Taxonomia"], ascending=[True, True]).reset_index(drop=True)
     else:
-        reporte_filtrado = pd.DataFrame(columns=["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Objetivo_CCC", "CCC", "NC", "Cobertura_Pct", "% Cumplimiento Objetivo"])
+        reporte_filtrado = pd.DataFrame(columns=["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Altas", "Cartera_Neta", "Objetivo_CCC", "CCC", "NC", "% Cartera", "% Objetivo"])
 
     tot_cartera = int(df_cli_filtrado["Cliente"].count()) if not df_cli_filtrado.empty else 0
+    tot_altas = int(df_cli_filtrado["Es_Alta_Periodo"].sum()) if not df_cli_filtrado.empty and "Es_Alta_Periodo" in df_cli_filtrado.columns else 0
+    tot_neta = tot_cartera - tot_altas
+
     cartera_tax = df_cli_filtrado.groupby("Taxonomia")["Cliente"].count() if not df_cli_filtrado.empty else pd.Series()
     cart_a = cartera_tax.get("A", 0)
     cart_b = cartera_tax.get("B", 0)
     cart_c = cartera_tax.get("C", 0)
     cart_d = cartera_tax.get("D", 0)
+
+    tot_obj_val = int(reporte_filtrado["Objetivo_CCC"].sum()) if not reporte_filtrado.empty and "Objetivo_CCC" in reporte_filtrado.columns else 0
+    obj_tax = reporte_filtrado.groupby("Taxonomia")["Objetivo_CCC"].sum() if not reporte_filtrado.empty else pd.Series()
+    obj_a = obj_tax.get("A", 0)
+    obj_b = obj_tax.get("B", 0)
+    obj_c = obj_tax.get("C", 0)
+    obj_d = obj_tax.get("D", 0)
 
     total_ccc_val = int(df_cli_filtrado["Es_CCC"].sum()) if not df_cli_filtrado.empty and "Es_CCC" in df_cli_filtrado.columns else 0
     tot_tax_ccc = df_cli_filtrado[df_cli_filtrado["Es_CCC"] == True].groupby("Taxonomia")["Cliente"].count() if not df_cli_filtrado.empty else pd.Series()
@@ -363,70 +443,125 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     cant_c = tot_tax_ccc.get("C", 0)
     cant_d = tot_tax_ccc.get("D", 0)
 
-    cob_total = (total_ccc_val / tot_cartera * 100) if tot_cartera > 0 else 0.0
-    cob_a = (cant_a / cart_a * 100) if cart_a > 0 else 0.0
-    cob_b = (cant_b / cart_b * 100) if cart_b > 0 else 0.0
-    cob_c = (cant_c / cart_c * 100) if cart_c > 0 else 0.0
-    cob_d = (cant_d / cart_d * 100) if cart_d > 0 else 0.0
+    # % Cartera total calculado sobre la neta filtrada
+    cob_total = (total_ccc_val / tot_neta * 100) if tot_neta > 0 else 0.0
+    
+    # Taxonomías netas para porcentajes individuales
+    neta_tax = df_cli_filtrado[df_cli_filtrado["Es_Alta_Periodo"] == False].groupby("Taxonomia")["Cliente"].count() if not df_cli_filtrado.empty else pd.Series()
+    neta_a = neta_tax.get("A", 0)
+    neta_b = neta_tax.get("B", 0)
+    neta_c = neta_tax.get("C", 0)
+    neta_d = neta_tax.get("D", 0)
 
-    cols_r1 = st.columns(5)
+    cob_a = (cant_a / neta_a * 100) if neta_a > 0 else 0.0
+    cob_b = (cant_b / neta_b * 100) if neta_b > 0 else 0.0
+    cob_c = (cant_c / neta_c * 100) if neta_c > 0 else 0.0
+    cob_d = (cant_d / neta_d * 100) if neta_d > 0 else 0.0
+
+    # Inyección CSS para reducir al mínimo absoluto el espacio vertical del separador <hr>
+    st.markdown("""
+        <style>
+        hr {
+            margin-top: 0.1rem !important;
+            margin-bottom: 0.1rem !important;
+            border-color: #334155 !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # 1. FILA 1: CARTERA TOTAL y ALTAS (2 columnas, borde celeste y más grueso)
+    cols_r1 = st.columns(2)
     with cols_r1[0]:
-        st.markdown(tarjeta_metrica_html("Cartera Total", f"{tot_cartera:,.0f}", "#3b82f6"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("CARTERA TOTAL", f"{tot_cartera:,.0f}", "#38bdf8", "2px"), unsafe_allow_html=True)
     with cols_r1[1]:
-        st.markdown(tarjeta_metrica_html("Cartera A", f"{cart_a:,.0f}", "#ef4444"), unsafe_allow_html=True)
-    with cols_r1[2]:
-        st.markdown(tarjeta_metrica_html("Cartera B", f"{cart_b:,.0f}", "#f97316"), unsafe_allow_html=True)
-    with cols_r1[3]:
-        st.markdown(tarjeta_metrica_html("Cartera C", f"{cart_c:,.0f}", "#eab308"), unsafe_allow_html=True)
-    with cols_r1[4]:
-        st.markdown(tarjeta_metrica_html("Cartera D", f"{cart_d:,.0f}", "#22c55e"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("ALTAS", f"{tot_altas:,.0f}", "#38bdf8", "2px"), unsafe_allow_html=True)
 
+    # Línea divisoria exactamente ENTRE la Fila 1 y la Fila 2
+    st.divider()
+
+    # 2. FILA 2: CARTERA NETA y COMPOSICIÓN POR TAXONOMÍA (5 columnas, borde blanco y grosor 1px)
+    cols_r2_net = st.columns(5)
+    with cols_r2_net[0]:
+        st.markdown(_tarjeta_metrica_compacta_html("CARTERA NETA", f"{tot_neta:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
+    with cols_r2_net[1]:
+        st.markdown(_tarjeta_metrica_compacta_html("CARTERA A", f"{cart_a:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
+    with cols_r2_net[2]:
+        st.markdown(_tarjeta_metrica_compacta_html("CARTERA B", f"{cart_b:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
+    with cols_r2_net[3]:
+        st.markdown(_tarjeta_metrica_compacta_html("CARTERA C", f"{cart_c:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
+    with cols_r2_net[4]:
+        st.markdown(_tarjeta_metrica_compacta_html("CARTERA D", f"{cart_d:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
+
+    # Línea divisoria entre la Fila 2 y la Fila 3
+    st.divider()
+
+    # 3. OBJETIVOS EN CANTIDAD (Fila 3)
+    cols_obj = st.columns(5)
+    with cols_obj[0]:
+        st.markdown(_tarjeta_metrica_compacta_html("OBJETIVO TOTAL", f"{tot_obj_val:,.0f}", "#3b82f6", "1px"), unsafe_allow_html=True)
+    with cols_obj[1]:
+        st.markdown(_tarjeta_metrica_compacta_html("OBJETIVO TAX. A", f"{obj_a:,.0f}", "#ef4444", "1px"), unsafe_allow_html=True)
+    with cols_obj[2]:
+        st.markdown(_tarjeta_metrica_compacta_html("OBJETIVO TAX. B", f"{obj_b:,.0f}", "#f97316", "1px"), unsafe_allow_html=True)
+    with cols_obj[3]:
+        st.markdown(_tarjeta_metrica_compacta_html("OBJETIVO TAX. C", f"{obj_c:,.0f}", "#eab308", "1px"), unsafe_allow_html=True)
+    with cols_obj[4]:
+        st.markdown(_tarjeta_metrica_compacta_html("OBJETIVO TAX. D", f"{obj_d:,.0f}", "#22c55e", "1px"), unsafe_allow_html=True)
+
+    # 4. TOTAL CCC (Fila 4)
     cols_r2 = st.columns(5)
     with cols_r2[0]:
-        st.markdown(tarjeta_metrica_html("Total CCC", f"{total_ccc_val:,.0f}", "#3b82f6"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("TOTAL CCC", f"{total_ccc_val:,.0f}", "#3b82f6", "1px"), unsafe_allow_html=True)
     with cols_r2[1]:
-        st.markdown(tarjeta_metrica_html("CCC Tax. A", f"{cant_a:,.0f}", "#ef4444"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("CCC TAX. A", f"{cant_a:,.0f}", "#ef4444", "1px"), unsafe_allow_html=True)
     with cols_r2[2]:
-        st.markdown(tarjeta_metrica_html("CCC Tax. B", f"{cant_b:,.0f}", "#f97316"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("CCC TAX. B", f"{cant_b:,.0f}", "#f97316", "1px"), unsafe_allow_html=True)
     with cols_r2[3]:
-        st.markdown(tarjeta_metrica_html("CCC Tax. C", f"{cant_c:,.0f}", "#eab308"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("CCC TAX. C", f"{cant_c:,.0f}", "#eab308", "1px"), unsafe_allow_html=True)
     with cols_r2[4]:
-        st.markdown(tarjeta_metrica_html("CCC Tax. D", f"{cant_d:,.0f}", "#22c55e"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("CCC TAX. D", f"{cant_d:,.0f}", "#22c55e", "1px"), unsafe_allow_html=True)
 
+    # 5. % CARTERA (Fila 5)
     cols_r3 = st.columns(5)
     with cols_r3[0]:
-        st.markdown(tarjeta_metrica_html("Cob. Total %", f"{cob_total:,.2f}%", "#3b82f6"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("% CARTERA TOTAL", f"{cob_total:,.2f}%", "#3b82f6", "1px"), unsafe_allow_html=True)
     with cols_r3[1]:
-        st.markdown(tarjeta_metrica_html("Cob. Tax. A %", f"{cob_a:,.2f}%", "#ef4444"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("% CARTERA A", f"{cob_a:,.2f}%", "#ef4444", "1px"), unsafe_allow_html=True)
     with cols_r3[2]:
-        st.markdown(tarjeta_metrica_html("Cob. Tax. B %", f"{cob_b:,.2f}%", "#f97316"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("% CARTERA B", f"{cob_b:,.2f}%", "#f97316", "1px"), unsafe_allow_html=True)
     with cols_r3[3]:
-        st.markdown(tarjeta_metrica_html("Cob. Tax. C %", f"{cob_c:,.2f}%", "#eab308"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("% CARTERA C", f"{cob_c:,.2f}%", "#eab308", "1px"), unsafe_allow_html=True)
     with cols_r3[4]:
-        st.markdown(tarjeta_metrica_html("Cob. Tax. D %", f"{cob_d:,.2f}%", "#22c55e"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("% CARTERA D", f"{cob_d:,.2f}%", "#22c55e", "1px"), unsafe_allow_html=True)
 
     st.divider()
 
-    columnas_visuales_ccc = ["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Objetivo_CCC", "CCC", "NC", "Cobertura_Pct", "% Cumplimiento Objetivo"]
+    columnas_visuales_ccc = [
+        "CodVendedor", "Nombre", "SUP", "Taxonomia", 
+        "Cartera_Total", "Altas", "Cartera_Neta", 
+        "Objetivo_CCC", "CCC", "NC", "% Cartera", "% Objetivo"
+    ]
     reporte_render = reporte_filtrado[columnas_visuales_ccc].copy().reset_index(drop=True)
 
     if not reporte_render.empty:
         gb = GridOptionsBuilder.from_dataframe(reporte_render)
         gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
         
-        gb.configure_column("CodVendedor", headerName="Cód. Vend", width=100, valueFormatter="x != null ? Number(x).toFixed(0) : ''")
-        gb.configure_column("Nombre", headerName="Preventista", minWidth=180)
-        gb.configure_column("SUP", headerName="SUP", width=80)
-        gb.configure_column("Taxonomia", headerName="Tax", width=80)
-        gb.configure_column("Cartera_Total", headerName="Cartera Total", width=110)
-        gb.configure_column("Objetivo_CCC", headerName="Objetivo CCC", width=110)
-        gb.configure_column("CCC", headerName="CCC", width=90)
-        gb.configure_column("NC", headerName="NC", width=90)
+        gb.configure_column("CodVendedor", headerName="Cód. Vend", width=90, valueFormatter="x != null ? Number(x).toFixed(0) : ''")
+        gb.configure_column("Nombre", headerName="Preventista", minWidth=160)
+        gb.configure_column("SUP", headerName="SUP", width=75)
+        gb.configure_column("Taxonomia", headerName="Tax", width=70)
+        gb.configure_column("Cartera_Total", headerName="Cartera Total", width=100)
+        gb.configure_column("Altas", headerName="Altas", width=80)
+        gb.configure_column("Cartera_Neta", headerName="Cartera Neta", width=100)
+        gb.configure_column("Objetivo_CCC", headerName="Objetivo CCC", width=105)
+        gb.configure_column("CCC", headerName="CCC", width=80)
+        gb.configure_column("NC", headerName="NC", width=80)
         
         val_fmt = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00'"
         
-        gb.configure_column("Cobertura_Pct", headerName="Cob %", width=100, valueFormatter=val_fmt)
-        gb.configure_column("% Cumplimiento Objetivo", headerName="% Cumplimiento", width=130, valueFormatter=val_fmt)
+        gb.configure_column("% Cartera", headerName="% Cartera", width=100, valueFormatter=val_fmt)
+        gb.configure_column("% Objetivo", headerName="% Objetivo", width=110, valueFormatter=val_fmt)
         
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
 
@@ -558,7 +693,7 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
             st.markdown('<div style="padding:0.5rem;text-align:center;color:#94a3b8;font-size:0.85rem;">Sin datos para WhatsApp</div>', unsafe_allow_html=True)
 
 def render_rep_ccc(df_vta, df_universo, filtros_globales=None):
-    st.subheader("📊 Avance de Clientes con Compra (CSS) por Taxonomía") # Manteniendo texto original o ajustado a CCC
+    st.subheader("📊 Avance de Clientes con Compra (CCC) por Taxonomía")
     st.markdown("Analiza la cobertura de Clientes con Compra (CCC) segmentada por taxonomía, vendedor y día de visita sobre el universo de cartera.")
 
     sup_filtro = "TODOS"
@@ -573,7 +708,7 @@ def render_rep_ccc(df_vta, df_universo, filtros_globales=None):
     try:
         maestro_ccc_param = db.cargar_tabla_sql("SELECT * FROM maestro_ccc")
     except Exception:
-        maestro_ccc_param = pd.DataFrame(columns=["Taxonomia", "OBJ_CCC"])
+        maestro_ccc_param = pd.DataFrame(columns=["Taxonomia", "Porcentaje_Cartera"])
 
     reporte_base = generar_reporte_ccc_taxonomia(df_vta, df_universo, maestro_v, maestro_ccc_param, filtros_globales)
     sups_sel = [sup_filtro] if sup_filtro != "TODOS" else None

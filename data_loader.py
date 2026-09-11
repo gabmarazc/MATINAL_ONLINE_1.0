@@ -40,13 +40,14 @@ def cargar_ausencias_remotas(url_ausencias):
         return df_vacio
 
 def sincronizar_archivos_excel_locales():
-    """Detecta archivos Excel operativas y maestros en la raíz o en data/ y actualiza SQLite si fueron modificados."""
-    posibles_rutas = [".", "data"]
+    """Detecta archivos Excel operativos y maestros en data/ o en la raíz y actualiza SQLite si fueron modificados o falta la tabla altas."""
+    posibles_rutas = ["data", "."]
     archivos_esperados = {
         "vta": ["VTA.xlsx", "vta.xlsx", "VTA.xls"],
         "universo": ["UNIVERSO.xlsx", "universo.xlsx", "UNIVERSO.xls"],
         "rutas": ["RUTAS.xlsx", "rutas.xlsx", "RUTAS.xls"],
-        "maestro_marcas_cebe": ["MAESTRO_MARCAS_CEBE.xlsx", "maestro_marcas_cebe.xlsx", "marcas_cebe.xlsx"]
+        "maestro_marcas_cebe": ["MAESTRO_MARCAS_CEBE.xlsx", "maestro_marcas_cebe.xlsx", "marcas_cebe.xlsx"],
+        "altas": ["ALTAS.xlsx", "altas.xlsx", "ALTAS.xls"]
     }
     
     archivos_encontrados = {}
@@ -66,10 +67,23 @@ def sincronizar_archivos_excel_locales():
             mtime_vta = os.path.getmtime(archivos_encontrados["vta"])
             mtime_db = os.path.getmtime(db_path) if os.path.exists(db_path) else 0
             
-            # Verificar también si el maestro de marcas/cebes fue actualizado recientemente
             mtime_cebe = os.path.getmtime(archivos_encontrados["maestro_marcas_cebe"]) if "maestro_marcas_cebe" in archivos_encontrados else 0
+            mtime_altas = os.path.getmtime(archivos_encontrados["altas"]) if "altas" in archivos_encontrados else 0
 
-            if mtime_vta > mtime_db or mtime_cebe > mtime_db or mtime_db == 0:
+            # Verificar si la tabla 'altas' existe físicamente en SQLite
+            conn = db.obtener_conexion()
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='altas'")
+            tabla_altas_existe = cursor.fetchone() is not None
+            conn.close()
+
+            # Forzar actualización si algún archivo es más nuevo que la BD, si la BD no existe, o si la tabla altas no fue creada
+            if (mtime_vta > mtime_db or 
+                mtime_cebe > mtime_db or 
+                mtime_altas > mtime_db or 
+                mtime_db == 0 or 
+                not tabla_altas_existe):
+                
                 dict_para_cargar = {}
                 for t, r in archivos_encontrados.items():
                     dict_para_cargar[t] = open(r, "rb")
@@ -86,6 +100,7 @@ def cargar_todas_las_bases():
     df_vta = db.cargar_tabla_sql("SELECT * FROM vta")
     df_universo = db.cargar_tabla_sql("SELECT * FROM universo")
     df_rutas = db.cargar_tabla_sql("SELECT * FROM rutas")
+    df_altas = db.cargar_tabla_sql("SELECT * FROM altas")
 
     renombres = {
         "Codigo": "Cliente",
@@ -123,11 +138,26 @@ def cargar_todas_las_bases():
             df_rutas = df_rutas.rename(columns={col_fecha_rutas: "Fecha"})
             df_rutas["Fecha"] = pd.to_datetime(df_rutas["Fecha"], errors="coerce")
 
+    if not df_altas.empty:
+        col_fecha_altas = "Fecha"
+        for c in df_altas.columns:
+            if str(c).strip().lower() in ["fecha", "fechacarga", "fecha_alta"]:
+                col_fecha_altas = c
+                break
+        if col_fecha_altas in df_altas.columns:
+            df_altas = df_altas.rename(columns={col_fecha_altas: "Fecha"})
+            df_altas["Fecha"] = pd.to_datetime(df_altas["Fecha"], errors="coerce")
+        if "Codigo" in df_altas.columns:
+            df_altas["Codigo"] = pd.to_numeric(df_altas["Codigo"], errors="coerce").astype("Int64")
+        if "Vendedor" in df_altas.columns:
+            df_altas["Vendedor"] = pd.to_numeric(df_altas["Vendedor"], errors="coerce").astype("Int64")
+
     ausencias_crudas = cargar_ausencias_remotas(getattr(cfg, "URL_AUSENCIAS", ""))
 
     return {
         "VTA": df_vta,
         "UNIVERSO": df_universo,
         "RUTAS": df_rutas,
+        "ALTAS": df_altas,
         "AUSENCIAS": ausencias_crudas,
     }

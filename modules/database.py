@@ -18,9 +18,19 @@ def init_db():
     conn.close()
 
 def cargar_tabla_sql(query: str) -> pd.DataFrame:
-    """Ejecuta una consulta SQL y retorna un DataFrame."""
+    """Ejecuta una consulta SQL de forma segura. Si la tabla no existe, retorna un DataFrame vacío."""
     conn = obtener_conexion()
     try:
+        q_lower = query.lower()
+        if "from" in q_lower:
+            partes = q_lower.split("from")[1].strip().split()
+            if partes:
+                nombre_tabla = partes[0].strip(";")
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name) = ?", (nombre_tabla,))
+                if not cursor.fetchone():
+                    return pd.DataFrame()
+        
         df = pd.read_sql(query, conn)
     except Exception:
         df = pd.DataFrame()
@@ -41,7 +51,7 @@ def tablas_existen() -> bool:
     conn = obtener_conexion()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT LOWER(name) FROM sqlite_master WHERE type='table' AND LOWER(name) IN ('vta', 'universo', 'rutas');")
+        cursor.execute("SELECT LOWER(name) FROM sqlite_master WHERE type='table' AND LOWER(name) IN ('vta', 'universo', 'rutas', 'altas');")
         tablas = [row[0] for row in cursor.fetchall()]
         
         if len(set(tablas)) < 3:
@@ -60,11 +70,14 @@ def tablas_existen() -> bool:
         conn.close()
 
 def inicializar_bd_desde_excel(archivos_dict):
-    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte para Obj_Mes."""
+    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte para Obj_Mes y Altas."""
     conn = obtener_conexion()
     try:
         for nombre_tabla, archivo in archivos_dict.items():
-            df = pd.read_excel(archivo)
+            if nombre_tabla.lower() == "altas":
+                df = pd.read_excel(archivo, sheet_name="Creacion")
+            else:
+                df = pd.read_excel(archivo)
             
             if nombre_tabla.lower() in ["maestro_marcas_cebe", "marcas_cebe", "cebes"]:
                 for col in df.columns:
@@ -100,11 +113,7 @@ def inicializar_bd_desde_excel(archivos_dict):
         conn.close()
 
 def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
-    """
-    Lee el Excel exportado desde rep_obj_kilos.py, valida sus columnas esenciales agrupadas
-    por vendedor y segmento, y guarda o reemplaza los objetivos definitivos en la tabla 
-    'objetivos_vendedores' para el período (Anio, Mes) asegurando control de versión multimes.
-    """
+    """Guarda o reemplaza los objetivos definitivos en 'objetivos_vendedores' para el período (Anio, Mes)."""
     try:
         df_subida = pd.read_excel(file_buffer_or_path)
     except Exception as e:
@@ -139,8 +148,6 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
     conn = obtener_conexion()
     try:
         cursor = conn.cursor()
-        
-        # Crear la tabla si no existe, preservando los datos de otros meses ya cargados
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS objetivos_vendedores (
                 Anio INTEGER,
@@ -158,11 +165,9 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
         """)
         conn.commit()
 
-        # Eliminar únicamente los registros del período específico que se está actualizando
         cursor.execute("DELETE FROM objetivos_vendedores WHERE Anio = ? AND Mes = ?", (anio_int, mes_int))
         conn.commit()
 
-        # Anexar los nuevos objetivos sin afectar los meses históricos
         df_subida.to_sql("objetivos_vendedores", conn, if_exists="append", index=False, chunksize=10000)
     finally:
         conn.close()
