@@ -1,5 +1,18 @@
-# En .gitignore:
+# Entorno virtual y dependencias locales
+venv/
+env/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Archivos de contexto del proyecto y bases de datos locales
+todo_el_proyecto*.txt
 data/
 *.db
 *.sqlite
 *.sqlite3
+
+# Configuración de IDEs y secretos
+.vscode/
+.idea/
+.streamlit/secrets.toml
