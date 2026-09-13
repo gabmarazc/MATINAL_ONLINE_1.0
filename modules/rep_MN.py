@@ -89,7 +89,9 @@ def preparar_ventas_mn(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_
 
     return df
 
-def _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal):
+@st.cache_data(show_spinner=False)
+def _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal):
+    """Caché optimizada de Streamlit para el motor pesado de MiNegocio."""
     try:
         df_ausencias = db.cargar_tabla_sql("SELECT * FROM ausencias")
     except Exception:
@@ -111,12 +113,12 @@ def _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_mati
             Ventas_MiNegocio=("ImporteNetoItem", lambda x: x[ventas_periodo.loc[x.index, "Es_MiNegocio"]].sum())
         )
         
-        # Limpieza rigurosa de ruido de punto flotante en sumas monetarias
         clientes_g["Ventas_Totales"] = clientes_g["Ventas_Totales"].round(2)
         clientes_g["Ventas_MiNegocio"] = clientes_g["Ventas_MiNegocio"].round(2)
         
         clientes_g.loc[clientes_g["Ventas_Totales"] < 0, "Ventas_Totales"] = 0.0
         clientes_g.loc[clientes_g["Ventas_MiNegocio"] < 0, "Ventas_MiNegocio"] = 0.0
+        clientes_g.loc[clientes_g["Ventas_MiNegocio"] < 0.01, "Ventas_MiNegocio"] = 0.0
 
         pct_raw = (clientes_g["Ventas_MiNegocio"] / clientes_g["Ventas_Totales"].replace(0, pd.NA)).mul(100.0)
         clientes_g["Pct_MiNegocio"] = pct_raw.clip(lower=0.0, upper=100.0).fillna(0.0).round(2)
@@ -208,12 +210,10 @@ def _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_mati
     df_detalle["Ventas_MiNegocio"] = df_detalle["Ventas_MiNegocio"].fillna(0.0)
     df_detalle["Pct_MiNegocio"] = df_detalle["Pct_MiNegocio"].fillna(0.0)
 
-    # Clasificación de categorías analíticas por cliente basada en el porcentaje limpio y acotado
-    df_detalle["Es_NoDigital"] = df_detalle["Pct_MiNegocio"] == 0.0
-    df_detalle["Es_Hibrido"] = (df_detalle["Pct_MiNegocio"] > 0.0) & (df_detalle["Pct_MiNegocio"] < 70.0)
+    df_detalle["Es_NoDigital"] = df_detalle["Pct_MiNegocio"] <= 0.01
+    df_detalle["Es_Hibrido"] = (df_detalle["Pct_MiNegocio"] > 0.01) & (df_detalle["Pct_MiNegocio"] < 70.0)
     df_detalle["Es_FullyDigital"] = df_detalle["Pct_MiNegocio"] >= 70.0
 
-    # Cálculo del monto mínimo faltante para alcanzar el 70% (Fully Digital) manteniendo ventas totales constantes
     df_detalle["Minimo_Facturacion_70"] = (0.70 * df_detalle["Ventas_Totales"] - df_detalle["Ventas_MiNegocio"]).clip(lower=0.0).round(2)
 
     df_detalle = df_detalle.merge(vendedores_df[["CodVendedor", "Nombre", "SUP"]], on="CodVendedor", how="left", suffixes=("_univ", ""))
@@ -228,48 +228,8 @@ def generar_reporte_mn_taxonomia(df_vta, df_universo, vendedores, filtros_global
     dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026") if filtros_globales else "02/09/2026"
     sup_filtro = str(filtros_globales.get("supervisor", "TODOS")).strip() if filtros_globales else "TODOS"
 
-    keys_to_del = [k for k in st.session_state.keys() if "_mn_motor_cache_" in k]
-    for k in keys_to_del:
-        del st.session_state[k]
-
-    clave_cache_estado = f"_mn_motor_cache_v6_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
-    if clave_cache_estado not in st.session_state:
-        df_det = _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal)
-        
-        taxonomias_df = pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"]})
-        vendedores_df = df_det[["CodVendedor", "Nombre", "SUP"]].drop_duplicates("CodVendedor") if not df_det.empty else pd.DataFrame(columns=["CodVendedor", "Nombre", "SUP"])
-        
-        if not vendedores_df.empty:
-            vendedores_df["_k"], taxonomias_df["_k"] = 1, 1
-            matriz_base = vendedores_df.merge(taxonomias_df, on="_k").drop(columns="_k")
-            
-            cartera_matriz = df_det.groupby(["CodVendedor", "Taxonomia"], as_index=False).agg(
-                Cartera_Total=("Cliente", "count"),
-                Ventas_Totales=("Ventas_Totales", "sum"),
-                Ventas_MiNegocio=("Ventas_MiNegocio", "sum"),
-                Count_NoDigital=("Es_NoDigital", lambda x: int(x.sum())),
-                Count_Hibrido=("Es_Hibrido", lambda x: int(x.sum())),
-                Count_FullyDigital=("Es_FullyDigital", lambda x: int(x.sum()))
-            )
-            
-            reporte = matriz_base.merge(cartera_matriz, on=["CodVendedor", "Taxonomia"], how="left")
-            reporte[["Cartera_Total", "Ventas_Totales", "Ventas_MiNegocio", "Count_NoDigital", "Count_Hibrido", "Count_FullyDigital"]] = reporte[["Cartera_Total", "Ventas_Totales", "Ventas_MiNegocio", "Count_NoDigital", "Count_Hibrido", "Count_FullyDigital"]].fillna(0)
-            
-            reporte["% Adopcion"] = (reporte["Ventas_MiNegocio"] / reporte["Ventas_Totales"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
-            reporte["% No Digital"] = (reporte["Count_NoDigital"] / reporte["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
-            reporte["% Híbridos"] = (reporte["Count_Hibrido"] / reporte["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
-            reporte["% FullyDigital"] = (reporte["Count_FullyDigital"] / reporte["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
-            
-            reporte["CodVendedor"] = pd.to_numeric(reporte["CodVendedor"], errors="coerce").astype("Int64")
-            reporte = reporte.sort_values(by=["CodVendedor", "Taxonomia"], ascending=[True, True]).reset_index(drop=True)
-        else:
-            reporte = pd.DataFrame(columns=["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Ventas_Totales", "Ventas_MiNegocio", "% Adopcion", "% No Digital", "% Híbridos", "% FullyDigital"])
-            
-        st.session_state[clave_cache_estado] = (reporte, df_det)
-
-    rep_cached, det_cached = st.session_state[clave_cache_estado]
-    st.session_state["_mn_df_clientes_detalle"] = det_cached
-    return rep_cached
+    df_det = _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal)
+    return df_det
 
 def _tarjeta_metrica_compacta_html(label, valor, border_color="#475569", border_width="1px"):
     return f"""
@@ -288,17 +248,12 @@ def _tarjeta_metrica_compacta_html(label, valor, border_color="#475569", border_
     """
 
 @st.fragment
-def render_fragmento_interactivo_mn(reporte_mn_base, supervisores_seleccionados):
-    if reporte_mn_base is None or reporte_mn_base.empty:
+def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
+    if df_det is None or df_det.empty:
         st.info("No hay datos disponibles para procesar el Avance de Adopción MiNegocio.")
         return
 
-    df_clientes_det = st.session_state.get("_mn_df_clientes_detalle", pd.DataFrame())
-    if df_clientes_det.empty:
-        st.info("No se encontró el detalle de clientes para el filtrado dinámico.")
-        return
-
-    df_base_cli = df_clientes_det.copy()
+    df_base_cli = df_det.copy()
     if supervisores_seleccionados and "SUP" in df_base_cli.columns:
         df_base_cli = df_base_cli[df_base_cli["SUP"].astype(str).str.strip().isin([str(s).strip() for s in supervisores_seleccionados])].copy()
 
@@ -375,7 +330,6 @@ def render_fragmento_interactivo_mn(reporte_mn_base, supervisores_seleccionados)
     cnt_hibrido = int(df_cli_filtrado["Es_Hibrido"].sum()) if not df_cli_filtrado.empty and "Es_Hibrido" in df_cli_filtrado.columns else 0
     cnt_fully = int(df_cli_filtrado["Es_FullyDigital"].sum()) if not df_cli_filtrado.empty and "Es_FullyDigital" in df_cli_filtrado.columns else 0
 
-    # Tarjetas de resumen métricas superiores organizadas en 3 líneas exactas
     st.markdown("""
         <style>
         hr {
@@ -386,7 +340,6 @@ def render_fragmento_interactivo_mn(reporte_mn_base, supervisores_seleccionados)
         </style>
     """, unsafe_allow_html=True)
 
-    # LÍNEA 1: Ventas Totales, Venta Total MN+, % Venta MN+
     cols_r1 = st.columns(3)
     with cols_r1[0]:
         st.markdown(_tarjeta_metrica_compacta_html("VENTAS TOTALES", f"${tot_ventas:,.2f}", "#38bdf8", "2px"), unsafe_allow_html=True)
@@ -397,7 +350,6 @@ def render_fragmento_interactivo_mn(reporte_mn_base, supervisores_seleccionados)
 
     st.divider()
 
-    # LÍNEA 2: Cartera Total + Colores por Taxonomía (A, B, C, D) con estilos idénticos a rep_ccc.py
     cols_r2 = st.columns(5)
     with cols_r2[0]:
         st.markdown(_tarjeta_metrica_compacta_html("CARTERA TOTAL", f"{tot_cartera:,.0f}", "#3b82f6", "1px"), unsafe_allow_html=True)
@@ -412,7 +364,6 @@ def render_fragmento_interactivo_mn(reporte_mn_base, supervisores_seleccionados)
 
     st.divider()
 
-    # LÍNEA 3: Conteo de clientes por categoría analítica (No Digital, Híbridos, FullyDigital)
     cols_r3 = st.columns(3)
     with cols_r3[0]:
         st.markdown(_tarjeta_metrica_compacta_html("CLIENTES NO DIGITAL", f"{cnt_nodigital:,.0f}", "#ef4444", "1px"), unsafe_allow_html=True)
@@ -472,7 +423,6 @@ def render_fragmento_interactivo_mn(reporte_mn_base, supervisores_seleccionados)
     st.markdown("Listado de clientes pendientes de conversión digital (excluye FullyDigital), con montos, porcentaje de adopción y mínimo requerido en $ para alcanzar el 70%.")
 
     if not df_cli_filtrado.empty:
-        # Excluir estrictamente a los FullyDigital de la batalla inferior
         df_batalla = df_cli_filtrado[df_cli_filtrado["Es_FullyDigital"] == False].copy()
         
         def determinar_categoria_txt(row):
@@ -617,7 +567,10 @@ def render_rep_mn(df_vta, df_universo, filtros_globales=None):
     except Exception:
         maestro_v = pd.DataFrame()
 
-    reporte_base = generar_reporte_mn_taxonomia(df_vta, df_universo, maestro_v, filtros_globales)
-    sups_sel = [sup_filtro] if sup_filtro != "TODOS" else None
+    df_det = generar_reporte_mn_taxonomia(df_vta, df_universo, maestro_v, filtros_globales)
+    
+    if sup_filtro != "TODOS" and not df_det.empty and "SUP" in df_det.columns:
+        df_det = df_det[df_det["SUP"].astype(str).str.strip() == sup_filtro].copy()
 
-    render_fragmento_interactivo_mn(reporte_base, sups_sel)
+    sups_sel = [sup_filtro] if sup_filtro != "TODOS" else None
+    render_fragmento_interactivo_mn(df_det, sups_sel)
