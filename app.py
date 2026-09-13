@@ -92,7 +92,7 @@ def main():
 
     nivel_actual = st.session_state.get("nivel_usuario", "")
     st.sidebar.info(f"Sesión activa: **{nivel_actual}**")
-    if st.sidebar.button("🔒 Cerrar Sesión", use_container_width=True):
+    if st.sidebar.button("🔒 Cerrar Sesión", width='stretch'):
         st.session_state["autenticado"] = False
         st.session_state["nivel_usuario"] = None
         st.rerun()
@@ -107,7 +107,7 @@ def main():
         st.session_state["sel_dia_anterior"] = def_ant
 
     st.sidebar.header("⚙️ Control de Datos")
-    if st.sidebar.button("🔄 Recargar Bases y Limpiar Caché", use_container_width=True):
+    if st.sidebar.button("🔄 Recargar Bases y Limpiar Caché", width='stretch'):
         st.cache_data.clear()
         st.cache_resource.clear()
         

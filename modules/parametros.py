@@ -414,7 +414,7 @@ def render_parametros_view(filtros_globales: dict = None):
         df_ccc_actual[["Taxonomia", "Porcentaje_Cartera"]],
         num_rows="fixed",
         key="editor_maestro_ccc",
-        use_container_width=True
+        width='stretch'
     )
 
     if st.button("📥 Registrar y Guardar Porcentajes CCC en Base de Datos"):
