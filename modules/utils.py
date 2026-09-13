@@ -3,7 +3,7 @@ import pandas as pd
 import unicodedata
 
 def parsear_fecha_robusta(serie):
-    """Estandariza parseo de fechas considerando formatos ISO, DD/MM/YYYY y genérico sin advertencias."""
+    """Estandariza parseo de fechas considerando formatos ISO y DD/MM/YYYY sin advertencias en consola."""
     if serie is None or (isinstance(serie, pd.Series) and serie.empty):
         return pd.Series(dtype="datetime64[ns]")
     if not isinstance(serie, pd.Series):
@@ -12,9 +12,8 @@ def parsear_fecha_robusta(serie):
     
     dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
     dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce", dayfirst=True)
-    dt_gen = pd.to_datetime(s, errors="coerce", dayfirst=False)
     
-    return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
+    return dt_iso.combine_first(dt_lat)
 
 def extraer_dia_de_ruta(val):
     """Extrae y normaliza el día de visita a partir del texto de la ruta."""
