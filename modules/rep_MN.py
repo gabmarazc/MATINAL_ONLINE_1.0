@@ -214,7 +214,9 @@ def _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, d
     df_detalle["Es_Hibrido"] = (df_detalle["Pct_MiNegocio"] > 0.01) & (df_detalle["Pct_MiNegocio"] < 70.0)
     df_detalle["Es_FullyDigital"] = df_detalle["Pct_MiNegocio"] >= 70.0
 
-    df_detalle["Minimo_Facturacion_70"] = (0.70 * df_detalle["Ventas_Totales"] - df_detalle["Ventas_MiNegocio"]).clip(lower=0.0).round(2)
+    # Lógica corregida: Cálculo estricto del incremental necesario por la app para alcanzar el 70% del total general
+    numerador_req = (0.70 * df_detalle["Ventas_Totales"]) - df_detalle["Ventas_MiNegocio"]
+    df_detalle["Minimo_Facturacion_70"] = (numerador_req / 0.30).clip(lower=0.0).round(2)
 
     df_detalle = df_detalle.merge(vendedores_df[["CodVendedor", "Nombre", "SUP"]], on="CodVendedor", how="left", suffixes=("_univ", ""))
     if "Nombre" not in df_detalle.columns and "Nombre_univ" in df_detalle.columns:
@@ -381,6 +383,9 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
     ]
     reporte_render = reporte_filtrado[columnas_visuales_mn].copy().reset_index(drop=True)
 
+    val_fmt_pesos = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00'"
+    val_fmt_pct = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%' : '0,00%'"
+
     if not reporte_render.empty:
         gb = GridOptionsBuilder.from_dataframe(reporte_render)
         gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=120)
@@ -390,9 +395,6 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
         gb.configure_column("SUP", headerName="SUP", width=75)
         gb.configure_column("Taxonomia", headerName="Tax", width=70)
         gb.configure_column("Cartera_Total", headerName="Cartera Total", width=100)
-        
-        val_fmt_pesos = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00'"
-        val_fmt_pct = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%' : '0,00%'"
         
         gb.configure_column("Ventas_Totales", headerName="Ventas Totales ($)", width=130, valueFormatter=val_fmt_pesos)
         gb.configure_column("Ventas_MiNegocio", headerName="Ventas App ($)", width=130, valueFormatter=val_fmt_pesos)
