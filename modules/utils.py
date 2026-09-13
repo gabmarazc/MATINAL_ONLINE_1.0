@@ -12,7 +12,7 @@ def parsear_fecha_robusta(serie):
     
     dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
     dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce", dayfirst=True)
-    dt_gen = pd.to_datetime(s, errors="coerce", dayfirst=True)
+    dt_gen = pd.to_datetime(s, errors="coerce", dayfirst=False)
     
     return dt_iso.combine_first(dt_lat).combine_first(dt_gen)
 
