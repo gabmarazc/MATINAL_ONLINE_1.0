@@ -310,7 +310,12 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
         )
         reporte_filtrado[["Cartera_Total", "Ventas_Totales", "Ventas_MiNegocio", "Count_NoDigital", "Count_Hibrido", "Count_FullyDigital"]] = reporte_filtrado[["Cartera_Total", "Ventas_Totales", "Ventas_MiNegocio", "Count_NoDigital", "Count_Hibrido", "Count_FullyDigital"]].fillna(0)
         
-        reporte_filtrado["% Adopcion"] = (reporte_filtrado["Ventas_MiNegocio"] / reporte_filtrado["Ventas_Totales"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
+        # Lógica actualizada: % Adopción como (Híbridos + FullyDigital) / Cartera_Total
+        reporte_filtrado["% Adopcion"] = (
+            (reporte_filtrado["Count_Hibrido"] + reporte_filtrado["Count_FullyDigital"]) / 
+            reporte_filtrado["Cartera_Total"].replace(0, pd.NA)
+        ).mul(100.0).fillna(0.0).round(2)
+
         reporte_filtrado["% No Digital"] = (reporte_filtrado["Count_NoDigital"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
         reporte_filtrado["% Híbridos"] = (reporte_filtrado["Count_Hibrido"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
         reporte_filtrado["% FullyDigital"] = (reporte_filtrado["Count_FullyDigital"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
