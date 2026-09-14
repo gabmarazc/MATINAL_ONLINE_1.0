@@ -170,9 +170,7 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     df_vta_prep = preparar_ventas_ccc(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
     ventas_periodo = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else df_vta_prep.copy()
 
-    dia_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
-    if pd.notna(dia_mat_dt) and not ventas_periodo.empty and "FechaEntrega_dt" in ventas_periodo.columns:
-        ventas_periodo = ventas_periodo[ventas_periodo["FechaEntrega_dt"].dt.date < dia_mat_dt.date()]
+    # NOTA: Se ha removido el filtro estricto sobre 'FechaEntrega_dt' por solicitud explícita.
 
     if not ventas_periodo.empty:
         col_c_orig = next((c for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"] if c in ventas_periodo.columns), "Cliente")
@@ -242,7 +240,6 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
 
     if not universo.empty and "CodVendedor" in universo.columns:
         universo["CodVendedor"] = pd.to_numeric(universo["CodVendedor"], errors="coerce").astype("Int64")
-        # Excluir estrictamente al Vendedor 20
         universo = universo[universo["CodVendedor"] != 20]
 
     if not universo.empty:
@@ -256,7 +253,6 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     else:
         universo["Es_CCC"] = False
 
-    # Agrupación por Vendedor y Taxonomía incluyendo Cartera Total, Altas y Cartera Neta
     cartera_matriz = universo.groupby(["CodVendedor", "Taxonomia"], as_index=False).agg(
         Cartera_Total=("Cliente", "count"),
         Altas=("Es_Alta_Periodo", lambda x: int(x.sum())),
@@ -272,7 +268,6 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     sv_c = vendedores[col_c_v]
     if isinstance(sv_c, pd.DataFrame): sv_c = sv_c.iloc[:, 0]
     vendedores_df["CodVendedor"] = pd.to_numeric(sv_c, errors="coerce").astype("Int64")
-    # Excluir estrictamente al Vendedor 20 del maestro
     vendedores_df = vendedores_df[vendedores_df["CodVendedor"] != 20]
 
     sv_n = vendedores[col_n_v]
@@ -293,7 +288,6 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     reporte[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]] = reporte[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]].fillna(0).astype("Int64")
     reporte["NC"] = (reporte["Cartera_Total"] - reporte["CCC"]).clip(lower=0).astype("Int64")
     
-    # % Cartera calculado sobre Cartera Neta para absoluta claridad analítica
     reporte["% Cartera"] = (reporte["CCC"] / reporte["Cartera_Neta"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
 
     reporte = reporte.merge(hoja_ccc, on="Taxonomia", how="left")
@@ -311,11 +305,18 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     ]
     return reporte[columnas_salida], df_det_nc
 
+@st.cache_data(show_spinner=False)
+def _calcular_base_ccc_cached(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal, huella_datos):
+    """Caché optimizada de Streamlit basada en huella digital para CCC."""
+    return _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal)
+
 def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_param, filtros_globales=None):
     anio_op = int(filtros_globales.get("anio", 2026)) if filtros_globales else 2026
     mes_op = int(filtros_globales.get("mes", 9)) if filtros_globales else 9
     dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026") if filtros_globales else "02/09/2026"
     sup_filtro = str(filtros_globales.get("supervisor", "TODOS")).strip() if filtros_globales else "TODOS"
+
+    huella_datos = f"{len(df_vta) if df_vta is not None else 0}_{len(df_universo) if df_universo is not None else 0}_{anio_op}_{mes_op}_{dia_matinal}"
 
     keys_to_delete = [k for k in st.session_state.keys() if "_ccc_motor_cache_" in k]
     for k in keys_to_delete:
@@ -323,7 +324,7 @@ def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_para
 
     clave_cache_estado = f"_ccc_motor_cache_v54_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
     if clave_cache_estado not in st.session_state:
-        rep, det = _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal)
+        rep, det = _calcular_base_ccc_cached(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal, huella_datos)
         st.session_state[clave_cache_estado] = (rep, det)
 
     rep_cached, det_cached = st.session_state[clave_cache_estado]
@@ -443,10 +444,8 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     cant_c = tot_tax_ccc.get("C", 0)
     cant_d = tot_tax_ccc.get("D", 0)
 
-    # % Cartera total calculado sobre la neta filtrada
     cob_total = (total_ccc_val / tot_neta * 100) if tot_neta > 0 else 0.0
     
-    # Taxonomías netas para porcentajes individuales
     neta_tax = df_cli_filtrado[df_cli_filtrado["Es_Alta_Periodo"] == False].groupby("Taxonomia")["Cliente"].count() if not df_cli_filtrado.empty else pd.Series()
     neta_a = neta_tax.get("A", 0)
     neta_b = neta_tax.get("B", 0)
@@ -458,7 +457,6 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     cob_c = (cant_c / neta_c * 100) if neta_c > 0 else 0.0
     cob_d = (cant_d / neta_d * 100) if neta_d > 0 else 0.0
 
-    # Inyección CSS para reducir al mínimo absoluto el espacio vertical del separador <hr>
     st.markdown("""
         <style>
         hr {
@@ -469,17 +467,14 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         </style>
     """, unsafe_allow_html=True)
 
-    # 1. FILA 1: CARTERA TOTAL y ALTAS (2 columnas, borde celeste y más grueso)
     cols_r1 = st.columns(2)
     with cols_r1[0]:
         st.markdown(_tarjeta_metrica_compacta_html("CARTERA TOTAL", f"{tot_cartera:,.0f}", "#38bdf8", "2px"), unsafe_allow_html=True)
     with cols_r1[1]:
         st.markdown(_tarjeta_metrica_compacta_html("ALTAS", f"{tot_altas:,.0f}", "#38bdf8", "2px"), unsafe_allow_html=True)
 
-    # Línea divisoria exactamente ENTRE la Fila 1 y la Fila 2
     st.divider()
 
-    # 2. FILA 2: CARTERA NETA y COMPOSICIÓN POR TAXONOMÍA (5 columnas, borde blanco y grosor 1px)
     cols_r2_net = st.columns(5)
     with cols_r2_net[0]:
         st.markdown(_tarjeta_metrica_compacta_html("CARTERA NETA", f"{tot_neta:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
@@ -492,10 +487,8 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     with cols_r2_net[4]:
         st.markdown(_tarjeta_metrica_compacta_html("CARTERA D", f"{cart_d:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
 
-    # Línea divisoria entre la Fila 2 y la Fila 3
     st.divider()
 
-    # 3. OBJETIVOS EN CANTIDAD (Fila 3)
     cols_obj = st.columns(5)
     with cols_obj[0]:
         st.markdown(_tarjeta_metrica_compacta_html("OBJETIVO TOTAL", f"{tot_obj_val:,.0f}", "#3b82f6", "1px"), unsafe_allow_html=True)
@@ -508,7 +501,6 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     with cols_obj[4]:
         st.markdown(_tarjeta_metrica_compacta_html("OBJETIVO TAX. D", f"{obj_d:,.0f}", "#22c55e", "1px"), unsafe_allow_html=True)
 
-    # 4. TOTAL CCC (Fila 4)
     cols_r2 = st.columns(5)
     with cols_r2[0]:
         st.markdown(_tarjeta_metrica_compacta_html("TOTAL CCC", f"{total_ccc_val:,.0f}", "#3b82f6", "1px"), unsafe_allow_html=True)
@@ -521,7 +513,6 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     with cols_r2[4]:
         st.markdown(_tarjeta_metrica_compacta_html("CCC TAX. D", f"{cant_d:,.0f}", "#22c55e", "1px"), unsafe_allow_html=True)
 
-    # 5. % CARTERA (Fila 5)
     cols_r3 = st.columns(5)
     with cols_r3[0]:
         st.markdown(_tarjeta_metrica_compacta_html("% CARTERA TOTAL", f"{cob_total:,.2f}%", "#3b82f6", "1px"), unsafe_allow_html=True)

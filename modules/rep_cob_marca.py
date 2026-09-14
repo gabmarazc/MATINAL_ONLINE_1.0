@@ -46,11 +46,7 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
     df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
     df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
 
-    dia_matinal_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
-    if pd.notna(dia_matinal_dt):
-        es_mes_en_curso = (dia_matinal_dt.year == anio_operativo and dia_matinal_dt.month in [mes_operativo, mes_operativo + 1])
-        if es_mes_en_curso:
-            df = df[df["FechaCarga_dt"].dt.date < dia_matinal_dt.date()]
+    # NOTA: Se ha removido el filtro estricto basado en 'dia_matinal' por solicitud explícita.
 
     col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
@@ -85,28 +81,8 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
 
     return df
 
-def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, filtros_globales=None):
-    """
-    Genera la matriz analítica de Cobertura por Marca estructurando la base analítica en memoria
-    para posibilitar recalculo instantáneo de cobertura ante cambios de Vendedor, Marca o Día de Visita.
-    """
-    if filtros_globales:
-        anio_op = int(filtros_globales.get("anio", 2026))
-        mes_op = int(filtros_globales.get("mes", 9))
-        dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026")
-    else:
-        df_params = db.cargar_tabla_sql("SELECT * FROM parametros")
-        params_map = {}
-        if not df_params.empty and "PARAMETRO" in df_params.columns and "VALOR" in df_params.columns:
-            params_map = dict(zip(df_params["PARAMETRO"], df_params["VALOR"]))
-
-        anio_op = int(st.session_state.get("sel_anio_op", params_map.get("Año", 2026)))
-        mes_op = int(st.session_state.get("sel_mes_op", params_map.get("Mes", 9)))
-        
-        dia_matinal_default = params_map.get("Dia Matinal", "02/09/2026")
-        dia_matinal_obj = st.session_state.get("sel_dia_matinal", dia_matinal_default)
-        dia_matinal = dia_matinal_obj.strftime("%d/%m/%Y") if hasattr(dia_matinal_obj, "strftime") else str(dia_matinal_obj)
-
+def _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, anio_op, mes_op, dia_matinal):
+    """Motor de cálculo base de Cobertura por Marca (aislado para ser cacheado inteligentemente)."""
     df_vta_prep = preparar_ventas_cobertura_marca(df_vtas_operativo, anio_op, mes_op, dia_matinal)
 
     df_vend = vendedores.copy() if vendedores is not None and not vendedores.empty else pd.DataFrame(columns=["CodVend", "Nombre", "SUP"])
@@ -196,11 +172,45 @@ def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, d
     else:
         vtas_agrupadas = pd.DataFrame(columns=["CodVendedor", "Cliente", "Marca", "Total_Cant"])
 
+    return cartera, vtas_agrupadas, marcas, mapa_objetivos
+
+@st.cache_data(show_spinner=False)
+def _calcular_base_cob_marca_cached(df_vtas_operativo, df_cartera, vendedores, df_marcas, anio_op, mes_op, dia_matinal, huella_datos):
+    """Caché optimizada de Streamlit basada en huella digital para Cobertura por Marca."""
+    return _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, anio_op, mes_op, dia_matinal)
+
+def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, filtros_globales=None):
+    """
+    Genera la matriz analítica de Cobertura por Marca estructurando la base analítica en memoria
+    para posibilitar recalculo instantáneo de cobertura ante cambios de Vendedor, Marca o Día de Visita.
+    """
+    if filtros_globales:
+        anio_op = int(filtros_globales.get("anio", 2026))
+        mes_op = int(filtros_globales.get("mes", 9))
+        dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026")
+    else:
+        df_params = db.cargar_tabla_sql("SELECT * FROM parametros")
+        params_map = {}
+        if not df_params.empty and "PARAMETRO" in df_params.columns and "VALOR" in df_params.columns:
+            params_map = dict(zip(df_params["PARAMETRO"], df_params["VALOR"]))
+
+        anio_op = int(st.session_state.get("sel_anio_op", params_map.get("Año", 2026)))
+        mes_op = int(st.session_state.get("sel_mes_op", params_map.get("Mes", 9)))
+        
+        dia_matinal_default = params_map.get("Dia Matinal", "02/09/2026")
+        dia_matinal_obj = st.session_state.get("sel_dia_matinal", dia_matinal_default)
+        dia_matinal = dia_matinal_obj.strftime("%d/%m/%Y") if hasattr(dia_matinal_obj, "strftime") else str(dia_matinal_obj)
+
+    huella_datos = f"{len(df_vtas_operativo) if df_vtas_operativo is not None else 0}_{len(df_cartera) if df_cartera is not None else 0}_{anio_op}_{mes_op}_{dia_matinal}"
+
+    cartera, vtas_agrupadas, marcas, mapa_objetivos = _calcular_base_cob_marca_cached(
+        df_vtas_operativo, df_cartera, vendedores, df_marcas, anio_op, mes_op, dia_matinal, huella_datos
+    )
+
     st.session_state["_cob_cartera_base"] = cartera
     st.session_state["_cob_vtas_agrupadas"] = vtas_agrupadas
     st.session_state["_cob_marcas"] = marcas
     st.session_state["_cob_mapa_objetivos"] = mapa_objetivos
-    st.session_state["_cob_vendedores_df"] = df_vend
 
     return pd.DataFrame(), marcas, mapa_objetivos
 

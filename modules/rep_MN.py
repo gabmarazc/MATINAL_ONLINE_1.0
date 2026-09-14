@@ -89,9 +89,8 @@ def preparar_ventas_mn(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_
 
     return df
 
-@st.cache_data(show_spinner=False)
-def _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal):
-    """Caché optimizada de Streamlit para el motor pesado de MiNegocio."""
+def _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal):
+    """Motor de cálculo base de MiNegocio (aislado para ser cacheado inteligentemente)."""
     try:
         df_ausencias = db.cargar_tabla_sql("SELECT * FROM ausencias")
     except Exception:
@@ -100,9 +99,7 @@ def _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, d
     df_vta_prep = preparar_ventas_mn(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
     ventas_periodo = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else df_vta_prep.copy()
 
-    dia_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
-    if pd.notna(dia_mat_dt) and not ventas_periodo.empty and "FechaEntrega_dt" in ventas_periodo.columns:
-        ventas_periodo = ventas_periodo[ventas_periodo["FechaEntrega_dt"].dt.date < dia_mat_dt.date()]
+    # NOTA: Se ha removido el filtro estricto sobre 'FechaEntrega_dt' por solicitud explícita.
 
     if not ventas_periodo.empty:
         col_c_orig = next((c for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"] if c in ventas_periodo.columns), "Cliente")
@@ -214,7 +211,6 @@ def _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, d
     df_detalle["Es_Hibrido"] = (df_detalle["Pct_MiNegocio"] > 0.01) & (df_detalle["Pct_MiNegocio"] < 70.0)
     df_detalle["Es_FullyDigital"] = df_detalle["Pct_MiNegocio"] >= 70.0
 
-    # Lógica corregida: Cálculo estricto del incremental necesario por la app para alcanzar el 70% del total general
     numerador_req = (0.70 * df_detalle["Ventas_Totales"]) - df_detalle["Ventas_MiNegocio"]
     df_detalle["Minimo_Facturacion_70"] = (numerador_req / 0.30).clip(lower=0.0).round(2)
 
@@ -224,13 +220,20 @@ def _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, d
 
     return df_detalle
 
+@st.cache_data(show_spinner=False)
+def _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal, huella_datos):
+    """Caché optimizada de Streamlit basada en huella digital para MiNegocio."""
+    return _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal)
+
 def generar_reporte_mn_taxonomia(df_vta, df_universo, vendedores, filtros_globales=None):
     anio_op = int(filtros_globales.get("anio", 2026)) if filtros_globales else 2026
     mes_op = int(filtros_globales.get("mes", 9)) if filtros_globales else 9
     dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026") if filtros_globales else "02/09/2026"
-    sup_filtro = str(filtros_globales.get("supervisor", "TODOS")).strip() if filtros_globales else "TODOS"
 
-    df_det = _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal)
+    # Huella digital única basada en dimensiones y parámetros operativos
+    huella_datos = f"{len(df_vta) if df_vta is not None else 0}_{len(df_universo) if df_universo is not None else 0}_{anio_op}_{mes_op}_{dia_matinal}"
+
+    df_det = _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal, huella_datos)
     return df_det
 
 def _tarjeta_metrica_compacta_html(label, valor, border_color="#475569", border_width="1px"):
@@ -307,10 +310,10 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
         )
         reporte_filtrado[["Cartera_Total", "Ventas_Totales", "Ventas_MiNegocio", "Count_NoDigital", "Count_Hibrido", "Count_FullyDigital"]] = reporte_filtrado[["Cartera_Total", "Ventas_Totales", "Ventas_MiNegocio", "Count_NoDigital", "Count_Hibrido", "Count_FullyDigital"]].fillna(0)
         
-        reporte_filtrado["% Adopcion"] = (reporte_filtrado["Ventas_MiNegocio"] / reporte_filtrado["Ventas_Totales"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
-        reporte_filtrado["% No Digital"] = (reporte_filtrado["Count_NoDigital"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
-        reporte_filtrado["% Híbridos"] = (reporte_filtrado["Count_Hibrido"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
-        reporte_filtrado["% FullyDigital"] = (reporte_filtrado["Count_FullyDigital"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
+        reporte_filtrado["% Adopcion"] = (reporte_filtrado["Ventas_MiNegocio"] / reporte_filtrado["Ventas_Totales"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
+        reporte_filtrado["% No Digital"] = (reporte_filtrado["Count_NoDigital"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
+        reporte_filtrado["% Híbridos"] = (reporte_filtrado["Count_Hibrido"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
+        reporte_filtrado["% FullyDigital"] = (reporte_filtrado["Count_FullyDigital"] / reporte_filtrado["Cartera_Total"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
         
         reporte_filtrado["CodVendedor"] = pd.to_numeric(reporte_filtrado["CodVendedor"], errors="coerce").astype("Int64")
         reporte_filtrado = reporte_filtrado.sort_values(by=["CodVendedor", "Taxonomia"], ascending=[True, True]).reset_index(drop=True)
