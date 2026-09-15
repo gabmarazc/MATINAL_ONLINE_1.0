@@ -46,8 +46,6 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
     df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
     df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
 
-    # NOTA: Se ha removido el filtro estricto basado en 'dia_matinal' por solicitud explícita.
-
     col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
 
@@ -180,10 +178,6 @@ def _calcular_base_cob_marca_cached(df_vtas_operativo, df_cartera, vendedores, d
     return _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, anio_op, mes_op, dia_matinal)
 
 def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, filtros_globales=None):
-    """
-    Genera la matriz analítica de Cobertura por Marca estructurando la base analítica en memoria
-    para posibilitar recalculo instantáneo de cobertura ante cambios de Vendedor, Marca o Día de Visita.
-    """
     if filtros_globales:
         anio_op = int(filtros_globales.get("anio", 2026))
         mes_op = int(filtros_globales.get("mes", 9))
@@ -324,8 +318,15 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
     columnas_finales = ["CodVendedor", "Nombre", "Cartera", "SUP"] + [m for m in m_selec_ordenadas if m in reporte_matriz.columns]
     df_render = reporte_matriz[columnas_finales].copy()
 
-    if not df_render.empty:
-        gb = GridOptionsBuilder.from_dataframe(df_render)
+    # DataFrames separados: Excel con números puros, pantalla con sufijo %
+    df_render_excel = df_render.copy()
+    df_render_display = df_render.copy()
+    for marca in m_selec_ordenadas:
+        if marca in df_render_display.columns:
+            df_render_display[marca] = df_render_display[marca].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "0.00%")
+
+    if not df_render_display.empty:
+        gb = GridOptionsBuilder.from_dataframe(df_render_display)
         gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=140, cellStyle={'textAlign': 'center'}, headerClass='centered-header')
         gb.configure_column("CodVendedor", headerName="Cód. Vend", width=100)
         gb.configure_column("Nombre", headerName="Nombre", minWidth=200, cellStyle={'textAlign': 'left'}, headerClass='left-header')
@@ -349,25 +350,12 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
             return {{'textAlign': 'center'}};
         }}
         """)
-        
-        val_fmt_2dec = JsCode("""
-        function(params) {
-            if (params.value == null || isNaN(params.value)) {
-                return '0,00%';
-            }
-            return Number(params.value).toLocaleString('es-AR', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            }) + '%';
-        }
-        """)
 
         for marca in m_selec_ordenadas:
-            if marca in df_render.columns:
+            if marca in df_render_display.columns:
                 gb.configure_column(
                     marca,
                     headerName=marca,
-                    valueFormatter=val_fmt_2dec,
                     cellStyle=cell_style_conditional
                 )
                 
@@ -388,7 +376,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
         """, unsafe_allow_html=True)
 
         AgGrid(
-            df_render,
+            df_render_display,
             gridOptions=grid_options,
             height=400,
             width="100%",
@@ -401,7 +389,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_render.to_excel(writer, index=False, sheet_name="Cobertura_Por_Marca")
+        df_render_excel.to_excel(writer, index=False, sheet_name="Cobertura_Por_Marca")
     buffer.seek(0)
     
     st.download_button(
@@ -448,19 +436,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
         gb_batalla.configure_column("Cód. Cliente", headerName="Cód. Cliente", width=110)
         gb_batalla.configure_column("Día Visita", headerName="Día Visita", width=110)
         gb_batalla.configure_column("Marca", headerName="Marca", width=120)
-        
-        val_fmt_unidades = JsCode("""
-        function(params) {
-            if (params.value == null || isNaN(params.value)) {
-                return '0,00';
-            }
-            return Number(params.value).toLocaleString('es-AR', {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2
-            });
-        }
-        """)
-        gb_batalla.configure_column("Unidades", headerName="Unidades", width=100, valueFormatter=val_fmt_unidades)
+        gb_batalla.configure_column("Unidades", headerName="Unidades", width=100, valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00'")
         gb_batalla.configure_column("Estado", headerName="Estado", width=160)
         
         gb_batalla.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)

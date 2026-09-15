@@ -506,45 +506,30 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     ]
     rep_detalle = rep_detalle[columnas_ordenadas]
 
-    if not rep_detalle.empty:
-        gb = GridOptionsBuilder.from_dataframe(rep_detalle)
-        gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
+    # DataFrame para descarga a Excel con números puros
+    rep_detalle_excel = rep_detalle.copy()
 
-        cols_numericas = [
-            "Objetivo Mes Corriente", "Arrastre", "Actual", "Ultima_Vta", "Penultima_Vta", 
-            "OPERATIVO", "Ajuste_Por_Reemp", "Tendencia_Total_Kg", "Promedio_Diario", "Media_Necesaria_Diaria"
-        ]
-        for col in cols_numericas:
-            gb.configure_column(
-                col, 
-                valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : ''"
-            )
+    # DataFrame formateado visualmente con sufijos kg y % para pantalla
+    rep_detalle_display = rep_detalle.copy()
+    cols_kilos = [
+        "Objetivo Mes Corriente", "Arrastre", "Actual", "Ultima_Vta", "Penultima_Vta", 
+        "OPERATIVO", "Ajuste_Por_Reemp", "Tendencia_Total_Kg", "Promedio_Diario", "Media_Necesaria_Diaria"
+    ]
+    for col in cols_kilos:
+        if col in rep_detalle_display.columns:
+            rep_detalle_display[col] = rep_detalle_display[col].apply(lambda x: f"{x:,.2f} kg" if pd.notna(x) else "0.00 kg")
+    
+    if "Cumplimiento_Proyectado_Pct" in rep_detalle_display.columns:
+        rep_detalle_display["Cumplimiento_Proyectado_Pct"] = rep_detalle_display["Cumplimiento_Proyectado_Pct"].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "0.00%")
 
-        gb.configure_column(
-            "Cumplimiento_Proyectado_Pct", 
-            headerName="% Cumpl. Proyectado",
-            valueFormatter="x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%' : '0.00%'"
-        )
-
-        gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
-        grid_options = gb.build()
-
-        AgGrid(
-            rep_detalle,
-            gridOptions=grid_options,
-            height=450,
-            width="100%",
-            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-            update_mode=GridUpdateMode.MODEL_CHANGED,
-            theme="streamlit",
-            fit_columns_on_grid_load=False
-        )
+    if not rep_detalle_display.empty:
+        st.dataframe(rep_detalle_display, width="stretch", hide_index=True)
     else:
         st.info("No se encontraron registros de Kilos con los filtros seleccionados.")
 
     buffer_kilos = io.BytesIO()
     with pd.ExcelWriter(buffer_kilos, engine="openpyxl") as writer:
-        rep_detalle.to_excel(writer, index=False, sheet_name="Avance_Kilos_Segmento")
+        rep_detalle_excel.to_excel(writer, index=False, sheet_name="Avance_Kilos_Segmento")
     buffer_kilos.seek(0)
 
     st.download_button(

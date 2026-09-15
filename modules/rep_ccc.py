@@ -170,8 +170,6 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     df_vta_prep = preparar_ventas_ccc(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
     ventas_periodo = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else df_vta_prep.copy()
 
-    # NOTA: Se ha removido el filtro estricto sobre 'FechaEntrega_dt' por solicitud explícita.
-
     if not ventas_periodo.empty:
         col_c_orig = next((c for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"] if c in ventas_periodo.columns), "Cliente")
         ventas_periodo["Cliente"] = pd.to_numeric(ventas_periodo[col_c_orig], errors="coerce").astype("Int64")
@@ -534,8 +532,17 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     ]
     reporte_render = reporte_filtrado[columnas_visuales_ccc].copy().reset_index(drop=True)
 
-    if not reporte_render.empty:
-        gb = GridOptionsBuilder.from_dataframe(reporte_render)
+    # DataFrames separados: visualización con formato y Excel con números puros
+    reporte_render_excel = reporte_render.copy()
+    reporte_render_display = reporte_render.copy()
+
+    cols_porc_ccc = ["% Cartera", "% Objetivo"]
+    for col in cols_porc_ccc:
+        if col in reporte_render_display.columns:
+            reporte_render_display[col] = reporte_render_display[col].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "0.00%")
+
+    if not reporte_render_display.empty:
+        gb = GridOptionsBuilder.from_dataframe(reporte_render_display)
         gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
         
         gb.configure_column("CodVendedor", headerName="Cód. Vend", width=90, valueFormatter="x != null ? Number(x).toFixed(0) : ''")
@@ -551,15 +558,15 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         
         val_fmt = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00'"
         
-        gb.configure_column("% Cartera", headerName="% Cartera", width=100, valueFormatter=val_fmt)
-        gb.configure_column("% Objetivo", headerName="% Objetivo", width=110, valueFormatter=val_fmt)
+        gb.configure_column("% Cartera", headerName="% Cartera", width=100)
+        gb.configure_column("% Objetivo", headerName="% Objetivo", width=110)
         
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
 
         grid_options = gb.build()
         
         AgGrid(
-            reporte_render,
+            reporte_render_display,
             gridOptions=grid_options,
             height=420,
             width="100%",
@@ -613,7 +620,7 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     with col_dl1:
         buffer_ccc = io.BytesIO()
         with pd.ExcelWriter(buffer_ccc, engine="openpyxl") as writer:
-            reporte_render.to_excel(writer, index=False, sheet_name="Avance_Clientes_Con_Compra")
+            reporte_render_excel.to_excel(writer, index=False, sheet_name="Avance_Clientes_Con_Compra")
         buffer_ccc.seek(0)
         st.download_button(
             label="📥 Descargar Avance a Excel",

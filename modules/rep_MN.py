@@ -99,8 +99,6 @@ def _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_mati
     df_vta_prep = preparar_ventas_mn(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
     ventas_periodo = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else df_vta_prep.copy()
 
-    # NOTA: Se ha removido el filtro estricto sobre 'FechaEntrega_dt' por solicitud explícita.
-
     if not ventas_periodo.empty:
         col_c_orig = next((c for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"] if c in ventas_periodo.columns), "Cliente")
         ventas_periodo["Cliente"] = pd.to_numeric(ventas_periodo[col_c_orig], errors="coerce").astype("Int64")
@@ -230,7 +228,6 @@ def generar_reporte_mn_taxonomia(df_vta, df_universo, vendedores, filtros_global
     mes_op = int(filtros_globales.get("mes", 9)) if filtros_globales else 9
     dia_matinal = filtros_globales.get("dia_matinal", "02/09/2026") if filtros_globales else "02/09/2026"
 
-    # Huella digital única basada en dimensiones y parámetros operativos
     huella_datos = f"{len(df_vta) if df_vta is not None else 0}_{len(df_universo) if df_universo is not None else 0}_{anio_op}_{mes_op}_{dia_matinal}"
 
     df_det = _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal, huella_datos)
@@ -310,7 +307,6 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
         )
         reporte_filtrado[["Cartera_Total", "Ventas_Totales", "Ventas_MiNegocio", "Count_NoDigital", "Count_Hibrido", "Count_FullyDigital"]] = reporte_filtrado[["Cartera_Total", "Ventas_Totales", "Ventas_MiNegocio", "Count_NoDigital", "Count_Hibrido", "Count_FullyDigital"]].fillna(0)
         
-        # Lógica actualizada: % Adopción como (Híbridos + FullyDigital) / Cartera_Total
         reporte_filtrado["% Adopcion"] = (
             (reporte_filtrado["Count_Hibrido"] + reporte_filtrado["Count_FullyDigital"]) / 
             reporte_filtrado["Cartera_Total"].replace(0, pd.NA)
@@ -391,11 +387,22 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
     ]
     reporte_render = reporte_filtrado[columnas_visuales_mn].copy().reset_index(drop=True)
 
-    val_fmt_pesos = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00'"
-    val_fmt_pct = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '%' : '0,00%'"
+    # DataFrames separados: Excel con números puros, pantalla con sufijos $, %
+    reporte_render_excel = reporte_render.copy()
+    reporte_render_display = reporte_render.copy()
 
-    if not reporte_render.empty:
-        gb = GridOptionsBuilder.from_dataframe(reporte_render)
+    cols_pesos_mn = ["Ventas_Totales", "Ventas_MiNegocio"]
+    cols_porc_mn = ["% Adopcion", "% No Digital", "% Híbridos", "% FullyDigital"]
+
+    for col in cols_pesos_mn:
+        if col in reporte_render_display.columns:
+            reporte_render_display[col] = reporte_render_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+    for col in cols_porc_mn:
+        if col in reporte_render_display.columns:
+            reporte_render_display[col] = reporte_render_display[col].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "0.00%")
+
+    if not reporte_render_display.empty:
+        gb = GridOptionsBuilder.from_dataframe(reporte_render_display)
         gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=120)
         
         gb.configure_column("CodVendedor", headerName="Cód. Vend", width=90, valueFormatter="x != null ? Number(x).toFixed(0) : ''")
@@ -404,18 +411,18 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
         gb.configure_column("Taxonomia", headerName="Tax", width=70)
         gb.configure_column("Cartera_Total", headerName="Cartera Total", width=100)
         
-        gb.configure_column("Ventas_Totales", headerName="Ventas Totales ($)", width=130, valueFormatter=val_fmt_pesos)
-        gb.configure_column("Ventas_MiNegocio", headerName="Ventas App ($)", width=130, valueFormatter=val_fmt_pesos)
-        gb.configure_column("% Adopcion", headerName="% Adopción", width=110, valueFormatter=val_fmt_pct)
-        gb.configure_column("% No Digital", headerName="% No Digital", width=110, valueFormatter=val_fmt_pct)
-        gb.configure_column("% Híbridos", headerName="% Híbridos", width=110, valueFormatter=val_fmt_pct)
-        gb.configure_column("% FullyDigital", headerName="% FullyDigital", width=120, valueFormatter=val_fmt_pct)
+        gb.configure_column("Ventas_Totales", headerName="Ventas Totales ($)", width=130)
+        gb.configure_column("Ventas_MiNegocio", headerName="Ventas App ($)", width=130)
+        gb.configure_column("% Adopcion", headerName="% Adopción", width=110)
+        gb.configure_column("% No Digital", headerName="% No Digital", width=110)
+        gb.configure_column("% Híbridos", headerName="% Híbridos", width=110)
+        gb.configure_column("% FullyDigital", headerName="% FullyDigital", width=120)
         
         gb.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
         grid_options = gb.build()
         
         AgGrid(
-            reporte_render,
+            reporte_render_display,
             gridOptions=grid_options,
             height=420,
             width="100%",
@@ -463,8 +470,17 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
     else:
         df_batalla_render = pd.DataFrame(columns=["Cód. Vend", "Preventista", "SUP", "Cód. Cliente", "Razón Social", "Dirección", "Día Visita", "Taxonomía", "Ventas Totales ($)", "Ventas App ($)", "% Adopción", "Faltante Mín. 70% ($)", "Categoría App"])
 
-    if not df_batalla_render.empty:
-        gb_b = GridOptionsBuilder.from_dataframe(df_batalla_render)
+    df_batalla_excel = df_batalla_render.copy()
+    df_batalla_display = df_batalla_render.copy()
+
+    for col in ["Ventas Totales ($)", "Ventas App ($)", "Faltante Mín. 70% ($)"]:
+        if col in df_batalla_display.columns:
+            df_batalla_display[col] = df_batalla_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+    if "% Adopción" in df_batalla_display.columns:
+        df_batalla_display["% Adopción"] = df_batalla_display["% Adopción"].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "0.00%")
+
+    if not df_batalla_display.empty:
+        gb_b = GridOptionsBuilder.from_dataframe(df_batalla_display)
         gb_b.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=120)
         gb_b.configure_column("Cód. Vend", width=90)
         gb_b.configure_column("Preventista", minWidth=150)
@@ -474,17 +490,17 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
         gb_b.configure_column("Dirección", minWidth=160)
         gb_b.configure_column("Día Visita", width=100)
         gb_b.configure_column("Taxonomía", width=80)
-        gb_b.configure_column("Ventas Totales ($)", width=130, valueFormatter=val_fmt_pesos)
-        gb_b.configure_column("Ventas App ($)", width=130, valueFormatter=val_fmt_pesos)
-        gb_b.configure_column("% Adopción", width=110, valueFormatter=val_fmt_pct)
-        gb_b.configure_column("Faltante Mín. 70% ($)", width=140, valueFormatter=val_fmt_pesos)
+        gb_b.configure_column("Ventas Totales ($)", width=130)
+        gb_b.configure_column("Ventas App ($)", width=130)
+        gb_b.configure_column("% Adopción", width=110)
+        gb_b.configure_column("Faltante Mín. 70% ($)", width=140)
         gb_b.configure_column("Categoría App", width=120)
 
         gb_b.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
         grid_opts_b = gb_b.build()
 
         AgGrid(
-            df_batalla_render,
+            df_batalla_display,
             gridOptions=grid_opts_b,
             height=400,
             width="100%",
@@ -502,7 +518,7 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
     with col_dl1:
         buffer_mn = io.BytesIO()
         with pd.ExcelWriter(buffer_mn, engine="openpyxl") as writer:
-            reporte_render.to_excel(writer, index=False, sheet_name="Adopcion_MiNegocio_Taxonomia")
+            reporte_render_excel.to_excel(writer, index=False, sheet_name="Adopcion_MiNegocio_Taxonomia")
         buffer_mn.seek(0)
         st.download_button(
             label="📥 Descargar Resumen a Excel",
@@ -515,7 +531,7 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
     with col_dl2:
         buffer_bat = io.BytesIO()
         with pd.ExcelWriter(buffer_bat, engine="openpyxl") as writer:
-            df_batalla_render.to_excel(writer, index=False, sheet_name="Batalla_MiNegocio_Clientes")
+            df_batalla_excel.to_excel(writer, index=False, sheet_name="Batalla_MiNegocio_Clientes")
         buffer_bat.seek(0)
         st.download_button(
             label="📥 Descargar Batalla a Excel",
