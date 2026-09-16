@@ -149,13 +149,33 @@ def obtener_objetivos_vendedores_sql(anio: str = None, mes: str = None) -> pd.Da
     except Exception:
         return pd.DataFrame(columns=["Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO", "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", "Obj_Sugerido_Kg"])
 
+def obtener_maestro_innovaciones_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
+    """Carga el maestro de innovaciones desde SQLite. Si mes está vacío, devuelve la base completa."""
+    try:
+        df_all = db.cargar_tabla_sql("SELECT * FROM maestro_innovaciones")
+        if df_all is None or df_all.empty:
+            return pd.DataFrame(columns=["Anio", "Mes", "Codigo", "Articulo", "Innovacion", "Condicion_Vta"])
+        
+        if not mes or str(mes).strip() == "":
+            return df_all
+        
+        if "Anio" in df_all.columns and "Mes" in df_all.columns:
+            cond = (df_all["Mes"].astype(str) == str(mes))
+            if anio and str(anio).strip() != "":
+                cond = cond & (df_all["Anio"].astype(str) == str(anio))
+            return df_all[cond]
+            
+        return df_all
+    except Exception:
+        return pd.DataFrame(columns=["Anio", "Mes", "Codigo", "Articulo", "Innovacion", "Condicion_Vta"])
+
 def render_parametros_view(filtros_globales: dict = None):
     if not es_entorno_local():
         st.warning("⚠️ Esta sección de configuración y parámetros está restringida al entorno de desarrollo local.")
         return
 
     st.subheader("⚙️ Configuración de Dimensiones y Maestros")
-    st.markdown("Los filtros operativos de Año, Mes, Fechas y Supervisor se gestionan desde la barra lateral izquierda. Esta sección permite cargar y mantener los maestros de Vendedores, Segmentos, Marcas / CEBE, Porcentajes CCC e importar los objetivos calibrados.")
+    st.markdown("Los filtros operativos de Año, Mes, Fechas y Supervisor se gestionan desde la barra lateral izquierda. Esta sección permite cargar y mantener los maestros de Vendedores, Segmentos, Marcas / CEBE, Porcentajes CCC, Innovaciones e importar los objetivos calibrados.")
 
     anio_def = filtros_globales.get("anio", "2026") if filtros_globales else "2026"
     mes_def = filtros_globales.get("mes", "9") if filtros_globales else "9"
@@ -447,9 +467,48 @@ def render_parametros_view(filtros_globales: dict = None):
     st.divider()
 
     # =========================================================================
-    # 4. SECCIÓN: IMPORTACIÓN DE OBJETIVOS CALIBRADOS (DEFINITIVOS)
+    # 4. SECCIÓN: MAESTRO DE INNOVACIONES
     # =========================================================================
-    st.markdown("### 📥 4. Importación de Objetivos Calibrados (Definitivos)")
+    st.markdown("### 🚀 4. Maestro de Innovaciones")
+    st.markdown("Cargue la planilla Excel con los códigos de artículos asociados a cada innovación, el nombre de la innovación y sus condiciones de venta unitarias.")
+
+    col_in1, col_in2 = st.columns(2)
+    with col_in1:
+        sel_anio_in = st.text_input("Año Operativo (Innovaciones)", value=anio_def, key="anio_innovaciones")
+    with col_in2:
+        sel_mes_in = st.text_input("Mes Operativo (Innovaciones)", value=mes_def, placeholder="Dejar vacío para ver toda la base", key="mes_innovaciones")
+
+    archivo_innovaciones = st.file_uploader("📂 Subir Excel de Innovaciones", type=["xlsx", "xls"], key="up_excel_innovaciones")
+
+    if archivo_innovaciones is not None:
+        try:
+            st.write("Vista previa del archivo de innovaciones:", pd.read_excel(archivo_innovaciones).head())
+
+            if st.button("📥 Registrar y Guardar Innovaciones en Base de Datos"):
+                if not sel_mes_in or str(sel_mes_in).strip() == "":
+                    st.error("⚠️ Debe especificar un Mes Operativo válido para registrar las innovaciones.")
+                else:
+                    exito, mensaje = db.guardar_innovaciones_desde_excel(archivo_innovaciones, sel_anio_in, sel_mes_in)
+                    if exito:
+                        st.success(mensaje)
+                        st.rerun()
+                    else:
+                        st.error(mensaje)
+        except Exception as e:
+            st.error(f"Error al procesar el archivo Excel de innovaciones: {e}")
+
+    titulo_tabla_in = f"📋 Innovaciones registradas en Base de Datos ({'Base Completa - Sin Filtro' if not sel_mes_in or str(sel_mes_in).strip() == '' else f'Período {sel_mes_in}/{sel_anio_in}'})"
+    st.markdown(f"#### {titulo_tabla_in}")
+
+    df_innovaciones_actual = obtener_maestro_innovaciones_sql(sel_anio_in, sel_mes_in)
+    st.dataframe(df_innovaciones_actual, width="stretch")
+
+    st.divider()
+
+    # =========================================================================
+    # 5. SECCIÓN: IMPORTACIÓN DE OBJETIVOS CALIBRADOS (DEFINITIVOS)
+    # =========================================================================
+    st.markdown("### 📥 5. Importación de Objetivos Calibrados (Definitivos)")
     st.markdown("Cargue aquí el archivo Excel exportado y ajustado desde el generador de objetivos para consolidar los objetivos oficiales del período operativo en la base de datos.")
 
     col7, col8 = st.columns(2)
@@ -499,6 +558,7 @@ def render_parametros_view(filtros_globales: dict = None):
         df_segmentos_actual.to_excel(writer, index=False, sheet_name='Maestro_Segmentos')
         df_marcas_cebe_actual.to_excel(writer, index=False, sheet_name='Maestro_Marcas_CEBE')
         df_ccc_actual.to_excel(writer, index=False, sheet_name='Maestro_CCC_Porcentajes')
+        df_innovaciones_actual.to_excel(writer, index=False, sheet_name='Maestro_Innovaciones')
         df_objetivos_actual.to_excel(writer, index=False, sheet_name='Objetivos_Calibrados')
     
     st.download_button(

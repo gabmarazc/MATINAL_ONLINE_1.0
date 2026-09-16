@@ -5,15 +5,16 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
 from modules.utils import tarjeta_metrica_html, parsear_fecha_robusta
-from modules.rep_kilos import preparar_datos_ventas_segmento
+from modules.rep_kilos import preparar_datos_ventas_segmento, generar_reporte_avance_kilos_segmento
 from modules.rep_ccc import generar_reporte_ccc_taxonomia
 from modules.rep_MN import generar_reporte_mn_taxonomia
 from modules.rep_cob_marca import generar_reporte_cobertura_marca
 
 @st.cache_data(show_spinner=False)
-def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias, anio_op, mes_op, dia_matinal, dia_venta, huella_global):
+def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias, anio_op, mes_op, dia_matinal, dia_venta, sup_seleccionado, huella_global):
     """
-    Motor analítico gerencial optimizado con prorrateo estricto por marca/canal, ritmo de rutas y control de período futuro.
+    Motor analítico gerencial optimizado con caché por supervisor, prorrateo estricto por marca/canal,
+    soporte dual para Ajuste de Entrega (TODO / AJUSTADO) y ritmo de rutas unificado con rep_kilos.
     """
     try:
         maestro_v = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
@@ -46,7 +47,7 @@ def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias
     df_marcas_maestro = db.cargar_tabla_sql("SELECT * FROM parametros_marcas")
 
     if maestro_v.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), [], {}, {}
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), [], {}, {}
 
     col_sup_v = next((c for c in maestro_v.columns if "sup" in str(c).strip().lower()), maestro_v.columns[2] if len(maestro_v.columns) > 2 else maestro_v.columns[0])
     col_cod_v = next((c for c in maestro_v.columns if "cod" in str(c).strip().lower()), maestro_v.columns[0])
@@ -58,57 +59,65 @@ def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias
     # 1. Preparación de ventas base con segmentación
     df_vta_prep_k = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
     
-    kilos_operativos_g = pd.DataFrame(columns=["Supervisor", "SEGMENTO", "Arrastre", "Actual", "Kilos_Operativos_Kg", "Importe_Operativo_Arg", "Kilos_Proyectados_Kg", "Gross_Proyectado_Arg", "Kilos_Futuro_Kg", "Gross_Futuro_Arg"])
-    
-    if not df_vta_prep_k.empty and "SEGMENTO" in df_vta_prep_k.columns:
-        df_vta_seg_bruto = df_vta_prep_k[
-            df_vta_prep_k["Periodo"].isin(["Arrastre", "Actual", "Futuro"]) & 
-            df_vta_prep_k["SEGMENTO"].notna()
-        ].copy()
+    # Generamos el reporte unificado de kilos a nivel vendedor para extraer las proyecciones exactas TODO y AJUSTADO
+    reporte_kilos_base = generar_reporte_avance_kilos_segmento(df_vta_prep_k, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, "TODOS")
 
-        df_vta_seg_bruto["CodVen_Clean"] = pd.to_numeric(df_vta_seg_bruto["CodVendedor"], errors="coerce").astype("Int64").astype(str).str.strip()
-        df_vta_seg_bruto["Supervisor"] = df_vta_seg_bruto["CodVen_Clean"].map(sup_map).fillna("GENERAL")
+    kilos_operativos_g_todo = pd.DataFrame()
+    kilos_operativos_g_ajustado = pd.DataFrame()
 
-        col_imp_neto = next((c for c in ["ImporteNetoItem", "ImporteNeto", "IMIMPORTENETO", "Neto"] if c in df_vta_seg_bruto.columns), None)
-        df_vta_seg_bruto["ImporteNetoItem"] = pd.to_numeric(df_vta_seg_bruto[col_imp_neto], errors="coerce").fillna(0.0) if col_imp_neto else 0.0
+    if not reporte_kilos_base.empty:
+        rep_k = reporte_kilos_base.copy()
+        rep_k["CodVend_Clean"] = pd.to_numeric(rep_k["CodVendedor"], errors="coerce").astype("Int64").astype(str).str.strip()
+        rep_k["Supervisor"] = rep_k["CodVend_Clean"].map(sup_map).fillna("GENERAL")
 
-        df_arr = df_vta_seg_bruto[df_vta_seg_bruto["Periodo"] == "Arrastre"]
-        df_act = df_vta_seg_bruto[df_vta_seg_bruto["Periodo"] == "Actual"]
-        df_fut = df_vta_seg_bruto[df_vta_seg_bruto["Periodo"] == "Futuro"]
-
-        arr_agg = df_arr.groupby(["Supervisor", "SEGMENTO"], as_index=False).agg(Arrastre=("PesoKg", "sum"), Arrastre_Imp=("ImporteNetoItem", "sum"))
-        act_agg = df_act.groupby(["Supervisor", "SEGMENTO"], as_index=False).agg(Actual=("PesoKg", "sum"), Actual_Imp=("ImporteNetoItem", "sum"))
-        fut_agg = df_fut.groupby(["Supervisor", "SEGMENTO"], as_index=False).agg(Kilos_Futuro_Kg=("PesoKg", "sum"), Gross_Futuro_Arg=("ImporteNetoItem", "sum"))
-
-        kilos_operativos_g = arr_agg.merge(act_agg, on=["Supervisor", "SEGMENTO"], how="outer").merge(fut_agg, on=["Supervisor", "SEGMENTO"], how="outer").fillna(0.0)
+        col_imp_neto = next((c for c in ["ImporteNetoItem", "ImporteNeto", "IMIMPORTENETO", "Neto"] if c in df_vta_prep_k.columns), None)
         
-        kilos_operativos_g["Kilos_Operativos_Kg"] = kilos_operativos_g["Arrastre"] + kilos_operativos_g["Actual"]
-        kilos_operativos_g["Importe_Operativo_Arg"] = kilos_operativos_g["Arrastre_Imp"] + kilos_operativos_g["Actual_Imp"]
-
-        # Cálculo de días de ruta para proyección por ritmo diario
-        rutas = df_rutas.copy() if df_rutas is not None and not df_rutas.empty else pd.DataFrame()
-        dias_pasados_tot, dias_totales_mes = 1, 1
-        if not rutas.empty:
-            col_fecha_r = next((c for c in ["Fecha", "fecha", "Dia", "Date", "FECHA"] if c in rutas.columns), rutas.columns[0])
-            rutas["Fecha_dt"] = pd.to_datetime(rutas[col_fecha_r], errors="coerce")
-            rutas_mes = rutas[(rutas["Fecha_dt"].dt.year == int(anio_op)) & (rutas["Fecha_dt"].dt.month == int(mes_op))]
-            
-            dia_v_dt = parsear_fecha_robusta(pd.Series([dia_venta])).iloc[0]
-            corte_date = dia_v_dt.date() if pd.notna(dia_v_dt) else None
-            
-            if corte_date is not None and not rutas_mes.empty:
-                pasadas = rutas_mes[rutas_mes["Fecha_dt"].dt.date <= corte_date]
-                dias_pasados_tot = max(1, pasadas["Fecha_dt"].nunique())
-                dias_totales_mes = max(1, rutas_mes["Fecha_dt"].nunique())
-
-        factor_proyeccion = dias_totales_mes / max(1, dias_pasados_tot)
+        # Procesamos escenario TODO
+        dp_todo = rep_k["Días Pasados"].astype(float).replace(0, 1.0)
+        dr_todo = rep_k["Días Restantes Todo"].astype(float)
+        p_diario = (rep_k["Actual"] + rep_k.get("Ajuste_Reemp_Actual", 0.0)) / dp_todo
         
-        kilos_operativos_g["Kilos_Proyectados_Kg"] = kilos_operativos_g["Arrastre"] + (kilos_operativos_g["Actual"] * factor_proyeccion)
-        
-        precio_prom_segmento = (kilos_operativos_g["Importe_Operativo_Arg"] / kilos_operativos_g["Kilos_Operativos_Kg"].replace(0, 1.0))
-        kilos_operativos_g["Gross_Proyectado_Arg"] = kilos_operativos_g["Kilos_Proyectados_Kg"] * precio_prom_segmento
+        rep_k["Operativo"] = rep_k["Arrastre"] + rep_k["Actual"] + rep_k.get("Ajuste_Por_Reemp", 0.0)
+        rep_k["Proyectado_Todo"] = rep_k["Operativo"]
+        mask_t = dr_todo > 0
+        if mask_t.any():
+            rep_k.loc[mask_t, "Proyectado_Todo"] = (p_diario[mask_t] * dr_todo[mask_t]) + rep_k.loc[mask_t, "Operativo"]
 
-    # 2. Prorrateo pormenorizado y cruzado de Objetivos (Kilos y Gross por Marca y Segmento)
+        # Procesamos escenario AJUSTADO
+        dr_ajustado = rep_k["Días Restantes Ajustado"].astype(float)
+        rep_k["Proyectado_Ajustado"] = rep_k["Operativo"]
+        if mask_t.any():
+            rep_k.loc[mask_t, "Proyectado_Ajustado"] = (p_diario[mask_t] * dr_ajustado[mask_t]) + rep_k.loc[mask_t, "Operativo"]
+
+        # Estimación de importes (Gross) proporcionales al volumen operativo y proyectado
+        if not df_vta_prep_k.empty:
+            df_vta_precio = df_vta_prep_k[df_vta_prep_k["Periodo"].isin(["Arrastre", "Actual"]) & df_vta_prep_k["SEGMENTO"].notna()].copy()
+            if col_imp_neto:
+                df_vta_precio["Imp"] = pd.to_numeric(df_vta_precio[col_imp_neto], errors="coerce").fillna(0.0)
+                precio_seg = df_vta_precio.groupby("SEGMENTO").apply(lambda x: x["Imp"].sum() / x["PesoKg"].sum() if x["PesoKg"].sum() > 0 else 0.0).to_dict()
+            else:
+                precio_seg = {}
+        else:
+            precio_seg = {}
+
+        rep_k["Precio_Unit"] = rep_k["SEGMENTO"].map(precio_seg).fillna(0.0)
+        rep_k["Gross_Operativo"] = rep_k["Operativo"] * rep_k["Precio_Unit"]
+        rep_k["Gross_Proyectado_Todo"] = rep_k["Proyectado_Todo"] * rep_k["Precio_Unit"]
+        rep_k["Gross_Proyectado_Ajustado"] = rep_k["Proyectado_Ajustado"] * rep_k["Precio_Unit"]
+
+        # Agrupado TODO
+        kilos_operativos_g_todo = rep_k.groupby(["Supervisor", "SEGMENTO"], as_index=False).agg({
+            "Arrastre": "sum", "Actual": "sum", "Operativo": "sum", "Gross_Operativo": "sum",
+            "Proyectado_Todo": "sum", "Gross_Proyectado_Todo": "sum"
+        }).rename(columns={"Operativo": "Kilos_Operativos_Kg", "Gross_Operativo": "Importe_Operativo_Arg", "Proyectado_Todo": "Kilos_Proyectados_Kg", "Gross_Proyectado_Todo": "Gross_Proyectado_Arg"})
+
+        # Agrupado AJUSTADO
+        kilos_operativos_g_ajustado = rep_k.groupby(["Supervisor", "SEGMENTO"], as_index=False).agg({
+            "Arrastre": "sum", "Actual": "sum", "Operativo": "sum", "Gross_Operativo": "sum",
+            "Proyectado_Ajustado": "sum", "Gross_Proyectado_Ajustado": "sum"
+        }).rename(columns={"Operativo": "Kilos_Operativos_Kg", "Gross_Operativo": "Importe_Operativo_Arg", "Proyectado_Ajustado": "Kilos_Proyectados_Kg", "Gross_Proyectado_Ajustado": "Gross_Proyectado_Arg"})
+
+    # 2. Prorrateo pormenorizado y cruzado de Objetivos por Marca, Segmento y Supervisor
     kilos_obj_g = pd.DataFrame(columns=["Supervisor", "SEGMENTO", "Objetivo_Kilos_Kg", "Objetivo_Importe_Arg"])
     if not maestro_cebe.empty and not df_vta_prep_k.empty and "Marca" in df_vta_prep_k.columns:
         col_m_cebe = next((c for c in maestro_cebe.columns if "marca" in str(c).strip().lower()), maestro_cebe.columns[0])
@@ -130,7 +139,7 @@ def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias
             df_vta_sin_20["Supervisor"] = df_vta_sin_20["CodVen_Clean"].map(sup_map).fillna("GENERAL")
             df_vta_sin_20["Marca_Key"] = df_vta_sin_20["Marca"].astype(str).str.strip().str.upper()
             
-            tot_marca_vta = df_vta_sin_20.groupby(["Marca_Key", "SEGMENTO"])["PesoKg"].sum().reset_index()
+            tot_marca_vta = df_vta_sin_20.groupby(["Supervisor", "Marca_Key", "SEGMENTO"])["PesoKg"].sum().reset_index()
             tot_marca_vta["Total_Marca"] = tot_marca_vta.groupby("Marca_Key")["PesoKg"].transform("sum").replace(0, 1.0)
             tot_marca_vta["Part_Marca_Seg"] = tot_marca_vta["PesoKg"] / tot_marca_vta["Total_Marca"]
             
@@ -140,11 +149,6 @@ def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias
             tot_marca_vta["Obj_Seg_Kg"] = tot_marca_vta["Obj_Kilos_Marca"] * tot_marca_vta["Part_Marca_Seg"]
             tot_marca_vta["Obj_Seg_Imp"] = tot_marca_vta["Obj_Gross_Marca"] * tot_marca_vta["Part_Marca_Seg"]
 
-            sup_seg_map = df_vta_sin_20.groupby(["SEGMENTO", "Supervisor"])["PesoKg"].sum().reset_index()
-            sup_seg_map = sup_seg_map.sort_values(by="PesoKg", ascending=False).drop_duplicates("SEGMENTO").set_index("SEGMENTO")["Supervisor"].to_dict()
-            
-            tot_marca_vta["Supervisor"] = tot_marca_vta["SEGMENTO"].map(sup_seg_map).fillna("GENERAL")
-
             kilos_obj_g = tot_marca_vta.groupby(["Supervisor", "SEGMENTO"], as_index=False).agg(
                 Objetivo_Kilos_Kg=("Obj_Seg_Kg", "sum"),
                 Objetivo_Importe_Arg=("Obj_Seg_Imp", "sum")
@@ -153,18 +157,18 @@ def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias
     # 3. Ventas del Vendedor 20 (sin prorrateo)
     df_v20 = df_vta_prep_k[(df_vta_prep_k["CodVendedor"] == 20) & df_vta_prep_k["Periodo"].isin(["Arrastre", "Actual"])].copy()
     if not df_v20.empty and "SEGMENTO" in df_v20.columns:
-        col_imp_neto = next((c for c in ["ImporteNetoItem", "ImporteNeto", "IMIMPORTENETO", "Neto"] if c in df_v20.columns), None)
-        df_v20["ImporteNetoItem"] = pd.to_numeric(df_v20[col_imp_neto], errors="coerce").fillna(0.0) if col_imp_neto else 0.0
+        col_imp_neto_v20 = next((c for c in ["ImporteNetoItem", "ImporteNeto", "IMIMPORTENETO", "Neto"] if c in df_v20.columns), None)
+        df_v20["ImporteNetoItem"] = pd.to_numeric(df_v20[col_imp_neto_v20], errors="coerce").fillna(0.0) if col_imp_neto_v20 else 0.0
         
-        df_v20_arr = df_v20[df_v20["Periodo"] == "Arrastre"].groupby("SEGMENTO", as_index=False)["PesoKg"].sum().rename(columns={"PesoKg": "Arrastre_V20"})
-        df_v20_act = df_v20[df_v20["Periodo"] == "Actual"].groupby("SEGMENTO", as_index=False)["PesoKg"].sum().rename(columns={"PesoKg": "Actual_V20"})
+        df_v20_arr = df_v20[df_v20["Periodo"] == "Arrastre"].groupby("SEGMENTO", as_index=False).agg(Arrastre_V20=("PesoKg", "sum"), Arrastre_Imp_V20=("ImporteNetoItem", "sum"))
+        df_v20_act = df_v20[df_v20["Periodo"] == "Actual"].groupby("SEGMENTO", as_index=False).agg(Actual_V20=("PesoKg", "sum"), Actual_Imp_V20=("ImporteNetoItem", "sum"))
         df_v20_imp = df_v20.groupby("SEGMENTO", as_index=False)["ImporteNetoItem"].sum().rename(columns={"ImporteNetoItem": "Gross_V20"})
         
         v20_agg = df_v20_arr.merge(df_v20_act, on="SEGMENTO", how="outer").merge(df_v20_imp, on="SEGMENTO", how="outer").fillna(0.0)
     else:
-        v20_agg = pd.DataFrame(columns=["SEGMENTO", "Arrastre_V20", "Actual_V20", "Gross_V20"])
+        v20_agg = pd.DataFrame(columns=["SEGMENTO", "Arrastre_V20", "Actual_V20", "Arrastre_Imp_V20", "Actual_Imp_V20", "Gross_V20"])
 
-    filtros_globales_base = {"anio": anio_op, "mes": mes_op, "dia_matinal": dia_matinal, "dia_venta": dia_venta, "supervisor": "TODOS"}
+    filtros_globales_base = {"anio": anio_op, "mes": mes_op, "dia_matinal": dia_matinal, "dia_venta": dia_venta, "supervisor": sup_seleccionado}
     
     rep_ccc_global = generar_reporte_ccc_taxonomia(df_vta, df_universo, maestro_v, maestro_ccc_param, filtros_globales_base)
     rep_mn_global = generar_reporte_mn_taxonomia(df_vta, df_universo, maestro_v, filtros_globales_base)
@@ -175,7 +179,7 @@ def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias
     marcas_lst = st.session_state.get("_cob_marcas", [])
     mapa_obj = st.session_state.get("_cob_mapa_objetivos", {})
 
-    return kilos_obj_g, kilos_operativos_g, v20_agg, rep_ccc_global, rep_mn_global, cartera_base_global, vtas_agrup_global, marcas_lst, mapa_obj
+    return kilos_obj_g, kilos_operativos_g_todo, kilos_operativos_g_ajustado, v20_agg, rep_ccc_global, rep_mn_global, cartera_base_global, vtas_agrup_global, marcas_lst, mapa_obj
 
 def render_rep_gerencial(df_vta, df_universo, df_rutas, df_ausencias, filtros_globales=None):
     st.subheader("📈 Tablero Ejecutivo Gerencial - Consolidado Integral")
@@ -196,32 +200,37 @@ def render_rep_gerencial(df_vta, df_universo, df_rutas, df_ausencias, filtros_gl
     except Exception:
         supervisores_disp = ["TODOS"]
 
-    col_sup_sel, _ = st.columns([2, 3])
+    col_sup_sel, col_ajuste_sel, _ = st.columns([2, 2, 3])
     with col_sup_sel:
         sup_seleccionado = st.selectbox("Filtrar Tablero por Supervisor", options=supervisores_disp, index=0, key="gerencial_filtro_sup")
+    with col_ajuste_sel:
+        modo_ajuste_ger = st.selectbox("Ajuste por Entrega", options=["TODO", "AJUSTADO"], index=1, key="gerencial_filtro_ajuste")
 
-    huella_global = f"{len(df_vta)}_{len(df_universo)}_{anio_op}_{mes_op}_{dia_matinal}"
+    huella_global = f"{len(df_vta)}_{len(df_universo)}_{anio_op}_{mes_op}_{dia_matinal}_{sup_seleccionado}"
 
-    kilos_obj_det_global, kilos_oper_detalle_global, v20_agg_global, rep_ccc_global, rep_mn_global, cartera_base_global, vtas_agrup_global, marcas_lst, mapa_obj = _calcular_motor_gerencial_global(
-        df_vta, df_universo, df_rutas, df_ausencias, anio_op, mes_op, dia_matinal, dia_venta, huella_global
+    kilos_obj_det_global, kilos_oper_todo, kilos_oper_ajustado, v20_agg_global, rep_ccc_global, rep_mn_global, cartera_base_global, vtas_agrup_global, marcas_lst, mapa_obj = _calcular_motor_gerencial_global(
+        df_vta, df_universo, df_rutas, df_ausencias, anio_op, mes_op, dia_matinal, dia_venta, sup_seleccionado, huella_global
     )
+
+    # Seleccionamos dinámicamente el DataFrame operativo según el modo elegido (TODO / AJUSTADO)
+    kilos_oper_detalle_global = kilos_oper_ajustado if modo_ajuste_ger == "AJUSTADO" else kilos_oper_todo
 
     if sup_seleccionado != "TODOS":
         if not kilos_oper_detalle_global.empty and "Supervisor" in kilos_oper_detalle_global.columns:
             kilos_operativos_g = kilos_oper_detalle_global[kilos_oper_detalle_global["Supervisor"].astype(str).str.strip() == sup_seleccionado].groupby("SEGMENTO", as_index=False).agg({
-                "Arrastre": "sum", "Actual": "sum", "Kilos_Operativos_Kg": "sum", "Importe_Operativo_Arg": "sum", 
-                "Kilos_Proyectados_Kg": "sum", "Gross_Proyectado_Arg": "sum", 
-                "Kilos_Futuro_Kg": "sum", "Gross_Futuro_Arg": "sum"
+                "Arrastre": "sum", "Actual": "sum", 
+                "Kilos_Operativos_Kg": "sum", "Importe_Operativo_Arg": "sum", 
+                "Kilos_Proyectados_Kg": "sum", "Gross_Proyectado_Arg": "sum"
             })
         else:
-            kilos_operativos_g = pd.DataFrame(columns=["SEGMENTO", "Arrastre", "Actual", "Kilos_Operativos_Kg", "Importe_Operativo_Arg", "Kilos_Proyectados_Kg", "Gross_Proyectado_Arg", "Kilos_Futuro_Kg", "Gross_Futuro_Arg"])
+            kilos_operativos_g = pd.DataFrame(columns=["SEGMENTO", "Arrastre", "Actual", "Kilos_Operativos_Kg", "Importe_Operativo_Arg", "Kilos_Proyectados_Kg", "Gross_Proyectado_Arg"])
         
         if not kilos_obj_det_global.empty and "Supervisor" in kilos_obj_det_global.columns:
             kilos_obj_g = kilos_obj_det_global[kilos_obj_det_global["Supervisor"].astype(str).str.strip() == sup_seleccionado].groupby("SEGMENTO", as_index=False).agg({"Objetivo_Kilos_Kg": "sum", "Objetivo_Importe_Arg": "sum"})
         else:
             kilos_obj_g = pd.DataFrame(columns=["SEGMENTO", "Objetivo_Kilos_Kg", "Objetivo_Importe_Arg"])
 
-        v20_segmento = pd.DataFrame(columns=["SEGMENTO", "Arrastre_V20", "Actual_V20", "Gross_V20"])
+        v20_segmento = pd.DataFrame(columns=["SEGMENTO", "Arrastre_V20", "Actual_V20", "Arrastre_Imp_V20", "Actual_Imp_V20", "Gross_V20"])
 
         rep_ccc = rep_ccc_global[rep_ccc_global["SUP"].astype(str).str.strip() == sup_seleccionado].copy() if not rep_ccc_global.empty and "SUP" in rep_ccc_global.columns else pd.DataFrame()
         rep_mn = rep_mn_global[rep_mn_global["SUP"].astype(str).str.strip() == sup_seleccionado].copy() if not rep_mn_global.empty and "SUP" in rep_mn_global.columns else pd.DataFrame()
@@ -229,58 +238,62 @@ def render_rep_gerencial(df_vta, df_universo, df_rutas, df_ausencias, filtros_gl
     else:
         if not kilos_oper_detalle_global.empty:
             kilos_operativos_g = kilos_oper_detalle_global.groupby("SEGMENTO", as_index=False).agg({
-                "Arrastre": "sum", "Actual": "sum", "Kilos_Operativos_Kg": "sum", "Importe_Operativo_Arg": "sum", 
-                "Kilos_Proyectados_Kg": "sum", "Gross_Proyectado_Arg": "sum", 
-                "Kilos_Futuro_Kg": "sum", "Gross_Futuro_Arg": "sum"
+                "Arrastre": "sum", "Actual": "sum", 
+                "Kilos_Operativos_Kg": "sum", "Importe_Operativo_Arg": "sum", 
+                "Kilos_Proyectados_Kg": "sum", "Gross_Proyectado_Arg": "sum"
             })
         else:
-            kilos_operativos_g = pd.DataFrame(columns=["SEGMENTO", "Arrastre", "Actual", "Kilos_Operativos_Kg", "Importe_Operativo_Arg", "Kilos_Proyectados_Kg", "Gross_Proyectado_Arg", "Kilos_Futuro_Kg", "Gross_Futuro_Arg"])
+            kilos_operativos_g = pd.DataFrame(columns=["SEGMENTO", "Arrastre", "Actual", "Kilos_Operativos_Kg", "Importe_Operativo_Arg", "Kilos_Proyectados_Kg", "Gross_Proyectado_Arg"])
         
         if not kilos_obj_det_global.empty:
-            kilos_obj_g = kilos_obj_det_global.groupby("SEGMENTO", as_index=False).agg({"Objetivo_Kilos_Kg": "sum", "Objetivo_Importe_Arg": "sum"})
+            kilos_obj_g = kilos_obj_det_global.groupby("SEGMENTO", as_index=False).agg({
+                "Objetivo_Kilos_Kg": "sum", 
+                "Objetivo_Importe_Arg": "sum"
+            })
         else:
             kilos_obj_g = pd.DataFrame(columns=["SEGMENTO", "Objetivo_Kilos_Kg", "Objetivo_Importe_Arg"])
 
         v20_segmento = v20_agg_global
-
         rep_ccc = rep_ccc_global.copy()
         rep_mn = rep_mn_global.copy()
         cartera_base = cartera_base_global.copy()
 
     # Consolidación final por Segmento incluyendo Vendedor 20
-    df_kilos_seg = kilos_obj_g.merge(kilos_operativos_g, on="SEGMENTO", how="outer").fillna(0.0)
+    df_seg = kilos_obj_g.merge(kilos_operativos_g, on="SEGMENTO", how="outer").fillna(0.0)
+    
+    total_proyectado_preventistas_puro = float(kilos_operativos_g["Kilos_Proyectados_Kg"].sum()) if not kilos_operativos_g.empty else 0.0
+
     if not v20_segmento.empty:
-        df_kilos_seg = df_kilos_seg.merge(v20_segmento, on="SEGMENTO", how="left").fillna(0.0)
-        df_kilos_seg["Arrastre"] += df_kilos_seg["Arrastre_V20"]
-        df_kilos_seg["Actual"] += df_kilos_seg["Actual_V20"]
-        df_kilos_seg["Kilos_Operativos_Kg"] += (df_kilos_seg["Arrastre_V20"] + df_kilos_seg["Actual_V20"])
-        df_kilos_seg["Importe_Operativo_Arg"] += df_kilos_seg["Gross_V20"]
-        df_kilos_seg["Kilos_Proyectados_Kg"] += (df_kilos_seg["Arrastre_V20"] + df_kilos_seg["Actual_V20"])
-        df_kilos_seg["Gross_Proyectado_Arg"] += df_kilos_seg["Gross_V20"]
+        df_seg = df_seg.merge(v20_segmento, on="SEGMENTO", how="left").fillna(0.0)
+        df_seg["Arrastre"] += df_seg["Arrastre_V20"]
+        df_seg["Actual"] += df_seg["Actual_V20"]
+        df_seg["Kilos_Operativos_Kg"] += (df_seg["Arrastre_V20"] + df_seg["Actual_V20"])
+        df_seg["Importe_Operativo_Arg"] += df_seg["Gross_V20"]
+        df_seg["Kilos_Proyectados_Kg"] += (df_seg["Arrastre_V20"] + df_seg["Actual_V20"])
+        df_seg["Gross_Proyectado_Arg"] += df_seg["Gross_V20"]
+
+    total_v20_kilos = float((v20_segmento["Arrastre_V20"] + v20_segmento["Actual_V20"]).sum()) if not v20_segmento.empty else 0.0
 
     # Redondeos y cálculos de porcentajes
-    df_kilos_seg["Objetivo_Kilos_Kg"] = df_kilos_seg["Objetivo_Kilos_Kg"].round(2)
-    df_kilos_seg["Objetivo_Importe_Arg"] = df_kilos_seg["Objetivo_Importe_Arg"].round(2)
-    df_kilos_seg["Arrastre"] = df_kilos_seg["Arrastre"].round(2)
-    df_kilos_seg["Actual"] = df_kilos_seg["Actual"].round(2)
-    df_kilos_seg["Kilos_Operativos_Kg"] = df_kilos_seg["Kilos_Operativos_Kg"].round(2)
-    df_kilos_seg["Importe_Operativo_Arg"] = df_kilos_seg["Importe_Operativo_Arg"].round(2)
-    df_kilos_seg["Kilos_Proyectados_Kg"] = df_kilos_seg["Kilos_Proyectados_Kg"].round(2)
-    df_kilos_seg["Gross_Proyectado_Arg"] = df_kilos_seg["Gross_Proyectado_Arg"].round(2)
-    df_kilos_seg["Kilos_Futuro_Kg"] = df_kilos_seg["Kilos_Futuro_Kg"].round(2)
-    df_kilos_seg["Gross_Futuro_Arg"] = df_kilos_seg["Gross_Futuro_Arg"].round(2)
+    df_seg["Objetivo_Kilos_Kg"] = df_seg["Objetivo_Kilos_Kg"].round(2)
+    df_seg["Objetivo_Importe_Arg"] = df_seg["Objetivo_Importe_Arg"].round(2)
+    df_seg["Arrastre"] = df_seg["Arrastre"].round(2)
+    df_seg["Actual"] = df_seg["Actual"].round(2)
+    df_seg["Kilos_Operativos_Kg"] = df_seg["Kilos_Operativos_Kg"].round(2)
+    df_seg["Importe_Operativo_Arg"] = df_seg["Importe_Operativo_Arg"].round(2)
+    df_seg["Kilos_Proyectados_Kg"] = df_seg["Kilos_Proyectados_Kg"].round(2)
+    df_seg["Gross_Proyectado_Arg"] = df_seg["Gross_Proyectado_Arg"].round(2)
     
-    df_kilos_seg["Cumplimiento_Actual_Pct"] = (df_kilos_seg["Kilos_Operativos_Kg"] / df_kilos_seg["Objetivo_Kilos_Kg"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
-    df_kilos_seg["Cumplimiento_Proyectado_Pct"] = (df_kilos_seg["Kilos_Proyectados_Kg"] / df_kilos_seg["Objetivo_Kilos_Kg"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
-    df_kilos_seg["Cumplimiento_Gross_Proy_Pct"] = (df_kilos_seg["Gross_Proyectado_Arg"] / df_kilos_seg["Objetivo_Importe_Arg"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
+    df_seg["Cumplimiento_Actual_Pct"] = (df_seg["Kilos_Operativos_Kg"] / df_seg["Objetivo_Kilos_Kg"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
+    df_seg["Cumplimiento_Proyectado_Pct"] = (df_seg["Kilos_Proyectados_Kg"] / df_seg["Objetivo_Kilos_Kg"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
+    df_seg["Cumplimiento_Gross_Proy_Pct"] = (df_seg["Gross_Proyectado_Arg"] / df_seg["Objetivo_Importe_Arg"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
 
-    # Cálculo de brecha / futuro a incorporar valorizado coherentemente al precio unitario objetivo del segmento
-    precio_unit_segmento_obj = (df_kilos_seg["Objetivo_Importe_Arg"] / df_kilos_seg["Objetivo_Kilos_Kg"].replace(0, 1.0))
+    precio_unit_segmento_obj = (df_seg["Objetivo_Importe_Arg"] / df_seg["Objetivo_Kilos_Kg"].replace(0, 1.0))
     
-    df_kilos_seg["Futuro_A_Incorporar_Kgs"] = (df_kilos_seg["Objetivo_Kilos_Kg"] - df_kilos_seg["Kilos_Proyectados_Kg"]).clip(lower=0).round(2)
-    df_kilos_seg["Futuro_A_Incorporar_Gross"] = (df_kilos_seg["Futuro_A_Incorporar_Kgs"] * precio_unit_segmento_obj).round(2)
+    df_seg["Futuro_A_Incorporar_Kgs"] = (df_seg["Objetivo_Kilos_Kg"] - df_seg["Kilos_Proyectados_Kg"]).clip(lower=0).round(2)
+    df_seg["Futuro_A_Incorporar_Gross"] = (df_seg["Futuro_A_Incorporar_Kgs"] * precio_unit_segmento_obj).round(2)
 
-    # ORDENAMIENTO OFICIAL DE SEGMENTOS IDÉNTICO A REP_KILOS
+    # Ordenamiento oficial de segmentos idéntico a rep_kilos
     orden_segmentos_maestro = [
         "GOLD Salty",
         "GOLD Crakers",
@@ -289,72 +302,73 @@ def render_rep_gerencial(df_vta, df_universo, df_rutas, df_ausencias, filtros_gl
         "SILVER Cereals"
     ]
     mapping_orden = {str(seg).strip(): i for i, seg in enumerate(orden_segmentos_maestro)}
-    df_kilos_seg["_orden_idx"] = df_kilos_seg["SEGMENTO"].astype(str).str.strip().map(mapping_orden).fillna(999)
-    df_kilos_seg = df_kilos_seg.sort_values(by="_orden_idx").drop(columns=["_orden_idx"]).reset_index(drop=True)
+    df_seg["_orden_idx"] = df_seg["SEGMENTO"].astype(str).str.strip().map(mapping_orden).fillna(999)
+    df_seg = df_seg.sort_values(by="_orden_idx").drop(columns=["_orden_idx"]).reset_index(drop=True)
 
-    # Renombrado oficial de columnas para la tabla gerencial
-    df_kilos_seg = df_kilos_seg.rename(columns={
-        "Objetivo_Kilos_Kg": "Objetivo Kilos Pepsico",
+    # ----------------------------------------------------
+    # TABLA 1: GROSS / IMPORTES
+    # ----------------------------------------------------
+    df_gross_seg = df_seg[[
+        "SEGMENTO", "Objetivo_Importe_Arg", "Importe_Operativo_Arg", 
+        "Gross_Proyectado_Arg", "Cumplimiento_Gross_Proy_Pct", "Futuro_A_Incorporar_Gross"
+    ]].copy()
+
+    df_gross_seg = df_gross_seg.rename(columns={
         "Objetivo_Importe_Arg": "Objetivo Gross Pepsico",
-        "Arrastre": "Arrastre Kilos",
-        "Actual": "Mes Actual Kilos",
-        "Kilos_Operativos_Kg": "Operativo Kilos",
         "Importe_Operativo_Arg": "Operativo Gross",
-        "Cumplimiento_Actual_Pct": "% Cumpl. Actual",
-        "Kilos_Proyectados_Kg": "Proyectado Kilos",
         "Gross_Proyectado_Arg": "Proyectado Gross",
-        "Cumplimiento_Proyectado_Pct": "% Cumpl. Proy. Kilos",
         "Cumplimiento_Gross_Proy_Pct": "% Cumpl. Proy. Gross",
-        "Kilos_Futuro_Kg": "Futuro Kilos",
-        "Gross_Futuro_Arg": "Gross Futuro",
-        "Futuro_A_Incorporar_Kgs": "A Incorporar Kilos",
         "Futuro_A_Incorporar_Gross": "A Incorporar Gross"
     })
 
-    cols_mantener = [
-        "SEGMENTO", "Objetivo Kilos Pepsico", "Objetivo Gross Pepsico", 
-        "Arrastre Kilos", "Mes Actual Kilos", "Operativo Kilos", "Operativo Gross", "% Cumpl. Actual", 
-        "Proyectado Kilos", "Proyectado Gross", "% Cumpl. Proy. Kilos", "% Cumpl. Proy. Gross", 
-        "Futuro Kilos", "Gross Futuro", "A Incorporar Kilos", "A Incorporar Gross"
-    ]
-    cols_existentes = [c for c in cols_mantener if c in df_kilos_seg.columns]
-    df_kilos_seg = df_kilos_seg[cols_existentes]
+    df_gross_excel = df_gross_seg.copy()
+    df_gross_display = df_gross_seg.copy()
+    for col in ["Objetivo Gross Pepsico", "Operativo Gross", "Proyectado Gross", "A Incorporar Gross"]:
+        if col in df_gross_display.columns:
+            df_gross_display[col] = df_gross_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
+    if "% Cumpl. Proy. Gross" in df_gross_display.columns:
+        df_gross_display["% Cumpl. Proy. Gross"] = df_gross_display["% Cumpl. Proy. Gross"].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "0.00%")
 
-    # DataFrame para descarga a Excel (Mantiene los valores numéricos puros)
-    df_kilos_seg_excel = df_kilos_seg.copy()
+    tot_obj_gross = float(df_gross_seg["Objetivo Gross Pepsico"].sum())
+    tot_operativo_g = float(df_gross_seg["Operativo Gross"].sum())
+    tot_proy_g = float(df_gross_seg["Proyectado Gross"].sum())
+    cump_proy_g_val = round((tot_proy_g / tot_obj_gross * 100.0) if tot_obj_gross > 0 else 0.0, 2)
+    tot_incorporar_g = float(df_gross_seg["A Incorporar Gross"].sum())
 
-    # DataFrame formateado exclusivamente para visualización en pantalla con $, kg y %
-    df_kilos_seg_display = df_kilos_seg.copy()
-    cols_pesos = ["Objetivo Gross Pepsico", "Operativo Gross", "Proyectado Gross", "Gross Futuro", "A Incorporar Gross"]
-    cols_kilos = ["Objetivo Kilos Pepsico", "Arrastre Kilos", "Mes Actual Kilos", "Operativo Kilos", "Proyectado Kilos", "Futuro Kilos", "A Incorporar Kilos"]
-    cols_porc = ["% Cumpl. Actual", "% Cumpl. Proy. Kilos", "% Cumpl. Proy. Gross"]
+    # ----------------------------------------------------
+    # TABLA 2: KILOS / VOLUMEN
+    # ----------------------------------------------------
+    df_kilos_seg = df_seg[[
+        "SEGMENTO", "Objetivo_Kilos_Kg", "Arrastre", "Actual", 
+        "Kilos_Operativos_Kg", "Cumplimiento_Actual_Pct", "Kilos_Proyectados_Kg", 
+        "Cumplimiento_Proyectado_Pct", "Futuro_A_Incorporar_Kgs"
+    ]].copy()
 
-    for col in cols_pesos:
-        if col in df_kilos_seg_display.columns:
-            df_kilos_seg_display[col] = df_kilos_seg_display[col].apply(lambda x: f"${x:,.2f}" if pd.notna(x) else "$0.00")
-    for col in cols_kilos:
-        if col in df_kilos_seg_display.columns:
-            df_kilos_seg_display[col] = df_kilos_seg_display[col].apply(lambda x: f"{x:,.2f} kg" if pd.notna(x) else "0.00 kg")
-    for col in cols_porc:
-        if col in df_kilos_seg_display.columns:
-            df_kilos_seg_display[col] = df_kilos_seg_display[col].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "0.00%")
+    df_kilos_seg = df_kilos_seg.rename(columns={
+        "Objetivo_Kilos_Kg": "Objetivo Kilos Pepsico",
+        "Arrastre": "Arrastre Kilos",
+        "Actual": "Mes Actual Kilos",
+        "Kilos_Operativos_Kg": "Operativo Kilos",
+        "Cumplimiento_Actual_Pct": "% Cumpl. Actual",
+        "Kilos_Proyectados_Kg": "Proyectado Kilos",
+        "Cumplimiento_Proyectado_Pct": "% Cumpl. Proy. Kilos",
+        "Futuro_A_Incorporar_Kgs": "A Incorporar Kilos"
+    })
+
+    df_kilos_excel = df_kilos_seg.copy()
+    df_kilos_display = df_kilos_seg.copy()
+    for col in ["Objetivo Kilos Pepsico", "Arrastre Kilos", "Mes Actual Kilos", "Operativo Kilos", "Proyectado Kilos", "A Incorporar Kilos"]:
+        if col in df_kilos_display.columns:
+            df_kilos_display[col] = df_kilos_display[col].apply(lambda x: f"{x:,.2f} kg" if pd.notna(x) else "0.00 kg")
+    for col in ["% Cumpl. Actual", "% Cumpl. Proy. Kilos"]:
+        if col in df_kilos_display.columns:
+            df_kilos_display[col] = df_kilos_display[col].apply(lambda x: f"{x:,.2f}%" if pd.notna(x) else "0.00%")
 
     tot_obj_kilos = float(df_kilos_seg["Objetivo Kilos Pepsico"].sum())
-    tot_obj_gross = float(df_kilos_seg["Objetivo Gross Pepsico"].sum())
-    tot_arrastre = float(df_kilos_seg["Arrastre Kilos"].sum())
-    tot_actual = float(df_kilos_seg["Mes Actual Kilos"].sum())
     tot_operativo_k = float(df_kilos_seg["Operativo Kilos"].sum())
-    tot_operativo_g = float(df_kilos_seg["Operativo Gross"].sum())
     tot_proy_k = float(df_kilos_seg["Proyectado Kilos"].sum())
-    tot_proy_g = float(df_kilos_seg["Proyectado Gross"].sum())
-    tot_futuro_k = float(df_kilos_seg["Futuro Kilos"].sum())
-    tot_futuro_g = float(df_kilos_seg["Gross Futuro"].sum())
-    tot_incorporar_k = float(df_kilos_seg["A Incorporar Kilos"].sum())
-    tot_incorporar_g = float(df_kilos_seg["A Incorporar Gross"].sum())
-
-    cump_actual_val = round((tot_operativo_k / tot_obj_kilos * 100.0) if tot_obj_kilos > 0 else 0.0, 2)
     cump_proy_k_val = round((tot_proy_k / tot_obj_kilos * 100.0) if tot_obj_kilos > 0 else 0.0, 2)
-    cump_proy_g_val = round((tot_proy_g / tot_obj_gross * 100.0) if tot_obj_gross > 0 else 0.0, 2)
+    tot_incorporar_k = float(df_kilos_seg["A Incorporar Kilos"].sum())
 
     # CCC, MiNegocio y Cobertura
     if not rep_ccc.empty:
@@ -411,52 +425,81 @@ def render_rep_gerencial(df_vta, df_universo, df_rutas, df_ausencias, filtros_gl
             })
     df_marcas_res = pd.DataFrame(registros_marca)
 
+    # ----------------------------------------------------
+    # PANEL DE AUDITORÍA Y CONCILIACIÓN (V20 y Reemplazos)
+    # ----------------------------------------------------
+    with st.expander("🔍 Auditoría de Conciliación: Preventistas vs. Consolidado Gerencial", expanded=False):
+        st.markdown("Este panel desglosa el origen exacto de la brecha numérica entre la tendencia de preventistas (`rep_kilos`) y el consolidado del tablero gerencial.")
+        
+        aud_col1, aud_col2, aud_col3, aud_col4 = st.columns(4)
+        with aud_col1:
+            st.metric("1. Preventistas Puros", f"{total_proyectado_preventistas_puro:,.2f} kg")
+        with aud_col2:
+            st.metric("2. Vendedor 20 (Depósito)", f"{total_v20_kilos:,.2f} kg")
+        with aud_col3:
+            st.metric("3. Total Consolidado Gerencial", f"{tot_proy_k:,.2f} kg")
+        with aud_col4:
+            diferencia_neta = tot_proy_k - total_proyectado_preventistas_puro
+            st.metric("Brecha Neta (V20 + Reemplazos)", f"{diferencia_neta:,.2f} kg", delta=f"{diferencia_neta:,.2f} kg")
+            
+        st.info("💡 **Conclusión de Auditoría:** La diferencia entre ambos reportes se debe exclusivamente a que el Tablero Gerencial incorpora el volumen y tendencia del **Vendedor 20** y las reasignaciones de red por **reemplazos/comodines**, los cuales operan fuera de la grilla estándar de preventistas.")
+
     st.divider()
 
     # RENDERIZADO EN PESTAÑAS LIMPIAS
     tab_k, tab_c, tab_mn, tab_m = st.tabs(["📦 Kilos e Importes por Segmento", "📈 CCC por Taxonomía", "📱 MiNegocio por Taxonomía", "🎯 Cobertura por Marca"])
 
     with tab_k:
-        st.markdown("### 📦 1. Kilos e Importes: Resumen Ejecutivo y Toma de Decisiones Gerenciales")
+        st.markdown("### 💰 1. Desglose Financiero (Gross / Importes)")
         
-        # 6 Columnas de Tarjetas de Métricas Directivas
-        mk1, mk2, mk3, mk4, mk5, mk6 = st.columns(6)
-        with mk1:
-            st.markdown(tarjeta_metrica_html("🎯 OBJ. KILOS", f"{tot_obj_kilos:,.2f} kg", "#3b82f6", "1.1rem", "0.5rem"), unsafe_allow_html=True)
-        with mk2:
-            st.markdown(tarjeta_metrica_html("📊 OPERATIVO", f"{tot_operativo_k:,.2f} kg", "#3b82f6", "1.1rem", "0.5rem"), unsafe_allow_html=True)
-        with mk3:
-            st.markdown(tarjeta_metrica_html("🔮 PROYECTADO", f"{tot_proy_k:,.2f} kg", "#8b5cf6", "1.1rem", "0.5rem"), unsafe_allow_html=True)
-        with mk4:
-            st.markdown(tarjeta_metrica_html("📈 CUMP. PROY.", f"{cump_proy_k_val:,.2f}%", "#22c55e" if cump_proy_k_val >= 100 else "#f97316", "1.1rem", "0.5rem"), unsafe_allow_html=True)
-        with mk5:
-            st.markdown(tarjeta_metrica_html("🎯 A INCORPORAR", f"{tot_incorporar_k:,.2f} kg", "#ef4444", "1.1rem", "0.5rem"), unsafe_allow_html=True)
-        with mk6:
-            st.markdown(tarjeta_metrica_html("⏩ KILOS FUTURO", f"{tot_futuro_k:,.2f} kg", "#f59e0b", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+        # Fila 1 (Nivel Superior Exclusivo): Proyectado Gross en ROJO vibrante y 50% más grande
+        col_proy_g1, col_proy_g2, col_proy_g3 = st.columns([1, 2, 1])
+        with col_proy_g2:
+            st.markdown(tarjeta_metrica_html("📊 PROYECTADO GROSS", f"${tot_proy_g:,.0f}", "#ef4444", "2.2rem", "1.1rem"), unsafe_allow_html=True)
 
-        mi1, mi2, mi3, mi4, mi5, mi6 = st.columns(6)
+        # Fila 2: Resto de indicadores financieros con colores distintos
+        mi1, mi2, mi3, mi4 = st.columns(4)
         with mi1:
-            st.markdown(tarjeta_metrica_html("💰 OBJ. GROSS", f"${tot_obj_gross:,.2f}", "#3b82f6", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+            st.markdown(tarjeta_metrica_html("💰 OBJ. GROSS", f"${tot_obj_gross:,.0f}", "#3b82f6", "1.1rem", "0.5rem"), unsafe_allow_html=True)
         with mi2:
-            st.markdown(tarjeta_metrica_html("💵 OPERATIVO GROSS", f"${tot_operativo_g:,.2f}", "#3b82f6", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+            st.markdown(tarjeta_metrica_html("💵 OPERATIVO GROSS", f"${tot_operativo_g:,.0f}", "#10b981", "1.1rem", "0.5rem"), unsafe_allow_html=True)
         with mi3:
-            st.markdown(tarjeta_metrica_html("📊 PROYECTADO GROSS", f"${tot_proy_g:,.2f}", "#8b5cf6", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+            st.markdown(tarjeta_metrica_html("📊 CUMP. PROY.", f"{cump_proy_g_val:,.2f}%", "#06b6d4", "1.1rem", "0.5rem"), unsafe_allow_html=True)
         with mi4:
-            st.markdown(tarjeta_metrica_html("📊 CUMP. PROY.", f"{cump_proy_g_val:,.2f}%", "#22c55e" if cump_proy_g_val >= 100 else "#f97316", "1.1rem", "0.5rem"), unsafe_allow_html=True)
-        with mi5:
-            st.markdown(tarjeta_metrica_html("🎯 A INCORPORAR", f"${tot_incorporar_g:,.2f}", "#ef4444", "1.1rem", "0.5rem"), unsafe_allow_html=True)
-        with mi6:
-            st.markdown(tarjeta_metrica_html("⏩ GROSS FUTURO", f"${tot_futuro_g:,.2f}", "#f59e0b", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+            st.markdown(tarjeta_metrica_html("🎯 A INCORPORAR", f"${tot_incorporar_g:,.0f}", "#f59e0b", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+
+        st.dataframe(df_gross_display, width="stretch", hide_index=True)
+        
+        buf_g = io.BytesIO()
+        with pd.ExcelWriter(buf_g, engine="openpyxl") as w:
+            df_gross_excel.to_excel(w, index=False, sheet_name="Gross_Importes_Segmento")
+        st.download_button("📥 Descargar Gross / Importes a Excel", data=buf_g.getvalue(), file_name="gross_importes_por_segmento.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_gross_seg")
 
         st.divider()
-        # Se renderiza la versión formateada con $, kg y % para máxima legibilidad visual
-        st.dataframe(df_kilos_seg_display, width="stretch", hide_index=True)
+        st.markdown("### 📦 2. Desglose Operativo (Kilos / Volumen)")
         
-        # El archivo de Excel se descarga con los valores numéricos puros para permitir operaciones al usuario
-        buf1 = io.BytesIO()
-        with pd.ExcelWriter(buf1, engine="openpyxl") as w:
-            df_kilos_seg_excel.to_excel(w, index=False, sheet_name="Kilos_Importes_Segmento")
-        st.download_button("📥 Descargar Kilos e Importes a Excel", data=buf1.getvalue(), file_name="kilos_e_importes_por_segmento.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_kilos_seg")
+        # Fila 1 (Nivel Superior Exclusivo): Proyectado Kilos en ROJO vibrante y 50% más grande
+        col_proy_k1, col_proy_k2, col_proy_k3 = st.columns([1, 2, 1])
+        with col_proy_k2:
+            st.markdown(tarjeta_metrica_html("🔮 PROYECTADO KILOS", f"{tot_proy_k:,.0f} kg", "#ef4444", "2.2rem", "1.1rem"), unsafe_allow_html=True)
+
+        # Fila 2: Resto de indicadores operativos con colores distintos
+        mk1, mk2, mk3, mk4 = st.columns(4)
+        with mk1:
+            st.markdown(tarjeta_metrica_html("🎯 OBJETIVO KILOS", f"{tot_obj_kilos:,.0f} kg", "#3b82f6", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+        with mk2:
+            st.markdown(tarjeta_metrica_html("📊 OPERATIVO KILOS", f"{tot_operativo_k:,.0f} kg", "#10b981", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+        with mk3:
+            st.markdown(tarjeta_metrica_html("📈 CUMP. PROY.", f"{cump_proy_g_val:,.2f}%", "#06b6d4", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+        with mk4:
+            st.markdown(tarjeta_metrica_html("🎯 A INCORPORAR", f"{tot_incorporar_k:,.0f} kg", "#f59e0b", "1.1rem", "0.5rem"), unsafe_allow_html=True)
+
+        st.dataframe(df_kilos_display, width="stretch", hide_index=True)
+        
+        buf_k = io.BytesIO()
+        with pd.ExcelWriter(buf_k, engine="openpyxl") as w:
+            df_kilos_excel.to_excel(w, index=False, sheet_name="Kilos_Volumen_Segmento")
+        st.download_button("📥 Descargar Kilos / Volumen a Excel", data=buf_k.getvalue(), file_name="kilos_volumen_por_segmento.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_kilos_seg")
 
     with tab_c:
         st.markdown("### 📈 2. CCC: Objetivo, Cantidad de CCC y Cumplimiento por Taxonomía")

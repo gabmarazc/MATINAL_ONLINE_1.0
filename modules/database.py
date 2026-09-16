@@ -70,7 +70,7 @@ def tablas_existen() -> bool:
         conn.close()
 
 def inicializar_bd_desde_excel(archivos_dict):
-    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte para Obj_Mes y Altas."""
+    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte para Obj_Mes, Altas y Ajuste_Entrega."""
     conn = obtener_conexion()
     try:
         for nombre_tabla, archivo in archivos_dict.items():
@@ -79,6 +79,14 @@ def inicializar_bd_desde_excel(archivos_dict):
             else:
                 df = pd.read_excel(archivo)
             
+            # Normalización para maestro de vendedores (Ajuste_Entrega)
+            if any(k in nombre_tabla.lower() for k in ["vendedor", "vendedores", "maestro_vendedores"]):
+                col_ajuste_cand = next((c for c in df.columns if any(k in str(c).strip().lower() for k in ["ajuste", "entrega", "lag", "dias_entrega"])), None)
+                if col_ajuste_cand:
+                    df["Ajuste_Entrega"] = pd.to_numeric(df[col_ajuste_cand], errors="coerce").fillna(1).astype(int)
+                else:
+                    df["Ajuste_Entrega"] = 1
+
             if nombre_tabla.lower() in ["maestro_marcas_cebe", "marcas_cebe", "cebes"]:
                 for col in df.columns:
                     col_l = str(col).strip().lower()
@@ -173,3 +181,57 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
         conn.close()
 
     return True, f"¡Objetivos del período {mes_int:02d}/{anio_int} cargados y versionados con éxito en la base de datos!"
+
+def guardar_innovaciones_desde_excel(file_buffer_or_path, anio, mes):
+    """Guarda o reemplaza el maestro de innovaciones en la tabla 'maestro_innovaciones' para el período (Anio, Mes)."""
+    try:
+        df_subida = pd.read_excel(file_buffer_or_path)
+    except Exception as e:
+        return False, f"Error al leer el archivo Excel de innovaciones: {e}"
+
+    columnas_requeridas = ["Codigo", "Articulo", "Innovacion", "Condicion_Vta"]
+    faltantes = [c for c in columnas_requeridas if c not in df_subida.columns]
+    if faltantes:
+        return False, f"El archivo Excel no tiene el formato correcto. Faltan las columnas: {', '.join(faltantes)}"
+
+    try:
+        anio_int = int(float(str(anio)))
+    except Exception:
+        anio_int = 2026
+
+    try:
+        mes_int = int(float(str(mes)))
+    except Exception:
+        mes_int = 9
+
+    df_subida["Anio"] = anio_int
+    df_subida["Mes"] = mes_int
+    df_subida["Codigo"] = pd.to_numeric(df_subida["Codigo"], errors="coerce").astype("Int64")
+    df_subida["Articulo"] = df_subida["Articulo"].fillna("").astype(str).str.strip()
+    df_subida["Innovacion"] = df_subida["Innovacion"].fillna("").astype(str).str.strip().str.upper()
+    df_subida["Condicion_Vta"] = pd.to_numeric(df_subida["Condicion_Vta"], errors="coerce").fillna(1.0)
+
+    conn = obtener_conexion()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS maestro_innovaciones (
+                Anio INTEGER,
+                Mes INTEGER,
+                Codigo INTEGER,
+                Articulo TEXT,
+                Innovacion TEXT,
+                Condicion_Vta REAL,
+                PRIMARY KEY (Anio, Mes, Codigo, Innovacion)
+            )
+        """)
+        conn.commit()
+
+        cursor.execute("DELETE FROM maestro_innovaciones WHERE Anio = ? AND Mes = ?", (anio_int, mes_int))
+        conn.commit()
+
+        df_subida.to_sql("maestro_innovaciones", conn, if_exists="append", index=False, chunksize=10000)
+    finally:
+        conn.close()
+
+    return True, f"¡Maestro de innovaciones del período {mes_int:02d}/{anio_int} guardado con éxito en la base de datos!"
