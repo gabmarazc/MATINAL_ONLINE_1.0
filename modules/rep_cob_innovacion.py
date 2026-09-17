@@ -165,7 +165,7 @@ def _calcular_base_cobertura_innovacion(df_vtas_operativo, df_cartera, vendedore
         vtas["Codigo_Prod"] = pd.to_numeric(vtas["Codigo_Prod"], errors="coerce").astype("Int64")
 
         vtas = vtas[vtas["Codigo_Prod"].isin(mapa_codigo_a_innovacion.keys())].copy()
-        vtas["Innovacion"] = vtalisas = vtas["Codigo_Prod"].map(mapa_codigo_a_innovacion)
+        vtas["Innovacion"] = vtas["Codigo_Prod"].map(mapa_codigo_a_innovacion)
 
         vtas_agrupadas = vtas.groupby(["CodVendedor", "Cliente", "Innovacion"], as_index=False).agg(
             Total_Cant=("cantbase", "sum")
@@ -333,7 +333,6 @@ def render_fragmento_interactivo_cobertura_innovacion(reporte_dummy, innovacione
 
     if not df_render_display.empty:
         gb = GridOptionsBuilder.from_dataframe(df_render_display)
-        # Configuración optimizada para estirar columnas según el contenido y encabezados
         gb.configure_default_column(filterable=True, sortable=True, resizable=True, flex=1, minWidth=130, cellStyle={'textAlign': 'center'}, headerClass='centered-header')
         gb.configure_column("CodVendedor", headerName="Cód. Vend", flex=0, width=105, minWidth=105)
         gb.configure_column("Nombre", headerName="Nombre", flex=2, minWidth=220, cellStyle={'textAlign': 'left'}, headerClass='left-header')
@@ -392,7 +391,7 @@ def render_fragmento_interactivo_cobertura_innovacion(reporte_dummy, innovacione
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_render_excel.to_excel(writer, index=False, sheet_name="Cobertura_Por_Innovacion")
+        df_render_excel.to_excel(writer, index=False, sheet_name="Cob_Innovacion")
     buffer.seek(0)
     
     st.download_button(
@@ -461,7 +460,7 @@ def render_fragmento_interactivo_cobertura_innovacion(reporte_dummy, innovacione
         with col_dl1:
             buffer_batalla = io.BytesIO()
             with pd.ExcelWriter(buffer_batalla, engine="openpyxl") as writer:
-                df_det_view.to_excel(writer, index=False, sheet_name="Clientes_No_Cubiertos_Innovacion")
+                df_det_view.to_excel(writer, index=False, sheet_name="No_Cubiertos_Innovacion")
             buffer_batalla.seek(0)
 
             st.download_button(
