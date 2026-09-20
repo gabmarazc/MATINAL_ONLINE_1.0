@@ -12,6 +12,7 @@ from modules.rep_MN import render_rep_mn
 from modules.rep_cob_marca import generar_reporte_cobertura_marca, dibujar_pestana_cobertura_marca
 from modules.rep_cob_innovacion import generar_reporte_cobertura_innovacion, dibujar_pestana_cobertura_innovacion
 from modules.rep_gerencial import render_rep_gerencial
+from modules.rep_vespertina import render_rep_vespertina
 from modules import database as db
 
 st.set_page_config(
@@ -218,9 +219,21 @@ def main():
 
     es_local = es_entorno_local()
     
-    # Definición de solapas incluyendo Cobertura Innovación al lado de Cobertura Marca
+    # Definición de solapas incluyendo Vespertina
     if "Nivel 1" in nivel_actual or "Nivel 2" in nivel_actual:
         if es_local and "Nivel 1" in nivel_actual:
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+                "📈 Tablero Gerencial",
+                "📊 Avance Kilos", 
+                "📈 Avance CCC", 
+                "🎯 Cobertura Marca", 
+                "🚀 Cobertura Innovación",
+                "📱 Adopción MiNegocio",
+                "🌙 Vespertina",
+                "⚙️ Parámetros",
+                "📦 Composición Obj Kilos"
+            ])
+        else:
             tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
                 "📈 Tablero Gerencial",
                 "📊 Avance Kilos", 
@@ -228,27 +241,18 @@ def main():
                 "🎯 Cobertura Marca", 
                 "🚀 Cobertura Innovación",
                 "📱 Adopción MiNegocio",
-                "⚙️ Parámetros",
-                "📦 Composición Obj Kilos"
-            ])
-        else:
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-                "📈 Tablero Gerencial",
-                "📊 Avance Kilos", 
-                "📈 Avance CCC", 
-                "🎯 Cobertura Marca", 
-                "🚀 Cobertura Innovación",
-                "📱 Adopción MiNegocio",
+                "🌙 Vespertina",
                 "📦 Composición Obj Kilos"
             ])
     else:
         # Nivel 3: Supervisión (Sin acceso al tablero gerencial)
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 Avance Kilos", 
             "📈 Avance CCC", 
             "🎯 Cobertura Marca",
             "🚀 Cobertura Innovación",
-            "📱 Adopción MiNegocio"
+            "📱 Adopción MiNegocio",
+            "🌙 Vespertina"
         ])
     
     df_vend_maestro = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
@@ -277,13 +281,15 @@ def main():
             dibujar_pestana_cobertura_innovacion(rep_innov, innovaciones_lst, df_innov_master, sup_sel_efectivo)
         with tab6:
             render_rep_mn(df_vta, df_universo, filtros_globales)
+        with tab7:
+            render_rep_vespertina(df_vta, filtros_globales)
         if es_local:
-            with tab7:
-                render_parametros_view(filtros_globales)
             with tab8:
+                render_parametros_view(filtros_globales)
+            with tab9:
                 render_rep_obj_kilos(df_vta, filtros_globales)
         else:
-            with tab7:
+            with tab8:
                 render_rep_obj_kilos(df_vta, filtros_globales)
     elif "Nivel 2" in nivel_actual:
         with tab1:
@@ -299,6 +305,8 @@ def main():
         with tab6:
             render_rep_mn(df_vta, df_universo, filtros_globales)
         with tab7:
+            render_rep_vespertina(df_vta, filtros_globales)
+        with tab8:
             render_rep_obj_kilos(df_vta, filtros_globales)
     else:
         # Nivel 3: Supervisión
@@ -312,6 +320,8 @@ def main():
             dibujar_pestana_cobertura_innovacion(rep_innov, innovaciones_lst, df_innov_master, sup_sel_efectivo)
         with tab5:
             render_rep_mn(df_vta, df_universo, filtros_globales)
+        with tab6:
+            render_rep_vespertina(df_vta, filtros_globales)
 
     # Toast informativo discreto con el tiempo de procesamiento global de los motores analíticos
     st.toast(f"⚡ Procesamiento analítico completado en {duracion_procesamiento:.2f} segundos", icon="⏱️")
