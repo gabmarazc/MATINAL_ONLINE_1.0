@@ -2,6 +2,7 @@
 import io
 import streamlit as st
 import pandas as pd
+import numpy as np
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
 from modules.utils import parsear_fecha_robusta
@@ -9,8 +10,11 @@ from modules.utils import parsear_fecha_robusta
 def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, maestro_cebe_ant, maestro_seg, anio_operativo, mes_operativo):
     """
     Calcula la distribución proporcional del objetivo macro de la compañía en Kilos 
-    tomando los valores directamente en Kilos (sin multiplicar por 1000) y basándose en la participación histórica global por Marca.
+    utilizando obligatoriamente el Master DataFrame Corporativo como fuente de verdad con vectorización.
     """
+    df_corp = db.obtener_df_maestro_corporativo()
+    df_base_vta = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
+
     if maestro_v is None or maestro_v.empty:
         return pd.DataFrame(), []
 
@@ -45,7 +49,6 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
             c = str(r.get(cc_act, "")).strip()
             val_kg = pd.to_numeric(r.get(co_act, 0.0), errors="coerce") if co_act else 0.0
             if m and m != "NAN":
-                # Lectura directa en Kilos (sin factores adicionales de 1000)
                 obj_act_map[m] = val_kg if pd.notna(val_kg) else 0.0
                 cebe_map[m] = c if c and c != "NAN" else "GLOBAL"
 
@@ -75,10 +78,10 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
         segmentos_validos = {"GOLD Salty", "GOLD Crakers", "SILVER Salty", "SILVER Crakers", "SILVER Cereals"}
         segmentos_orden_lista = ["GOLD Salty", "GOLD Crakers", "SILVER Salty", "SILVER Crakers", "SILVER Cereals"]
 
-    if df_vta is None or df_vta.empty:
+    if df_base_vta.empty:
         return pd.DataFrame(), segmentos_orden_lista
 
-    vta = df_vta.copy()
+    vta = df_base_vta.copy()
     
     if "TipoDeVenta" in vta.columns:
         tipos_excluidos = ["Comodato Devolución", "Comodato Ficticio", "Comodato Ficticio Devolución", "Comodato Préstamo"]
@@ -116,18 +119,25 @@ def generar_distribucion_objetivos_macro(df_vta, maestro_v, maestro_cebe_act, ma
     col_rent = "SegmentoRentabilidad" if "SegmentoRentabilidad" in vta_mes_ant.columns else None
     col_rubro = "Rubro" if "Rubro" in vta_mes_ant.columns else None
 
-    def resolver_segmento(row):
-        sr = str(row.get(col_rent, "")).strip().title() if col_rent else ""
-        rubro = str(row.get(col_rubro, "")).strip() if col_rubro else ""
-        if sr in ["Platinum", "Gold"]:
-            seg = f"GOLD {rubro}".strip()
-        elif sr in ["Silver", "Bronze"]:
-            seg = f"SILVER {rubro}".strip()
-        else:
-            seg = sr if sr else (list(segmentos_validos)[0] if segmentos_validos else "GOLD Salty")
-        return seg if seg in segmentos_validos else (list(segmentos_validos)[0] if segmentos_validos else seg)
-
-    vta_mes_ant["SEGMENTO"] = vta_mes_ant.apply(resolver_segmento, axis=1)
+    # Vectorización de asignación de segmentos en objetivos
+    sr_obj = vta_mes_ant.get(col_rent, pd.Series("", index=vta_mes_ant.index)).fillna("").astype(str).str.strip().str.title() if col_rent else pd.Series("", index=vta_mes_ant.index)
+    rubro_obj = vta_mes_ant.get(col_rubro, pd.Series("", index=vta_mes_ant.index)).fillna("").astype(str).str.strip() if col_rubro else pd.Series("", index=vta_mes_ant.index)
+    
+    cond_gold_obj = sr_obj.isin(["Platinum", "Gold"])
+    cond_silver_obj = sr_obj.isin(["Silver", "Bronze"])
+    
+    gold_val_obj = "GOLD " + rubro_obj
+    silver_val_obj = "SILVER " + rubro_obj
+    
+    default_seg = list(segmentos_validos)[0] if segmentos_validos else "GOLD Salty"
+    vta_mes_ant["SEGMENTO"] = np.select(
+        [cond_gold_obj, cond_silver_obj],
+        [gold_val_obj.str.strip(), silver_val_obj.str.strip()],
+        default=default_seg
+    )
+    
+    # Validar que pertenezcan a los segmentos válidos
+    vta_mes_ant["SEGMENTO"] = np.where(vta_mes_ant["SEGMENTO"].isin(segmentos_validos), vta_mes_ant["SEGMENTO"], default_seg)
 
     col_kg = next((c for c in ["PesoKg", "PESOKG", "Kilos", "KILOS"] if c in vta_mes_ant.columns), None)
     vta_mes_ant["Kilos"] = pd.to_numeric(vta_mes_ant[col_kg], errors="coerce").fillna(0.0) if col_kg else 0.0
@@ -303,6 +313,13 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     df_agrupado = df_agrupado.sort_values(by=["Supervisor", "Nombre", "SEGMENTO"]).reset_index(drop=True)
     df_agrupado["SEGMENTO"] = df_agrupado["SEGMENTO"].astype(str)
 
+    columnas_orden_ui = [
+        "Anio", "Mes", "CodVendedor", "Nombre", "Supervisor", "SEGMENTO", 
+        "Kilos_Mes_Anterior", "Objetivo_Mes_Anterior_Kg", "Logro_Anterior_Pct", 
+        "Obj_Sugerido_Kg"
+    ]
+    df_agrupado = df_agrupado[[c for c in columnas_orden_ui if c in df_agrupado.columns]]
+
     total_kilos_ant = df_agrupado["Kilos_Mes_Anterior"].sum()
     total_obj_sugerido = df_agrupado["Obj_Sugerido_Kg"].sum()
     
@@ -310,7 +327,6 @@ def render_rep_obj_kilos(df_vta, filtros_globales=None):
     if not maestro_cebe_act.empty:
         co_act = next((c for c in maestro_cebe_act.columns if any(k in str(c).strip().lower() for k in ["obj_tn", "tn", "obj_mes", "objetivo", "obj"])), None)
         if co_act:
-            # Lectura directa en Kilos sin factor 1000
             total_macro_compania = pd.to_numeric(maestro_cebe_act[co_act], errors="coerce").sum()
 
     m1, m2, m3 = st.columns(3)

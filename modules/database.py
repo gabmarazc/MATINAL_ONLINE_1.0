@@ -13,9 +13,19 @@ def obtener_conexion():
     return conn
 
 def init_db():
-    """Inicializa la estructura básica si es necesario."""
+    """Inicializa la estructura básica y asegura índices de rendimiento."""
     conn = obtener_conexion()
-    conn.close()
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_vendedor ON vta(CodVendedor);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_cliente ON vta(Cliente);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_fechacarga ON vta(FechaCarga);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_fechaentrega ON vta(FechaEntrega);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_marca ON vta(Marca);")
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        conn.close()
 
 def cargar_tabla_sql(query: str) -> pd.DataFrame:
     """Ejecuta una consulta SQL de forma segura. Si la tabla no existe, retorna un DataFrame vacío."""
@@ -69,17 +79,68 @@ def tablas_existen() -> bool:
     finally:
         conn.close()
 
+def obtener_df_maestro_corporativo() -> pd.DataFrame:
+    """
+    Retorna el Master DataFrame Corporativo de ventas base.
+    - Carga la tabla 'vta' de SQLite.
+    - Aplica la única exclusión universal obligatoria: elimina empleados ('EMPLOYEES' / 'EMPLEADOS').
+    - Mantiene el 100% de la operación total de la empresa (incluyendo Vendedor 20 / Depósito).
+    - Sin filtros de proveedores (soporte multi-marca a futuro) ni filtros temporales o de fecha matinal.
+    """
+    df = cargar_tabla_sql("SELECT * FROM vta")
+    if df.empty:
+        return df
+
+    if "Subramo" in df.columns:
+        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
+        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
+
+    col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
+    if col_vend_tit in df.columns:
+        df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
+
+    return df
+
 def inicializar_bd_desde_excel(archivos_dict):
-    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte para Obj_Mes, Altas y Ajuste_Entrega."""
+    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte multi-solapa para Altas."""
     conn = obtener_conexion()
     try:
         for nombre_tabla, archivo in archivos_dict.items():
-            if nombre_tabla.lower() == "altas":
-                df = pd.read_excel(archivo, sheet_name="Creacion")
+            if "altas" in nombre_tabla.lower():
+                xls_altas = pd.ExcelFile(archivo)
+                dfs_all = []
+                for sheet in xls_altas.sheet_names:
+                    df_sheet = pd.read_excel(archivo, sheet_name=sheet)
+                    
+                    for col in df_sheet.columns:
+                        col_l = str(col).strip().lower()
+                        if any(k in col_l for k in ["fecha", "dia", "date"]):
+                            s = df_sheet[col].astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
+                            dt = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
+                            mask_na = dt.isna()
+                            if mask_na.any():
+                                dt.loc[mask_na] = pd.to_datetime(s[mask_na], format="%d-%m-%Y", errors="coerce")
+                            mask_na = dt.isna()
+                            if mask_na.any():
+                                dt.loc[mask_na] = pd.to_datetime(s[mask_na], format="%Y-%m-%d", errors="coerce")
+                            mask_na = dt.isna()
+                            if mask_na.any():
+                                dt.loc[mask_na] = pd.to_datetime(s[mask_na], errors="coerce")
+                            df_sheet[col] = dt.dt.strftime("%Y-%m-%d")
+
+                    nombre_tabla_sheet = f"altas_{sheet.lower()}"
+                    df_sheet.to_sql(nombre_tabla_sheet, conn, if_exists='replace', index=False, chunksize=10000)
+
+                    df_s_copy = df_sheet.copy()
+                    df_s_copy["Origen_Hoja"] = sheet
+                    dfs_all.append(df_s_copy)
+                
+                if dfs_all:
+                    df_altas_unificado = pd.concat(dfs_all, ignore_index=True)
+                    df_altas_unificado.to_sql("altas", conn, if_exists='replace', index=False, chunksize=10000)
             else:
                 df = pd.read_excel(archivo)
             
-            # Normalización para maestro de vendedores (Ajuste_Entrega)
             if any(k in nombre_tabla.lower() for k in ["vendedor", "vendedores", "maestro_vendedores"]):
                 col_ajuste_cand = next((c for c in df.columns if any(k in str(c).strip().lower() for k in ["ajuste", "entrega", "lag", "dias_entrega"])), None)
                 if col_ajuste_cand:
@@ -95,28 +156,32 @@ def inicializar_bd_desde_excel(archivos_dict):
                 if "Obj_Mes" in df.columns:
                     df["Obj_Mes"] = pd.to_numeric(df["Obj_Mes"], errors="coerce").fillna(0.0)
 
-            for col in df.columns:
-                col_l = str(col).strip().lower()
-                if any(k in col_l for k in ["fecha", "dia", "date"]):
-                    s = df[col].astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-                    
-                    dt = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
-                    
-                    mask_na = dt.isna()
-                    if mask_na.any():
-                        dt.loc[mask_na] = pd.to_datetime(s[mask_na], format="%d-%m-%Y", errors="coerce")
-                    
-                    mask_na = dt.isna()
-                    if mask_na.any():
-                        dt.loc[mask_na] = pd.to_datetime(s[mask_na], format="%Y-%m-%d", errors="coerce")
-                    
-                    mask_na = dt.isna()
-                    if mask_na.any():
-                        dt.loc[mask_na] = pd.to_datetime(s[mask_na], errors="coerce")
-                    
-                    df[col] = dt.dt.strftime("%Y-%m-%d")
-                    
-            df.to_sql(nombre_tabla, conn, if_exists='replace', index=False, chunksize=10000)
+            if "altas" not in nombre_tabla.lower():
+                for col in df.columns:
+                    col_l = str(col).strip().lower()
+                    if any(k in col_l for k in ["fecha", "dia", "date"]):
+                        s = df[col].astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
+                        dt = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
+                        mask_na = dt.isna()
+                        if mask_na.any():
+                            dt.loc[mask_na] = pd.to_datetime(s[mask_na], format="%d-%m-%Y", errors="coerce")
+                        mask_na = dt.isna()
+                        if mask_na.any():
+                            dt.loc[mask_na] = pd.to_datetime(s[mask_na], format="%Y-%m-%d", errors="coerce")
+                        mask_na = dt.isna()
+                        if mask_na.any():
+                            dt.loc[mask_na] = pd.to_datetime(s[mask_na], errors="coerce")
+                        df[col] = dt.dt.strftime("%Y-%m-%d")
+                        
+                df.to_sql(nombre_tabla, conn, if_exists='replace', index=False, chunksize=10000)
+
+        # Creación de índices optimizados para rendimiento
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_vendedor ON vta(CodVendedor);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_cliente ON vta(Cliente);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_fechacarga ON vta(FechaCarga);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_fechaentrega ON vta(FechaEntrega);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_marca ON vta(Marca);")
+        conn.commit()
     finally:
         conn.close()
 
@@ -209,7 +274,7 @@ def guardar_innovaciones_desde_excel(file_buffer_or_path, anio, mes):
     df_subida["Codigo"] = pd.to_numeric(df_subida["Codigo"], errors="coerce").astype("Int64")
     df_subida["Articulo"] = df_subida["Articulo"].fillna("").astype(str).str.strip()
     df_subida["Innovacion"] = df_subida["Innovacion"].fillna("").astype(str).str.strip().str.upper()
-    df_subida["Condicion_Vta"] = pd.to_numeric(df_subida["Condicion_Vta"], errors="coerce").fillna(1.0)
+    df_subida["Condicion_Vta"] = pd.to_numeric(df_subida["Condicion_Vta"], errors="coerce").astype("Int64")
 
     conn = obtener_conexion()
     try:

@@ -3,13 +3,16 @@ import io
 import urllib.parse
 import streamlit as st
 import pandas as pd
+import numpy as np
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
 from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta
 
 def preparar_ventas_mn(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
-    """Pipeline de ventas independiente y específico para MiNegocio homologado con CCC."""
-    df = df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame()
+    """Pipeline de ventas unificado para MiNegocio consumiendo el Master DataFrame Corporativo con alta vectorización."""
+    df_corp = db.obtener_df_maestro_corporativo()
+    df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
+    
     if df.empty:
         return df
 
@@ -58,8 +61,6 @@ def preparar_ventas_mn(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_
 
     col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
-
-    # Exclusión estricta del vendedor 20
     df = df[df["CodVendedor"] != 20]
 
     df["MesCarga"] = df["FechaCarga_dt"].dt.month
@@ -73,24 +74,18 @@ def preparar_ventas_mn(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_
     mes_sig = 1 if mes_operativo == 12 else mes_operativo + 1
     anio_sig = anio_operativo + 1 if mes_operativo == 12 else anio_operativo
 
-    def asignar_periodo(row):
-        ac, mc = row["AñoCarga"], row["MesCarga"]
-        ae, me = row["AñoEntrega"], row["MesEntrega"]
-        
-        if ac == anio_ant and mc == mes_ant and ae == anio_operativo and me == mes_operativo:
-            return "Arrastre"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_operativo and me == mes_operativo:
-            return "Actual"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_sig and me == mes_sig:
-            return "Futuro"
-        return "Fuera de Periodo"
-
-    df["Periodo"] = df.apply(asignar_periodo, axis=1)
+    conditions = [
+        (df["AñoCarga"] == anio_ant) & (df["MesCarga"] == mes_ant) & (df["AñoEntrega"] == anio_operativo) & (df["MesEntrega"] == mes_operativo),
+        (df["AñoCarga"] == anio_operativo) & (df["MesCarga"] == mes_operativo) & (df["AñoEntrega"] == anio_operativo) & (df["MesEntrega"] == mes_operativo),
+        (df["AñoCarga"] == anio_operativo) & (df["MesCarga"] == mes_operativo) & (df["AñoEntrega"] == anio_sig) & (df["MesEntrega"] == mes_sig)
+    ]
+    choices = ["Arrastre", "Actual", "Futuro"]
+    df["Periodo"] = np.select(conditions, choices, default="Fuera de Periodo")
 
     return df
 
 def _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal):
-    """Motor de cálculo base de MiNegocio (aislado para ser cacheado inteligentemente)."""
+    """Motor de cálculo base de MiNegocio optimizado con operaciones vectorizadas."""
     try:
         df_ausencias = db.cargar_tabla_sql("SELECT * FROM ausencias")
     except Exception:
@@ -103,9 +98,11 @@ def _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_mati
         col_c_orig = next((c for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"] if c in ventas_periodo.columns), "Cliente")
         ventas_periodo["Cliente"] = pd.to_numeric(ventas_periodo[col_c_orig], errors="coerce").astype("Int64")
         
+        # Agregación vectorizada de ventas totales y MiNegocio
+        ventas_periodo["_mn_val"] = np.where(ventas_periodo["Es_MiNegocio"], ventas_periodo["ImporteNetoItem"], 0.0)
         clientes_g = ventas_periodo.groupby("Cliente", as_index=False).agg(
             Ventas_Totales=("ImporteNetoItem", "sum"),
-            Ventas_MiNegocio=("ImporteNetoItem", lambda x: x[ventas_periodo.loc[x.index, "Es_MiNegocio"]].sum())
+            Ventas_MiNegocio=("_mn_val", "sum")
         )
         
         clientes_g["Ventas_Totales"] = clientes_g["Ventas_Totales"].round(2)
@@ -175,20 +172,43 @@ def _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_mati
         universo["CodVendedor"] = pd.to_numeric(universo["CodVendedor"], errors="coerce").astype("Int64")
         universo = universo[universo["CodVendedor"] != 20]
 
-    vendedores_df = pd.DataFrame()
-    col_c_v = next((c for c in ["Codigo_Vendedor", "CodVend", "CodVendedor"] if c in vendedores.columns), vendedores.columns[0])
-    col_n_v = next((c for c in ["Nombre_Vendedor", "Nombre"] if c in vendedores.columns), vendedores.columns[1])
-    col_s_v = next((c for c in ["Supervisor", "SUP"] if c in vendedores.columns), vendedores.columns[2] if len(vendedores.columns) > 2 else vendedores.columns[1])
+    if not clientes_g.empty:
+        clientes_con_ventas = set(clientes_g["Cliente"].dropna().tolist())
+        clientes_en_universo = set(universo["Cliente"].dropna().tolist()) if not universo.empty else set()
+        clientes_fuera_universo = clientes_con_ventas - clientes_en_universo
 
-    sv_c = vendedores[col_c_v]
+        if clientes_fuera_universo and not ventas_periodo.empty:
+            df_fuera = ventas_periodo[ventas_periodo["Cliente"].isin(clientes_fuera_universo)].groupby("Cliente", as_index=False).agg({
+                "CodVendedor": "first"
+            })
+            df_fuera["Taxonomia"] = "SIN CLASIFICAR"
+            df_fuera["NombreCliente"] = "CLIENTE FUERA DE PADRÓN"
+            df_fuera["DireccionCliente"] = ""
+            df_fuera["DiaVisita"] = "SIN DÍA"
+            
+            if universo.empty:
+                universo = df_fuera
+            else:
+                universo = pd.concat([universo, df_fuera], ignore_index=True)
+
+    vendedores_df = pd.DataFrame()
+    vendedores_seguro = vendedores.copy() if vendedores is not None and not vendedores.empty else pd.DataFrame(columns=["Codigo_Vendedor", "Nombre_Vendedor", "Supervisor"])
+    if vendedores_seguro.empty:
+        vendedores_seguro = pd.DataFrame({"Codigo_Vendedor": [0], "Nombre_Vendedor": ["SIN ASIGNAR"], "Supervisor": ["GENERAL"]})
+
+    col_c_v = next((c for c in ["Codigo_Vendedor", "CodVend", "CodVendedor"] if c in vendedores_seguro.columns), vendedores_seguro.columns[0])
+    col_n_v = next((c for c in ["Nombre_Vendedor", "Nombre"] if c in vendedores_seguro.columns), vendedores_seguro.columns[1] if len(vendedores_seguro.columns) > 1 else vendedores_seguro.columns[0])
+    col_s_v = next((c for c in ["Supervisor", "SUP"] if c in vendedores_seguro.columns), vendedores_seguro.columns[2] if len(vendedores_seguro.columns) > 2 else vendedores_seguro.columns[0])
+
+    sv_c = vendedores_seguro[col_c_v]
     if isinstance(sv_c, pd.DataFrame): sv_c = sv_c.iloc[:, 0]
     vendedores_df["CodVendedor"] = pd.to_numeric(sv_c, errors="coerce").astype("Int64")
     vendedores_df = vendedores_df[vendedores_df["CodVendedor"] != 20]
 
-    sv_n = vendedores[col_n_v]
+    sv_n = vendedores_seguro[col_n_v]
     if isinstance(sv_n, pd.DataFrame): sv_n = sv_n.iloc[:, 0]
     vendedores_df["Nombre"] = sv_n.fillna("").astype(str).str.strip()
-    sv_s = vendedores[col_s_v]
+    sv_s = vendedores_seguro[col_s_v]
     if isinstance(sv_s, pd.DataFrame): sv_s = sv_s.iloc[:, 0]
     vendedores_df["SUP"] = sv_s.fillna("").astype(str).str.strip()
     vendedores_df = vendedores_df.drop_duplicates("CodVendedor")
@@ -220,7 +240,6 @@ def _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_mati
 
 @st.cache_data(show_spinner=False)
 def _calcular_base_mn_cached(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal, huella_datos):
-    """Caché optimizada de Streamlit basada en huella digital para MiNegocio."""
     return _calcular_base_mn(df_vta, df_universo, vendedores, anio_op, mes_op, dia_matinal)
 
 def generar_reporte_mn_taxonomia(df_vta, df_universo, vendedores, filtros_globales=None):
@@ -387,7 +406,6 @@ def render_fragmento_interactivo_mn(df_det, supervisores_seleccionados):
     ]
     reporte_render = reporte_filtrado[columnas_visuales_mn].copy().reset_index(drop=True)
 
-    # DataFrames separados: Excel con números puros, pantalla con sufijos $, %
     reporte_render_excel = reporte_render.copy()
     reporte_render_display = reporte_render.copy()
 

@@ -2,12 +2,19 @@
 import io
 import streamlit as st
 import pandas as pd
+import numpy as np
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
 from modules.utils import parsear_fecha_robusta
 
 def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
-    df = df_vta.copy()
+    """Pipeline de ventas optimizado para Kilos utilizando el Master DataFrame Corporativo con alta vectorización."""
+    df_corp = db.obtener_df_maestro_corporativo()
+    df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
+    
+    if df.empty:
+        return df
+
     df["PesoKg"] = pd.to_numeric(df.get("PesoKg", 0), errors="coerce").fillna(0.0)
 
     if "TipoDeVenta" in df.columns:
@@ -33,8 +40,8 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
         subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
         df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
 
-    df["FechaCarga_dt"] = parsear_fecha_robusta(df["FechaCarga"])
-    df["FechaEntrega_dt"] = parsear_fecha_robusta(df["FechaEntrega"])
+    df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
+    df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
 
     dia_matinal_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
     
@@ -43,13 +50,8 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
         if es_mes_en_curso:
             df = df[df["FechaCarga_dt"].dt.date < dia_matinal_dt.date()]
 
-    col_vend_tit = None
-    for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"]:
-        if cand in df.columns:
-            col_vend_tit = cand
-            break
-    if not col_vend_tit:
-        col_vend_tit = "CodVendedor"
+    col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
+    if col_vend_tit not in df.columns:
         df[col_vend_tit] = 0
 
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
@@ -60,16 +62,19 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
     col_rent = "SegmentoRentabilidad" if "SegmentoRentabilidad" in df.columns else None
     col_rubro = "Rubro" if "Rubro" in df.columns else None
     
-    def asignar_segmento(row):
-        sr = str(row.get(col_rent, "")).strip().title() if col_rent else ""
-        rubro = str(row.get(col_rubro, "")).strip() if col_rubro else ""
-        if sr in ["Platinum", "Gold"]:
-            return f"GOLD {rubro}".strip()
-        elif sr in ["Silver", "Bronze"]:
-            return f"SILVER {rubro}".strip()
-        return None
-
-    df["SEGMENTO"] = df.apply(asignar_segmento, axis=1)
+    sr = df.get(col_rent, pd.Series("", index=df.index)).fillna("").astype(str).str.strip().str.title() if col_rent else pd.Series("", index=df.index)
+    rubro = df.get(col_rubro, pd.Series("", index=df.index)).fillna("").astype(str).str.strip() if col_rubro else pd.Series("", index=df.index)
+    
+    cond_gold = sr.isin(["Platinum", "Gold"]).fillna(False)
+    cond_silver = sr.isin(["Silver", "Bronze"]).fillna(False)
+    
+    gold_val = "GOLD " + rubro
+    silver_val = "SILVER " + rubro
+    df["SEGMENTO"] = np.select(
+        [cond_gold, cond_silver],
+        [gold_val.str.strip(), silver_val.str.strip()],
+        default=None
+    )
 
     df["MesCarga"] = df["FechaCarga_dt"].dt.month
     df["AñoCarga"] = df["FechaCarga_dt"].dt.year
@@ -82,48 +87,27 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
     mes_sig = 1 if mes_operativo == 12 else mes_operativo + 1
     anio_sig = anio_operativo + 1 if mes_operativo == 12 else anio_operativo
 
-    def asignar_periodo(row):
-        ac, mc = row["AñoCarga"], row["MesCarga"]
-        ae, me = row["AñoEntrega"], row["MesEntrega"]
-        
-        if ac == anio_ant and mc == mes_ant and ae == anio_operativo and me == mes_operativo:
-            return "Arrastre"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_operativo and me == mes_operativo:
-            return "Actual"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_sig and me == mes_sig:
-            return "Futuro"
-        return "Fuera de Periodo"
+    ac, mc = df["AñoCarga"], df["MesCarga"]
+    ae, me = df["AñoEntrega"], df["MesEntrega"]
+    
+    cond_arr = ((ac == anio_ant) & (mc == mes_ant) & (ae == anio_operativo) & (me == mes_operativo)).fillna(False)
+    cond_act = ((ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_operativo) & (me == mes_operativo)).fillna(False)
+    cond_fut = ((ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_sig) & (me == mes_sig)).fillna(False)
 
-    df["Periodo"] = df.apply(asignar_periodo, axis=1)
+    df["Periodo"] = np.select(
+        [cond_arr, cond_act, cond_fut],
+        ["Arrastre", "Actual", "Futuro"],
+        default="Fuera de Periodo"
+    )
 
     df["ClaveAUS_Carga"] = df["CodVendedor"].astype(str) + "-" + df["FechaCarga_dt"].dt.strftime("%Y-%m-%d")
     df["ClaveAUS_Entrega"] = df["CodVendedor"].astype(str) + "-" + df["FechaEntrega_dt"].dt.strftime("%Y-%m-%d")
 
     df_aus = df_ausencias.copy() if df_ausencias is not None and not df_ausencias.empty else pd.DataFrame()
     if not df_aus.empty:
-        col_aus_vend = None
-        for c in ["Ausente", "CodVend", "CodVendedor", "Vendedor", "Cod_Vendedor"]:
-            if c in df_aus.columns:
-                col_aus_vend = c
-                break
-        if not col_aus_vend:
-            col_aus_vend = df_aus.columns[3]
-
-        col_aus_fecha = None
-        for c in ["Fecha", "FechaAusencia", "Dia"]:
-            if c in df_aus.columns:
-                col_aus_fecha = c
-                break
-        if not col_aus_fecha:
-            col_aus_fecha = df_aus.columns[2]
-
-        col_aus_reemp = None
-        for c in ["Reemplazo", "CodReemplazo", "Cod_Reemplazo", "PreventistaReemplazo"]:
-            if c in df_aus.columns:
-                col_aus_reemp = c
-                break
-        if not col_aus_reemp:
-            col_aus_reemp = df_aus.columns[4]
+        col_aus_vend = next((c for c in ["Ausente", "CodVend", "CodVendedor", "Vendedor", "Cod_Vendedor"] if c in df_aus.columns), df_aus.columns[3])
+        col_aus_fecha = next((c for c in df_aus.columns if c in ["Fecha", "FechaAusencia", "Dia"]), df_aus.columns[2])
+        col_aus_reemp = next((c for c in df_aus.columns if c in ["Reemplazo", "CodReemplazo", "Cod_Reemplazo", "PreventistaReemplazo"]), df_aus.columns[4])
 
         df_aus["Fecha_dt"] = parsear_fecha_robusta(df_aus[col_aus_fecha])
         df_aus["CodVend_clean"] = pd.to_numeric(df_aus[col_aus_vend], errors="coerce").astype("Int64")
@@ -175,10 +159,10 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     segmentos_rep = pd.DataFrame({"SEGMENTO": orden_segmentos_maestro})
 
     df_comodines = pd.DataFrame({
-        "CodVend": [-999, -998],
-        "Nombre": ["DEPOSITO", "REEMPLAZO"],
-        "SUP": ["GENERAL", "GENERAL"],
-        "Ajuste_Entrega": [0, 0]
+        "CodVend": [-998],
+        "Nombre": ["REEMPLAZO"],
+        "SUP": ["GENERAL"],
+        "Ajuste_Entrega": [0]
     })
     vendedores_rep_full = pd.concat([vendedores_rep, df_comodines], ignore_index=True)
 
@@ -188,33 +172,33 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
 
     df_vtas_op = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"]) & df_vta_prep["SEGMENTO"].notna()].copy()
     
-    def rutear_vendedor_operativo(row):
-        cod_op = row["CodVendedorOperativo"]
-        cod_tit = row["CodVendedor"]
-        reemp = row.get("Reemplazo", pd.NA)
-        
-        if (pd.notna(reemp) and int(reemp) == 99) or (pd.notna(cod_op) and int(cod_op) == 99) or (pd.notna(cod_tit) and int(cod_tit) == 99):
-            return -998
-        elif pd.notna(cod_op) and int(cod_op) in codigos_validos_padron:
-            return int(cod_op)
-        elif pd.notna(cod_tit) and int(cod_tit) in codigos_validos_padron:
-            return int(cod_tit)
-        else:
-            return -999
-
-    df_vtas_op["CodVend_Op"] = df_vtas_op.apply(rutear_vendedor_operativo, axis=1).astype("Int64")
+    cod_op = df_vtas_op["CodVendedorOperativo"]
+    cod_tit = df_vtas_op["CodVendedor"]
+    reemp = df_vtas_op.get("Reemplazo", pd.Series(pd.NA, index=df_vtas_op.index))
     
-    def asignar_sup_transaccion(row):
-        c_op = row["CodVend_Op"]
-        c_tit = row["CodVendedor"]
-        if c_op == -999:
-            return "GENERAL"
-        elif c_op == -998:
-            return sup_map.get(c_tit, "GENERAL")
-        else:
-            return sup_map.get(c_op, sup_map.get(c_tit, "GENERAL"))
+    is_special = ((reemp == 99) | (cod_op == 99) | (cod_tit == 99)).fillna(False)
+    valid_op_mask = cod_op.isin(codigos_validos_padron).fillna(False)
+    valid_tit_mask = cod_tit.isin(codigos_validos_padron).fillna(False)
+    
+    cod_op_series = cod_op.fillna(-999).astype(int)
+    cod_tit_series = cod_tit.fillna(-999).astype(int)
+    
+    df_vtas_op["CodVend_Op"] = np.select(
+        [is_special, valid_op_mask, valid_tit_mask],
+        [-998, cod_op_series, cod_tit_series],
+        default=cod_tit_series
+    )
+    df_vtas_op["CodVend_Op"] = pd.Series(df_vtas_op["CodVend_Op"]).replace(-999, pd.NA).astype("Int64")
 
-    df_vtas_op["SUP_Transaccion"] = df_vtas_op.apply(asignar_sup_transaccion, axis=1).astype(str).str.strip()
+    cond_op_998 = (df_vtas_op["CodVend_Op"] == -998).fillna(False)
+    sup_from_op = df_vtas_op["CodVend_Op"].astype(str).map(sup_map)
+    sup_from_tit = df_vtas_op["CodVendedor"].astype(str).map(sup_map)
+    
+    df_vtas_op["SUP_Transaccion"] = np.select(
+        [cond_op_998],
+        ["GENERAL"],
+        default=sup_from_op.fillna(sup_from_tit).fillna("GENERAL")
+    )
     df_vtas_op["SEGMENTO"] = df_vtas_op["SEGMENTO"].astype(str).str.strip()
     
     kilos = df_vtas_op.groupby(["CodVend_Op", "SEGMENTO", "Periodo"], dropna=False)["PesoKg"].sum().reset_index()
@@ -243,8 +227,8 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
         dt_directo = pd.to_datetime(s_fechas, format="%Y-%m-%d", errors="coerce")
         dt_invertido = pd.to_datetime(s_fechas, format="%Y-%d-%m", errors="coerce")
         
-        coincidencias_directo = (dt_directo.dt.year == int(anio_operativo)) & (dt_directo.dt.month == int(mes_operativo))
-        coincidencias_invertido = (dt_invertido.dt.year == int(anio_operativo)) & (dt_invertido.dt.month == int(mes_operativo))
+        coincidencias_directo = ((dt_directo.dt.year == int(anio_operativo)) & (dt_directo.dt.month == int(mes_operativo))).fillna(False)
+        coincidencias_invertido = ((dt_invertido.dt.year == int(anio_operativo)) & (dt_invertido.dt.month == int(mes_operativo))).fillna(False)
         
         if coincidencias_directo.sum() >= coincidencias_invertido.sum() and coincidencias_directo.sum() > 0:
             rutas["Fecha_dt"] = dt_directo
@@ -256,8 +240,8 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
         rutas["CodVend"] = pd.to_numeric(rutas[col_vend_r], errors="coerce").astype("Int64")
 
         rutas_mes = rutas[
-            (rutas["Fecha_dt"].dt.year == int(anio_operativo)) & 
-            (rutas["Fecha_dt"].dt.month == int(mes_operativo))
+            ((rutas["Fecha_dt"].dt.year == int(anio_operativo)) & 
+            (rutas["Fecha_dt"].dt.month == int(mes_operativo))).fillna(False)
         ].copy()
 
         dia_v_dt = parsear_fecha_robusta(pd.Series([dia_venta])).iloc[0]
@@ -280,13 +264,10 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte["Días Pasados"] = reporte["Días Pasados"].fillna(0).astype("Int64")
     reporte["Rutas"] = reporte["Rutas"].fillna(0).astype("Int64")
     
-    # Mapeo de Ajuste_Entrega al reporte
     reporte["Ajuste_Entrega"] = reporte["CodVend"].map(ajuste_map).fillna(1).astype(int)
 
-    # Días Restantes para el escenario TODO (Sin descuento de ajuste)
     reporte["Días Restantes Todo"] = (reporte["Rutas"] - reporte["Días Pasados"]).clip(lower=0).astype("Int64")
     
-    # Días Restantes para el escenario AJUSTADO (Descontando las últimas N rutas de cierre de mes)
     rutas_efectivas_utiles = (reporte["Rutas"] - reporte["Ajuste_Entrega"]).clip(lower=1)
     reporte["Días Restantes Ajustado"] = (rutas_efectivas_utiles - reporte["Días Pasados"]).clip(lower=0).astype("Int64")
 
@@ -377,6 +358,12 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte = reporte.rename(columns={"CodVend": "CodVendedor"})
     return reporte
 
+@st.cache_data(show_spinner=False)
+def _calcular_avance_kilos_cached(df_vta, df_rutas, maestro_vend, maestro_seg, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro, huella):
+    df_vta_prep = preparar_datos_ventas_segmento(df_vta, None, anio_op, mes_op, dia_venta)
+    reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, maestro_seg, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro)
+    return reporte_avance, df_vta_prep
+
 @st.fragment
 def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Rows, s_dispo, v_dispo, anio_op, mes_op, sup_filtro, df_vta_prep, dia_matinal):
     from modules.utils import tarjeta_metrica_html
@@ -403,7 +390,6 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
         if col_req not in rep_filtrado.columns:
             rep_filtrado[col_req] = 0.0
 
-    # Selección dinámica de la columna de días restantes según el filtro elegido (Respuesta Instantánea)
     col_dias_restantes_activo = "Días Restantes Ajustado" if modo_ajuste == "AJUSTADO" else "Días Restantes Todo"
 
     rep_detalle = rep_filtrado[
@@ -494,7 +480,6 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
         total_tendencia = float(rep_detalle["Tendencia_Total_Kg"].sum())
         pct_cumplimiento_obj = (total_tendencia / total_objetivo_mes * 100.0) if total_objetivo_mes > 0 else 0.0
 
-    # RENDERIZADO DE MÉTRICAS UTILIZANDO LA UTILIDAD COMPARTIDA
     mcol1, mcol2, mcol3, mcol4 = st.columns(4)
     with mcol1:
         st.markdown(tarjeta_metrica_html("📦 Arrastre", f"{total_arrastre:,.1f} kg", "#3b82f6", "39px", "21px"), unsafe_allow_html=True)
@@ -527,10 +512,8 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     ]
     rep_detalle = rep_detalle[columnas_ordenadas]
 
-    # DataFrame para descarga a Excel con números puros
     rep_detalle_excel = rep_detalle.copy()
 
-    # DataFrame formateado visualmente con sufijos kg y % para pantalla
     rep_detalle_display = rep_detalle.copy()
     cols_kilos = [
         "Objetivo Mes Corriente", "Arrastre", "Actual", "Ultima_Vta", "Penultima_Vta", 
@@ -589,7 +572,7 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
     try:
         maestro_s = db.cargar_tabla_sql("SELECT * FROM maestro_segmentos ORDER BY rowid ASC")
         if not maestro_s.empty and "Mes" in maestro_s.columns:
-            ms_per = maestro_s[(ms_per["Mes"].astype(str) == str(mes_op)) & (ms_per["Anio"].astype(str) == str(anio_op))]
+            ms_per = maestro_s[(maestro_s["Mes"].astype(str) == str(mes_op)) & (maestro_s["Anio"].astype(str) == str(anio_op))]
             if not ms_per.empty:
                 maestro_s = ms_per
     except Exception:
@@ -598,7 +581,7 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
     try:
         maestro_cebe = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
         if not maestro_cebe.empty and "Mes" in maestro_cebe.columns:
-            mc_per = maestro_cebe[(mc_per["Mes"].astype(str) == str(mes_op)) & (mc_per["Anio"].astype(str) == str(anio_op))]
+            mc_per = maestro_cebe[(maestro_cebe["Mes"].astype(str) == str(mes_op)) & (maestro_cebe["Anio"].astype(str) == str(anio_op))]
             if not mc_per.empty:
                 maestro_cebe = mc_per
     except Exception:
@@ -608,13 +591,11 @@ def render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales=None):
         st.warning("⚠️ No se encontró el Maestro de Vendedores cargado para este período en SQLite. Verifique en la solapa de Parámetros.")
         return
 
-    cache_key_rep = f"_cache_kilos_v48_{sup_filtro}_{anio_op}_{mes_op}_{dia_matinal.replace('/', '')}_{dia_venta.replace('/', '')}"
-    if cache_key_rep not in st.session_state:
-        df_vta_prep = preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
-        reporte_avance = generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro)
-        st.session_state[cache_key_rep] = (reporte_avance, df_vta_prep)
-    else:
-        reporte_avance, df_vta_prep = st.session_state[cache_key_rep]
+    huella_kilos = f"{len(df_vta) if df_vta is not None else 0}_{len(df_rutas) if df_rutas is not None else 0}_{anio_op}_{mes_op}_{sup_filtro}_{dia_matinal}_{dia_venta}"
+    
+    reporte_avance, df_vta_prep = _calcular_avance_kilos_cached(
+        df_vta, df_rutas, maestro_v, maestro_s, maestro_cebe, dia_venta, anio_op, mes_op, sup_filtro, huella_kilos
+    )
 
     if "Ajuste_Reemp_Arrastre" not in reporte_avance.columns:
         reporte_avance["Ajuste_Reemp_Arrastre"] = 0.0

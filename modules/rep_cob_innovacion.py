@@ -2,16 +2,16 @@
 import io
 import streamlit as st
 import pandas as pd
+import numpy as np
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode, JsCode
 from modules import database as db
 from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta_vectorial, tarjeta_metrica_html
 
 def preparar_ventas_cobertura_innovacion(df_vta, anio_operativo, mes_operativo, dia_matinal):
-    """
-    Pipeline de ventas para Cobertura por Innovaciones:
-    Filtra transacciones válidas y extrae los códigos de artículos de interés.
-    """
-    df = df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame()
+    """Pipeline de ventas unificado para Cobertura por Innovaciones consumiendo el Master DataFrame Corporativo con vectorización."""
+    df_corp = db.obtener_df_maestro_corporativo()
+    df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
+    
     if df.empty:
         return df
 
@@ -64,23 +64,22 @@ def preparar_ventas_cobertura_innovacion(df_vta, anio_operativo, mes_operativo, 
     mes_sig = 1 if mes_operativo == 12 else mes_operativo + 1
     anio_sig = anio_operativo + 1 if mes_operativo == 12 else anio_operativo
 
-    def asignar_periodo(row):
-        ac, mc = row["AñoCarga"], row["MesCarga"]
-        ae, me = row["AñoEntrega"], row["MesEntrega"]
-        
-        if ac == anio_ant and mc == mes_ant and ae == anio_operativo and me == mes_operativo:
-            return "Arrastre"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_operativo and me == mes_operativo:
-            return "Actual"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_sig and me == mes_sig:
-            return "Futuro"
-        return "Fuera de Periodo"
+    ac, mc = df["AñoCarga"], df["MesCarga"]
+    ae, me = df["AñoEntrega"], df["MesEntrega"]
+    
+    cond_arr = (ac == anio_ant) & (mc == mes_ant) & (ae == anio_operativo) & (me == mes_operativo)
+    cond_act = (ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_operativo) & (me == mes_operativo)
+    cond_fut = (ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_sig) & (me == mes_sig)
 
-    df["Periodo"] = df.apply(asignar_periodo, axis=1)
+    df["Periodo"] = np.select(
+        [cond_arr, cond_act, cond_fut],
+        ["Arrastre", "Actual", "Futuro"],
+        default="Fuera de Periodo"
+    )
     return df
 
 def _calcular_base_cobertura_innovacion(df_vtas_operativo, df_cartera, vendedores, anio_op, mes_op, dia_matinal):
-    """Motor de cálculo base de Cobertura por Innovaciones."""
+    """Motor de cálculo base de Cobertura por Innovaciones optimizado."""
     df_vta_prep = preparar_ventas_cobertura_innovacion(df_vtas_operativo, anio_op, mes_op, dia_matinal)
 
     df_vend = vendedores.copy() if vendedores is not None and not vendedores.empty else pd.DataFrame(columns=["CodVend", "Nombre", "SUP"])
@@ -177,7 +176,6 @@ def _calcular_base_cobertura_innovacion(df_vtas_operativo, df_cartera, vendedore
 
 @st.cache_data(show_spinner=False)
 def _calcular_base_cob_innovacion_cached(df_vtas_operativo, df_cartera, vendedores, anio_op, mes_op, dia_matinal, huella_datos):
-    """Caché optimizada de Streamlit basada en huella digital para Cobertura por Innovación."""
     return _calcular_base_cobertura_innovacion(df_vtas_operativo, df_cartera, vendedores, anio_op, mes_op, dia_matinal)
 
 def generar_reporte_cobertura_innovacion(df_vtas_operativo, df_cartera, vendedores, filtros_globales=None):

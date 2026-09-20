@@ -1,16 +1,20 @@
 # modules/rep_ccc.py
 import io
+import os
 import urllib.parse
 import unicodedata
 import streamlit as st
 import pandas as pd
+import numpy as np
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules import database as db
-from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta
+from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta, extraer_dia_de_ruta_vectorial
 
 def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
-    """Pipeline de ventas independiente y específico para CCC basado en CantBase, ImporteNeto y períodos."""
-    df = df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame()
+    """Pipeline de ventas unificado para CCC consumiendo el Master DataFrame Corporativo con alta vectorización."""
+    df_corp = db.obtener_df_maestro_corporativo()
+    df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
+    
     if df.empty:
         return df
 
@@ -57,8 +61,6 @@ def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia
 
     col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
-
-    # Excluir estrictamente al vendedor 20 del pipeline de ventas CCC
     df = df[df["CodVendedor"] != 20]
 
     df["MesCarga"] = df["FechaCarga_dt"].dt.month
@@ -72,19 +74,13 @@ def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia
     mes_sig = 1 if mes_operativo == 12 else mes_operativo + 1
     anio_sig = anio_operativo + 1 if mes_operativo == 12 else anio_operativo
 
-    def asignar_periodo(row):
-        ac, mc = row["AñoCarga"], row["MesCarga"]
-        ae, me = row["AñoEntrega"], row["MesEntrega"]
-        
-        if ac == anio_ant and mc == mes_ant and ae == anio_operativo and me == mes_operativo:
-            return "Arrastre"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_operativo and me == mes_operativo:
-            return "Actual"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_sig and me == mes_sig:
-            return "Futuro"
-        return "Fuera de Periodo"
-
-    df["Periodo"] = df.apply(asignar_periodo, axis=1)
+    conditions = [
+        (df["AñoCarga"] == anio_ant) & (df["MesCarga"] == mes_ant) & (df["AñoEntrega"] == anio_operativo) & (df["MesEntrega"] == mes_operativo),
+        (df["AñoCarga"] == anio_operativo) & (df["MesCarga"] == mes_operativo) & (df["AñoEntrega"] == anio_operativo) & (df["MesEntrega"] == mes_operativo),
+        (df["AñoCarga"] == anio_operativo) & (df["MesCarga"] == mes_operativo) & (df["AñoEntrega"] == anio_sig) & (df["MesEntrega"] == mes_sig)
+    ]
+    choices = ["Arrastre", "Actual", "Futuro"]
+    df["Periodo"] = np.select(conditions, choices, default="Fuera de Periodo")
 
     df["ClaveAUS_Carga"] = df["CodVendedor"].astype(str) + "-" + df["FechaCarga_dt"].dt.strftime("%Y-%m-%d")
     df["ClaveAUS_Entrega"] = df["CodVendedor"].astype(str) + "-" + df["FechaEntrega_dt"].dt.strftime("%Y-%m-%d")
@@ -149,23 +145,55 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     except Exception:
         df_ausencias = pd.DataFrame()
 
-    try:
-        df_altas_db = db.cargar_tabla_sql("SELECT * FROM altas")
-    except Exception:
-        df_altas_db = pd.DataFrame()
+    df_altas_all = db.cargar_tabla_sql("SELECT * FROM altas")
+    
+    if df_altas_all.empty:
+        ruta_altas = "ALTAS.xlsx" if os.path.exists("ALTAS.xlsx") else "data/ALTAS.xlsx"
+        if os.path.exists(ruta_altas):
+            try:
+                xls_altas = pd.ExcelFile(ruta_altas)
+                dfs = []
+                for sh in xls_altas.sheet_names:
+                    ds = pd.read_excel(ruta_altas, sheet_name=sh)
+                    ds["Origen_Hoja"] = sh
+                    dfs.append(ds)
+                if dfs:
+                    df_altas_all = pd.concat(dfs, ignore_index=True)
+            except Exception:
+                pass
 
-    altas_periodo_set = set()
-    if not df_altas_db.empty:
-        col_f_altas = next((c for c in df_altas_db.columns if "fecha" in str(c).lower()), None)
-        col_cod_altas = next((c for c in df_altas_db.columns if "codigo" in str(c).lower() or "cliente" in str(c).lower()), df_altas_db.columns[0])
-        if col_f_altas:
-            df_altas_db["Fecha_dt"] = parsear_fecha_robusta(df_altas_db[col_f_altas])
-            altas_mes = df_altas_db[
-                (df_altas_db["Fecha_dt"].dt.year == int(anio_op)) & 
-                (df_altas_db["Fecha_dt"].dt.month == int(mes_op))
+    altas_nuevas_set = set()
+    reactivaciones_set = set()
+
+    if not df_altas_all.empty:
+        col_f = next((c for c in df_altas_all.columns if "fecha" in str(c).lower()), None)
+        col_c = next((c for c in df_altas_all.columns if "codigo" in str(c).lower() or "cliente" in str(c).lower()), df_altas_all.columns[0])
+        col_est = next((c for c in df_altas_all.columns if "estado" in str(c).lower()), None)
+        col_orig = next((c for c in df_altas_all.columns if "origen_hoja" in str(c).lower() or "origen" in str(c).lower()), "Origen_Hoja")
+
+        if col_f:
+            df_altas_all["Fecha_dt"] = parsear_fecha_robusta(df_altas_all[col_f])
+            f_mes = df_altas_all[
+                (df_altas_all["Fecha_dt"].dt.year == int(anio_op)) & 
+                (df_altas_all["Fecha_dt"].dt.month == int(mes_op))
             ].copy()
-            if not altas_mes.empty:
-                altas_periodo_set = set(pd.to_numeric(altas_mes[col_cod_altas], errors="coerce").dropna().astype("Int64").tolist())
+
+            if col_est and "Estado" in f_mes.columns:
+                f_mes = f_mes[f_mes["Estado"].astype(str).str.strip().str.upper() != "CIERRE DEFINITIVO"]
+
+            if not f_mes.empty and col_orig in f_mes.columns:
+                f_mes["_orig_clean"] = f_mes[col_orig].astype(str).str.strip().str.casefold()
+                
+                crea_rows = f_mes[f_mes["_orig_clean"] == "creacion"]
+                acti_rows = f_mes[f_mes["_orig_clean"] == "activacion"]
+                inac_rows = f_mes[f_mes["_orig_clean"] == "inactivacion"]
+
+                altas_nuevas_set = set(pd.to_numeric(crea_rows[col_c], errors="coerce").dropna().astype("Int64").tolist())
+                activacion_bruta_set = set(pd.to_numeric(acti_rows[col_c], errors="coerce").dropna().astype("Int64").tolist())
+                inactivaciones_set = set(pd.to_numeric(inac_rows[col_c], errors="coerce").dropna().astype("Int64").tolist())
+
+                reactivaciones_set = (activacion_bruta_set - altas_nuevas_set) - inactivaciones_set
+                altas_nuevas_set = altas_nuevas_set - inactivaciones_set
 
     df_vta_prep = preparar_ventas_ccc(df_vta, df_ausencias, anio_op, mes_op, dia_matinal)
     ventas_periodo = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else df_vta_prep.copy()
@@ -226,9 +254,10 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
             sr_u = universo[col_ruta_u]
             if isinstance(sr_u, pd.DataFrame):
                 sr_u = sr_u.iloc[:, 0]
-            universo["DiaVisita"] = sr_u.apply(extraer_dia_de_ruta)
+            universo["DiaVisita"] = extraer_dia_de_ruta_vectorial(sr_u)
         else:
-            universo["DiaVisita"] = "SIN DÍA"
+            if "DiaVisita" not in universo.columns:
+                universo["DiaVisita"] = "SIN DÍA"
 
         cli_col_u = next((c for c in ["Codigo", "Cliente", "NroCliente", "CodCliente"] if c in universo.columns), universo.columns[0])
         scli_u = universo[cli_col_u]
@@ -241,9 +270,11 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
         universo = universo[universo["CodVendedor"] != 20]
 
     if not universo.empty:
-        universo["Es_Alta_Periodo"] = universo["Cliente"].isin(altas_periodo_set)
+        universo["Es_Alta_Periodo"] = universo["Cliente"].isin(altas_nuevas_set)
+        universo["Es_Reactivacion"] = universo["Cliente"].isin(reactivaciones_set)
     else:
         universo["Es_Alta_Periodo"] = False
+        universo["Es_Reactivacion"] = False
 
     if not universo.empty and not clientes_g.empty:
         universo = universo.merge(clientes_g[["Cliente", "Es_CCC"]], on="Cliente", how="left")
@@ -251,27 +282,34 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     else:
         universo["Es_CCC"] = False
 
+    excluidos_set = altas_nuevas_set.union(reactivaciones_set)
+
     cartera_matriz = universo.groupby(["CodVendedor", "Taxonomia"], as_index=False).agg(
         Cartera_Total=("Cliente", "count"),
         Altas=("Es_Alta_Periodo", lambda x: int(x.sum())),
-        Cartera_Neta=("Es_Alta_Periodo", lambda x: int((~x).sum())),
+        Reactivaciones=("Es_Reactivacion", lambda x: int(x.sum())),
+        Cartera_Neta=("Cliente", lambda x: int(len(x) - x.isin(excluidos_set).sum())),
         CCC=("Es_CCC", lambda x: int(x.sum()))
-    ) if not universo.empty and "CodVendedor" in universo.columns else pd.DataFrame(columns=["CodVendedor", "Taxonomia", "Cartera_Total", "Altas", "Cartera_Neta", "CCC"])
+    ) if not universo.empty and "CodVendedor" in universo.columns else pd.DataFrame(columns=["CodVendedor", "Taxonomia", "Cartera_Total", "Altas", "Reactivaciones", "Cartera_Neta", "CCC"])
 
     vendedores_df = pd.DataFrame()
-    col_c_v = next((c for c in ["Codigo_Vendedor", "CodVend", "CodVendedor"] if c in vendedores.columns), vendedores.columns[0])
-    col_n_v = next((c for c in ["Nombre_Vendedor", "Nombre"] if c in vendedores.columns), vendedores.columns[1])
-    col_s_v = next((c for c in ["Supervisor", "SUP"] if c in vendedores.columns), vendedores.columns[2] if len(vendedores.columns) > 2 else vendedores.columns[1])
+    vendedores_seguro = vendedores.copy() if vendedores is not None and not vendedores.empty else pd.DataFrame(columns=["Codigo_Vendedor", "Nombre_Vendedor", "Supervisor"])
+    if vendedores_seguro.empty:
+        vendedores_seguro = pd.DataFrame({"Codigo_Vendedor": [0], "Nombre_Vendedor": ["SIN ASIGNAR"], "Supervisor": ["GENERAL"]})
 
-    sv_c = vendedores[col_c_v]
+    col_c_v = next((c for c in ["Codigo_Vendedor", "CodVend", "CodVendedor"] if c in vendedores_seguro.columns), vendedores_seguro.columns[0])
+    col_n_v = next((c for c in ["Nombre_Vendedor", "Nombre"] if c in vendedores_seguro.columns), vendedores_seguro.columns[1] if len(vendedores_seguro.columns) > 1 else vendedores_seguro.columns[0])
+    col_s_v = next((c for c in ["Supervisor", "SUP"] if c in vendedores_seguro.columns), vendedores_seguro.columns[2] if len(vendedores_seguro.columns) > 2 else vendedores_seguro.columns[0])
+
+    sv_c = vendedores_seguro[col_c_v]
     if isinstance(sv_c, pd.DataFrame): sv_c = sv_c.iloc[:, 0]
     vendedores_df["CodVendedor"] = pd.to_numeric(sv_c, errors="coerce").astype("Int64")
     vendedores_df = vendedores_df[vendedores_df["CodVendedor"] != 20]
 
-    sv_n = vendedores[col_n_v]
+    sv_n = vendedores_seguro[col_n_v]
     if isinstance(sv_n, pd.DataFrame): sv_n = sv_n.iloc[:, 0]
     vendedores_df["Nombre"] = sv_n.fillna("").astype(str).str.strip()
-    sv_s = vendedores[col_s_v]
+    sv_s = vendedores_seguro[col_s_v]
     if isinstance(sv_s, pd.DataFrame): sv_s = sv_s.iloc[:, 0]
     vendedores_df["SUP"] = sv_s.fillna("").astype(str).str.strip()
     vendedores_df = vendedores_df.drop_duplicates("CodVendedor")
@@ -283,7 +321,7 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
     matriz_base = vendedores_df.merge(taxonomias_df, on="_k").drop(columns="_k")
 
     reporte = matriz_base.merge(cartera_matriz, on=["CodVendedor", "Taxonomia"], how="left")
-    reporte[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]] = reporte[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]].fillna(0).astype("Int64")
+    reporte[["Cartera_Total", "Altas", "Reactivaciones", "Cartera_Neta", "CCC"]] = reporte[["Cartera_Total", "Altas", "Reactivaciones", "Cartera_Neta", "CCC"]].fillna(0).astype("Int64")
     reporte["NC"] = (reporte["Cartera_Total"] - reporte["CCC"]).clip(lower=0).astype("Int64")
     
     reporte["% Cartera"] = (reporte["CCC"] / reporte["Cartera_Neta"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
@@ -298,14 +336,13 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
 
     columnas_salida = [
         "CodVendedor", "Nombre", "SUP", "Taxonomia", 
-        "Cartera_Total", "Altas", "Cartera_Neta", 
+        "Cartera_Total", "Altas", "Reactivaciones", "Cartera_Neta", 
         "Objetivo_CCC", "CCC", "NC", "% Cartera", "% Objetivo"
     ]
     return reporte[columnas_salida], df_det_nc
 
 @st.cache_data(show_spinner=False)
 def _calcular_base_ccc_cached(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal, huella_datos):
-    """Caché optimizada de Streamlit basada en huella digital para CCC."""
     return _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal)
 
 def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_param, filtros_globales=None):
@@ -320,7 +357,7 @@ def generar_reporte_ccc_taxonomia(df_vta, df_universo, vendedores, hoja_ccc_para
     for k in keys_to_delete:
         del st.session_state[k]
 
-    clave_cache_estado = f"_ccc_motor_cache_v54_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
+    clave_cache_estado = f"_ccc_motor_cache_v68_{anio_op}_{mes_op}_{dia_matinal}_{sup_filtro}"
     if clave_cache_estado not in st.session_state:
         rep, det = _calcular_base_ccc_cached(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op, mes_op, dia_matinal, huella_datos)
         st.session_state[clave_cache_estado] = (rep, det)
@@ -357,6 +394,12 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         return
 
     df_base_cli = df_clientes_det.copy()
+    
+    if "Es_Reactivacion" not in df_base_cli.columns:
+        df_base_cli["Es_Reactivacion"] = False
+    if "Es_Alta_Periodo" not in df_base_cli.columns:
+        df_base_cli["Es_Alta_Periodo"] = False
+
     if supervisores_seleccionados and "SUP" in df_base_cli.columns:
         df_base_cli = df_base_cli[df_base_cli["SUP"].astype(str).str.strip().isin([str(s).strip() for s in supervisores_seleccionados])].copy()
 
@@ -398,13 +441,18 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     df_cli_filtrado = df_base_cli[mask_cli].copy()
 
     if not df_cli_filtrado.empty:
+        altas_nuevas_set_f = set(df_cli_filtrado[df_cli_filtrado["Es_Alta_Periodo"] == True]["Cliente"].dropna().tolist())
+        reactivaciones_set_f = set(df_cli_filtrado[df_cli_filtrado["Es_Reactivacion"] == True]["Cliente"].dropna().tolist())
+        excluidos_set_f = altas_nuevas_set_f.union(reactivaciones_set_f)
+
         reporte_filtrado = df_cli_filtrado.groupby(["CodVendedor", "Nombre", "SUP", "Taxonomia"], as_index=False).agg(
             Cartera_Total=("Cliente", "count"),
             Altas=("Es_Alta_Periodo", lambda x: int(x.sum())),
-            Cartera_Neta=("Es_Alta_Periodo", lambda x: int((~x).sum())),
+            Reactivaciones=("Es_Reactivacion", lambda x: int(x.sum())),
+            Cartera_Neta=("Cliente", lambda x: int(len(x) - x.isin(excluidos_set_f).sum())),
             CCC=("Es_CCC", lambda x: int(x.sum()))
         )
-        reporte_filtrado[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]] = reporte_filtrado[["Cartera_Total", "Altas", "Cartera_Neta", "CCC"]].fillna(0).astype("Int64")
+        reporte_filtrado[["Cartera_Total", "Altas", "Reactivaciones", "Cartera_Neta", "CCC"]] = reporte_filtrado[["Cartera_Total", "Altas", "Reactivaciones", "Cartera_Neta", "CCC"]].fillna(0).astype("Int64")
         reporte_filtrado["NC"] = (reporte_filtrado["Cartera_Total"] - reporte_filtrado["CCC"]).clip(lower=0).astype("Int64")
         reporte_filtrado["% Cartera"] = (reporte_filtrado["CCC"] / reporte_filtrado["Cartera_Neta"].replace(0, pd.NA)).mul(100).fillna(0.0).round(2)
 
@@ -416,17 +464,19 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         reporte_filtrado["CodVendedor"] = pd.to_numeric(reporte_filtrado["CodVendedor"], errors="coerce").astype("Int64")
         reporte_filtrado = reporte_filtrado.sort_values(by=["CodVendedor", "Taxonomia"], ascending=[True, True]).reset_index(drop=True)
     else:
-        reporte_filtrado = pd.DataFrame(columns=["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Altas", "Cartera_Neta", "Objetivo_CCC", "CCC", "NC", "% Cartera", "% Objetivo"])
+        reporte_filtrado = pd.DataFrame(columns=["CodVendedor", "Nombre", "SUP", "Taxonomia", "Cartera_Total", "Altas", "Reactivaciones", "Cartera_Neta", "Objetivo_CCC", "CCC", "NC", "% Cartera", "% Objetivo"])
 
     tot_cartera = int(df_cli_filtrado["Cliente"].count()) if not df_cli_filtrado.empty else 0
     tot_altas = int(df_cli_filtrado["Es_Alta_Periodo"].sum()) if not df_cli_filtrado.empty and "Es_Alta_Periodo" in df_cli_filtrado.columns else 0
-    tot_neta = tot_cartera - tot_altas
+    tot_reactivaciones = int(df_cli_filtrado["Es_Reactivacion"].sum()) if not df_cli_filtrado.empty and "Es_Reactivacion" in df_cli_filtrado.columns else 0
+    tot_neta = tot_cartera - (tot_altas + tot_reactivaciones)
 
-    cartera_tax = df_cli_filtrado.groupby("Taxonomia")["Cliente"].count() if not df_cli_filtrado.empty else pd.Series()
-    cart_a = cartera_tax.get("A", 0)
-    cart_b = cartera_tax.get("B", 0)
-    cart_c = cartera_tax.get("C", 0)
-    cart_d = cartera_tax.get("D", 0)
+    altas_react_mask = (df_cli_filtrado["Es_Alta_Periodo"] == True) | (df_cli_filtrado["Es_Reactivacion"] == True) if not df_cli_filtrado.empty else pd.Series(dtype=bool)
+    neta_tax_df = df_cli_filtrado[~altas_react_mask].groupby("Taxonomia")["Cliente"].count() if not df_cli_filtrado.empty else pd.Series()
+    net_a = int(neta_tax_df.get("A", 0))
+    net_b = int(neta_tax_df.get("B", 0))
+    net_c = int(neta_tax_df.get("C", 0))
+    net_d = int(neta_tax_df.get("D", 0))
 
     tot_obj_val = int(reporte_filtrado["Objetivo_CCC"].sum()) if not reporte_filtrado.empty and "Objetivo_CCC" in reporte_filtrado.columns else 0
     obj_tax = reporte_filtrado.groupby("Taxonomia")["Objetivo_CCC"].sum() if not reporte_filtrado.empty else pd.Series()
@@ -443,17 +493,11 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     cant_d = tot_tax_ccc.get("D", 0)
 
     cob_total = (total_ccc_val / tot_neta * 100) if tot_neta > 0 else 0.0
-    
-    neta_tax = df_cli_filtrado[df_cli_filtrado["Es_Alta_Periodo"] == False].groupby("Taxonomia")["Cliente"].count() if not df_cli_filtrado.empty else pd.Series()
-    neta_a = neta_tax.get("A", 0)
-    neta_b = neta_tax.get("B", 0)
-    neta_c = neta_tax.get("C", 0)
-    neta_d = neta_tax.get("D", 0)
 
-    cob_a = (cant_a / neta_a * 100) if neta_a > 0 else 0.0
-    cob_b = (cant_b / neta_b * 100) if neta_b > 0 else 0.0
-    cob_c = (cant_c / neta_c * 100) if neta_c > 0 else 0.0
-    cob_d = (cant_d / neta_d * 100) if neta_d > 0 else 0.0
+    cob_a = (cant_a / net_a * 100) if net_a > 0 else 0.0
+    cob_b = (cant_b / net_b * 100) if net_b > 0 else 0.0
+    cob_c = (cant_c / net_c * 100) if net_c > 0 else 0.0
+    cob_d = (cant_d / net_d * 100) if net_d > 0 else 0.0
 
     st.markdown("""
         <style>
@@ -465,11 +509,13 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
         </style>
     """, unsafe_allow_html=True)
 
-    cols_r1 = st.columns(2)
+    cols_r1 = st.columns(3)
     with cols_r1[0]:
         st.markdown(_tarjeta_metrica_compacta_html("CARTERA TOTAL", f"{tot_cartera:,.0f}", "#38bdf8", "2px"), unsafe_allow_html=True)
     with cols_r1[1]:
-        st.markdown(_tarjeta_metrica_compacta_html("ALTAS", f"{tot_altas:,.0f}", "#38bdf8", "2px"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("ALTAS (NUEVOS)", f"{tot_altas:,.0f}", "#38bdf8", "2px"), unsafe_allow_html=True)
+    with cols_r1[2]:
+        st.markdown(_tarjeta_metrica_compacta_html("REACTIVACIONES", f"{tot_reactivaciones:,.0f}", "#38bdf8", "2px"), unsafe_allow_html=True)
 
     st.divider()
 
@@ -477,13 +523,13 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
     with cols_r2_net[0]:
         st.markdown(_tarjeta_metrica_compacta_html("CARTERA NETA", f"{tot_neta:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
     with cols_r2_net[1]:
-        st.markdown(_tarjeta_metrica_compacta_html("CARTERA A", f"{cart_a:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("NETA TAX. A", f"{net_a:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
     with cols_r2_net[2]:
-        st.markdown(_tarjeta_metrica_compacta_html("CARTERA B", f"{cart_b:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("NETA TAX. B", f"{net_b:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
     with cols_r2_net[3]:
-        st.markdown(_tarjeta_metrica_compacta_html("CARTERA C", f"{cart_c:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("NETA TAX. C", f"{net_c:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
     with cols_r2_net[4]:
-        st.markdown(_tarjeta_metrica_compacta_html("CARTERA D", f"{cart_d:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
+        st.markdown(_tarjeta_metrica_compacta_html("NETA TAX. D", f"{net_d:,.0f}", "#ffffff", "1px"), unsafe_allow_html=True)
 
     st.divider()
 
@@ -527,12 +573,11 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
 
     columnas_visuales_ccc = [
         "CodVendedor", "Nombre", "SUP", "Taxonomia", 
-        "Cartera_Total", "Altas", "Cartera_Neta", 
+        "Cartera_Total", "Altas", "Reactivaciones", "Cartera_Neta", 
         "Objetivo_CCC", "CCC", "NC", "% Cartera", "% Objetivo"
     ]
     reporte_render = reporte_filtrado[columnas_visuales_ccc].copy().reset_index(drop=True)
 
-    # DataFrames separados: visualización con formato y Excel con números puros
     reporte_render_excel = reporte_render.copy()
     reporte_render_display = reporte_render.copy()
 
@@ -543,20 +588,19 @@ def render_fragmento_interactivo_ccc(reporte_ccc_base, supervisores_seleccionado
 
     if not reporte_render_display.empty:
         gb = GridOptionsBuilder.from_dataframe(reporte_render_display)
-        gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=130)
+        gb.configure_default_column(filterable=True, sortable=True, resizable=True, minWidth=120)
         
         gb.configure_column("CodVendedor", headerName="Cód. Vend", width=90, valueFormatter="x != null ? Number(x).toFixed(0) : ''")
         gb.configure_column("Nombre", headerName="Preventista", minWidth=160)
         gb.configure_column("SUP", headerName="SUP", width=75)
         gb.configure_column("Taxonomia", headerName="Tax", width=70)
         gb.configure_column("Cartera_Total", headerName="Cartera Total", width=100)
-        gb.configure_column("Altas", headerName="Altas", width=80)
+        gb.configure_column("Altas", headerName="Altas", width=70)
+        gb.configure_column("Reactivaciones", headerName="Reactiv.", width=90)
         gb.configure_column("Cartera_Neta", headerName="Cartera Neta", width=100)
         gb.configure_column("Objetivo_CCC", headerName="Objetivo CCC", width=105)
         gb.configure_column("CCC", headerName="CCC", width=80)
         gb.configure_column("NC", headerName="NC", width=80)
-        
-        val_fmt = "x != null ? Number(x).toLocaleString('es-AR', {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0,00'"
         
         gb.configure_column("% Cartera", headerName="% Cartera", width=100)
         gb.configure_column("% Objetivo", headerName="% Objetivo", width=110)

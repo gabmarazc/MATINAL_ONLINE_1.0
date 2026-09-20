@@ -1,6 +1,7 @@
 # app.py
 import streamlit as st
 import pandas as pd
+import time
 from datetime import date, timedelta
 from data_loader import cargar_todas_las_bases
 from modules.parametros import render_parametros_view, es_entorno_local, obtener_tabla_parametros
@@ -109,30 +110,32 @@ def main():
         st.session_state["sel_dia_anterior"] = def_ant
 
     st.sidebar.header("⚙️ Control de Datos")
-    if st.sidebar.button("🔄 Recargar Bases y Limpiar Caché", width='stretch'):
+    
+    # Botones separados para Limpiar Caché y Recargar Bases con forzado de Excel
+    if st.sidebar.button("🧹 Limpiar Caché", width='stretch'):
         st.cache_data.clear()
         st.cache_resource.clear()
-        
-        auth_status = st.session_state.get("autenticado", False)
-        nivel_status = st.session_state.get("nivel_usuario", None)
-        
-        st.session_state.clear()
-        
-        st.session_state["autenticado"] = auth_status
-        st.session_state["nivel_usuario"] = nivel_status
-        
-        h, dv, da = calcular_fechas_operativas_default()
-        st.session_state["sel_dia_matinal"] = h
-        st.session_state["sel_dia_venta"] = dv
-        st.session_state["sel_dia_anterior"] = da
-        st.session_state["sel_sup_op"] = "TODOS"
-        
-        st.sidebar.success("¡Caché borrada y bases actualizadas!")
+        st.sidebar.success("¡Caché purgada con éxito!")
+        st.rerun()
+
+    if st.sidebar.button("🔄 Recargar Bases", width='stretch'):
+        t_inicio = time.time()
+        with st.status("Sincronizando motores de datos y SQLite...", expanded=False) as status:
+            st.write("Leyendo archivos fuente Excel...")
+            st.session_state["bases"] = cargar_todas_las_bases(forzar=True)
+            t_fin = time.time()
+            duracion = t_fin - t_inicio
+            status.update(label=f"¡Bases recargadas desde disco en {duracion:.2f} segundos!", state="complete", expanded=False)
         st.rerun()
 
     if "bases" not in st.session_state or st.session_state["bases"] is None:
-        with st.spinner("Cargando bases de datos y ausencias..."):
+        t_inicio = time.time()
+        with st.status("Cargando bases de datos y ausencias...", expanded=False) as status:
+            st.write("Conectando con motores de almacenamiento...")
             st.session_state["bases"] = cargar_todas_las_bases()
+            t_fin = time.time()
+            duracion = t_fin - t_inicio
+            status.update(label=f"¡Bases cargadas exitosamente en {duracion:.2f} segundos!", state="complete", expanded=False)
 
     datos = st.session_state["bases"]
 
@@ -151,10 +154,14 @@ def main():
             up_rutas = st.file_uploader("Subir Archivo RUTAS (.xlsx)", type=["xlsx", "xls"], key="up_rutas")
 
         if up_vta and up_univ and up_rutas and not st.session_state.get("bd_inicializada", False):
-            with st.spinner("Procesando y guardando archivos en SQLite..."):
+            t_inicio = time.time()
+            with st.status("Procesando y guardando archivos en SQLite...", expanded=False) as status:
                 archivos_dict = {"vta": up_vta, "universo": up_univ, "rutas": up_rutas}
                 db.inicializar_bd_desde_excel(archivos_dict)
                 st.session_state["bd_inicializada"] = True
+                t_fin = time.time()
+                duracion = t_fin - t_inicio
+                status.update(label=f"¡Base de datos inicializada en {duracion:.2f} segundos!", state="complete", expanded=False)
             
             st.success("¡Base de datos inicializada con éxito! Recargando aplicación...")
             st.rerun()
@@ -249,11 +256,14 @@ def main():
     
     sup_sel_efectivo = supervisores_disponibles[1:] if filtros_globales["supervisor"] == "TODOS" else [filtros_globales["supervisor"]]
     
-    # Generar reportes de cobertura
+    # Medición del tiempo de procesamiento analítico previo al renderizado de pestañas
+    t_proc_inicio = time.time()
     rep_cob, marcas_lst, mapa_obj = generar_reporte_cobertura_marca(df_vta, df_universo, df_vend_maestro, df_marcas_maestro, filtros_globales)
     rep_innov, innovaciones_lst, df_innov_master = generar_reporte_cobertura_innovacion(df_vta, df_universo, df_vend_maestro, filtros_globales)
+    t_proc_fin = time.time()
+    duracion_procesamiento = t_proc_fin - t_proc_inicio
 
-    # Renderizado de pestañas acorde al perfil activo
+    # Renderizado de pestañas acorde al perfil activo con telemetría de procesamiento
     if "Nivel 1" in nivel_actual:
         with tab1:
             render_rep_gerencial(df_vta, df_universo, df_rutas, df_ausencias, filtros_globales)
@@ -302,6 +312,9 @@ def main():
             dibujar_pestana_cobertura_innovacion(rep_innov, innovaciones_lst, df_innov_master, sup_sel_efectivo)
         with tab5:
             render_rep_mn(df_vta, df_universo, filtros_globales)
+
+    # Toast informativo discreto con el tiempo de procesamiento global de los motores analíticos
+    st.toast(f"⚡ Procesamiento analítico completado en {duracion_procesamiento:.2f} segundos", icon="⏱️")
 
 if __name__ == "__main__":
     main()

@@ -4,16 +4,16 @@ import urllib.parse
 import unicodedata
 import streamlit as st
 import pandas as pd
+import numpy as np
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode, JsCode
 from modules import database as db
 from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta_vectorial, tarjeta_metrica_html
 
 def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_matinal):
-    """
-    Pipeline de ventas nativo para Cobertura por Marca:
-    Aplica exclusivamente los filtros de cabecera válidos sin agrupar ni descartar filas por segmentos de kilos.
-    """
-    df = df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame()
+    """Pipeline de ventas unificado para Cobertura por Marca consumiendo el Master DataFrame Corporativo con vectorización."""
+    df_corp = db.obtener_df_maestro_corporativo()
+    df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
+    
     if df.empty:
         return df
 
@@ -60,19 +60,18 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
     mes_sig = 1 if mes_operativo == 12 else mes_operativo + 1
     anio_sig = anio_operativo + 1 if mes_operativo == 12 else anio_operativo
 
-    def asignar_periodo(row):
-        ac, mc = row["AñoCarga"], row["MesCarga"]
-        ae, me = row["AñoEntrega"], row["MesEntrega"]
-        
-        if ac == anio_ant and mc == mes_ant and ae == anio_operativo and me == mes_operativo:
-            return "Arrastre"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_operativo and me == mes_operativo:
-            return "Actual"
-        elif ac == anio_operativo and mc == mes_operativo and ae == anio_sig and me == mes_sig:
-            return "Futuro"
-        return "Fuera de Periodo"
+    ac, mc = df["AñoCarga"], df["MesCarga"]
+    ae, me = df["AñoEntrega"], df["MesEntrega"]
+    
+    cond_arr = (ac == anio_ant) & (mc == mes_ant) & (ae == anio_operativo) & (me == mes_operativo)
+    cond_act = (ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_operativo) & (me == mes_operativo)
+    cond_fut = (ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_sig) & (me == mes_sig)
 
-    df["Periodo"] = df.apply(asignar_periodo, axis=1)
+    df["Periodo"] = np.select(
+        [cond_arr, cond_act, cond_fut],
+        ["Arrastre", "Actual", "Futuro"],
+        default="Fuera de Periodo"
+    )
 
     col_m = next((c for c in ["Marca", "MARCA", "marca"] if c in df.columns), None)
     df["Marca"] = df[col_m].fillna("").astype(str).str.strip().str.upper() if col_m else "SIN MARCA"
@@ -80,7 +79,7 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
     return df
 
 def _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, anio_op, mes_op, dia_matinal):
-    """Motor de cálculo base de Cobertura por Marca (aislado para ser cacheado inteligentemente)."""
+    """Motor de cálculo base de Cobertura por Marca optimizado."""
     df_vta_prep = preparar_ventas_cobertura_marca(df_vtas_operativo, anio_op, mes_op, dia_matinal)
 
     df_vend = vendedores.copy() if vendedores is not None and not vendedores.empty else pd.DataFrame(columns=["CodVend", "Nombre", "SUP"])
@@ -174,7 +173,6 @@ def _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df
 
 @st.cache_data(show_spinner=False)
 def _calcular_base_cob_marca_cached(df_vtas_operativo, df_cartera, vendedores, df_marcas, anio_op, mes_op, dia_matinal, huella_datos):
-    """Caché optimizada de Streamlit basada en huella digital para Cobertura por Marca."""
     return _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, anio_op, mes_op, dia_matinal)
 
 def generar_reporte_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df_marcas, filtros_globales=None):
@@ -318,7 +316,6 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
     columnas_finales = ["CodVendedor", "Nombre", "Cartera", "SUP"] + [m for m in m_selec_ordenadas if m in reporte_matriz.columns]
     df_render = reporte_matriz[columnas_finales].copy()
 
-    # DataFrames separados: Excel con números puros, pantalla con sufijo %
     df_render_excel = df_render.copy()
     df_render_display = df_render.copy()
     for marca in m_selec_ordenadas:

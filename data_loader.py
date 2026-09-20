@@ -39,63 +39,57 @@ def cargar_ausencias_remotas(url_ausencias):
     except Exception:
         return df_vacio
 
-def sincronizar_archivos_excel_locales():
-    """Detecta archivos Excel operativos y maestros en data/ o en la raíz y actualiza SQLite si fueron modificados o falta la tabla altas."""
+def sincronizar_archivos_excel_locales(forzar=False):
+    """Sincroniza archivos Excel locales a SQLite. Si forzar=True, reconstruye las tablas desde los Excel encontrados."""
+    db_path = "data/matinal.db"
+    if os.path.exists(db_path) and not forzar:
+        return
+
     posibles_rutas = ["data", "."]
-    archivos_esperados = {
-        "vta": ["VTA.xlsx", "vta.xlsx", "VTA.xls"],
-        "universo": ["UNIVERSO.xlsx", "universo.xlsx", "UNIVERSO.xls"],
-        "rutas": ["RUTAS.xlsx", "rutas.xlsx", "RUTAS.xls"],
-        "maestro_marcas_cebe": ["MAESTRO_MARCAS_CEBE.xlsx", "maestro_marcas_cebe.xlsx", "marcas_cebe.xlsx"],
-        "altas": ["ALTAS.xlsx", "altas.xlsx", "ALTAS.xls"]
-    }
-    
     archivos_encontrados = {}
-    for tabla, nombres in archivos_esperados.items():
-        for d in posibles_rutas:
-            for n in nombres:
-                ruta = os.path.join(d, n)
-                if os.path.exists(ruta):
-                    archivos_encontrados[tabla] = ruta
-                    break
-            if tabla in archivos_encontrados:
-                break
+    
+    mapeo_claves = {
+        "vta": ["vta"],
+        "universo": ["universo"],
+        "rutas": ["ruta"],
+        "altas": ["alta"],
+        "maestro_vendedores": ["vendedor", "maestro_vendedores"],
+        "maestro_segmentos": ["segmento", "maestro_segmentos"],
+        "maestro_ccc": ["ccc", "maestro_ccc"],
+        "maestro_marcas_cebe": ["cebe", "marcas_cebe", "maestro_marcas_cebe"],
+        "parametros_marcas": ["parametros_marcas", "parametros", "parametro_marca"],
+        "maestro_innovaciones": ["innovacion", "innovaciones", "maestro_innovaciones"]
+    }
 
-    if "vta" in archivos_encontrados:
+    for d in posibles_rutas:
+        if not os.path.exists(d):
+            continue
         try:
-            db_path = "data/matinal.db"
-            mtime_vta = os.path.getmtime(archivos_encontrados["vta"])
-            mtime_db = os.path.getmtime(db_path) if os.path.exists(db_path) else 0
-            
-            mtime_cebe = os.path.getmtime(archivos_encontrados["maestro_marcas_cebe"]) if "maestro_marcas_cebe" in archivos_encontrados else 0
-            mtime_altas = os.path.getmtime(archivos_encontrados["altas"]) if "altas" in archivos_encontrados else 0
-
-            # Verificar si la tabla 'altas' existe físicamente en SQLite
-            conn = db.obtener_conexion()
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='altas'")
-            tabla_altas_existe = cursor.fetchone() is not None
-            conn.close()
-
-            # Forzar actualización si algún archivo es más nuevo que la BD, si la BD no existe, o si la tabla altas no fue creada
-            if (mtime_vta > mtime_db or 
-                mtime_cebe > mtime_db or 
-                mtime_altas > mtime_db or 
-                mtime_db == 0 or 
-                not tabla_altas_existe):
+            for archivo in os.listdir(d):
+                if not archivo.lower().endswith(('.xlsx', '.xls')):
+                    continue
+                ruta_completa = os.path.join(d, archivo)
+                if os.path.isdir(ruta_completa):
+                    continue
                 
-                dict_para_cargar = {}
-                for t, r in archivos_encontrados.items():
-                    dict_para_cargar[t] = open(r, "rb")
-                db.inicializar_bd_desde_excel(dict_para_cargar)
-                for f in dict_para_cargar.values():
-                    f.close()
+                nombre_norm = archivo.lower().replace(" ", "_").replace("-", "_")
+                
+                for tabla, keywords in mapeo_claves.items():
+                    if tabla not in archivos_encontrados:
+                        if any(kw in nombre_norm for kw in keywords):
+                            archivos_encontrados[tabla] = ruta_completa
         except Exception:
             pass
 
-def cargar_todas_las_bases():
-    """Carga optimizada de las bases operativas desde SQLite y ausencias remotas."""
-    sincronizar_archivos_excel_locales()
+    if archivos_encontrados:
+        try:
+            db.inicializar_bd_desde_excel(archivos_encontrados)
+        except Exception:
+            pass
+
+def cargar_todas_las_bases(forzar=False):
+    """Carga de bases operativas desde SQLite y ausencias remotas. Si forzar=True, re-sincroniza desde los Excel locales."""
+    sincronizar_archivos_excel_locales(forzar=forzar)
 
     df_vta = db.cargar_tabla_sql("SELECT * FROM vta")
     df_universo = db.cargar_tabla_sql("SELECT * FROM universo")
