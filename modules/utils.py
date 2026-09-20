@@ -46,8 +46,8 @@ def extraer_dia_de_ruta_vectorial(serie):
     dias_map[s_upper.str.contains("DOM", na=False)] = "DOMINGO"
     return dias_map
 
-def tarjeta_metrica_html(label, valor, border_color="#475569", font_val="1.4rem", font_lbl="0.75rem"):
-    """Genera contenedores HTML unificados para tarjetas de métricas."""
+def tarjeta_metrica_html(label, valor, border_color="#475569", font_val="1.4rem", font_lbl="0.75rem", color_valor="#f8fafc"):
+    """Genera contenedores HTML unificados para tarjetas de métricas con soporte de color dinámico para el valor."""
     return f"""
     <div style="
         background-color: #1e293b;
@@ -59,6 +59,6 @@ def tarjeta_metrica_html(label, valor, border_color="#475569", font_val="1.4rem"
         margin-bottom: 8px;
     ">
         <div style="font-size: {font_lbl}; color: #94a3b8; font-weight: 600; margin-bottom: 4px; text-transform: uppercase;">{label}</div>
-        <div style="font-size: {font_val}; color: #f8fafc; font-weight: 700;">{valor}</div>
+        <div style="font-size: {font_val}; color: {color_valor}; font-weight: 700;">{valor}</div>
     </div>
     """

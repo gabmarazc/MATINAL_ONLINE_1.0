@@ -96,7 +96,8 @@ def _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df
         df_marcas_oficial = df_marcas if df_marcas is not None else pd.DataFrame()
 
     marcas = []
-    mapa_objetivos = {}
+    mapa_objetivos_empresa = {}
+    
     if not df_marcas_oficial.empty:
         col_m = next((c for c in df_marcas_oficial.columns if str(c).strip().lower() in ["marca", "marcaupper", "descripcion_marca"]), None)
         if not col_m:
@@ -106,7 +107,7 @@ def _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df
             m = str(row.get(col_m, "")).strip().upper()
             if m and m not in ["", "NAN", "NONE", "-NO DEFINIDO-", "-NO DEFINIDO---NO DEFINIDO-"] and m not in marcas:
                 marcas.append(m)
-                mapa_objetivos[m] = 80.0
+                mapa_objetivos_empresa[m] = float(row.get("Obj_Empresa_Cobertura", 80.0) or 80.0)
 
     vtas = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_prep.empty and "Periodo" in df_vta_prep.columns else pd.DataFrame()
 
@@ -169,7 +170,7 @@ def _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df
     else:
         vtas_agrupadas = pd.DataFrame(columns=["CodVendedor", "Cliente", "Marca", "Total_Cant"])
 
-    return cartera, vtas_agrupadas, marcas, mapa_objetivos
+    return cartera, vtas_agrupadas, marcas, mapa_objetivos_empresa
 
 @st.cache_data(show_spinner=False)
 def _calcular_base_cob_marca_cached(df_vtas_operativo, df_cartera, vendedores, df_marcas, anio_op, mes_op, dia_matinal, huella_datos):
@@ -287,11 +288,6 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
 
     reporte_matriz = reporte_matriz.sort_values(by="CodVendedor").reset_index(drop=True)
 
-    colores_tarjetas = [
-        "#3b82f6", "#ef4444", "#f97316", "#eab308", "#22c55e", "#a855f7", 
-        "#ec4899", "#14b8a6", "#6366f1", "#84cc16", "#06b6d4", "#f43f5e"
-    ]
-    
     suma_cartera_global = reporte_matriz["Cartera"].sum()
     m_selec_ordenadas = [m for m in marcas if m in m_selec]
 
@@ -299,7 +295,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
         cols_obj_ui = st.columns(min(len(m_selec_ordenadas), 5))
         for idx, marca in enumerate(m_selec_ordenadas):
             col_target = cols_obj_ui[idx % len(cols_obj_ui)]
-            obj_val = mapa_objetivos.get(marca, 80.0)
+            obj_val = float(mapa_objetivos.get(marca, 80.0) or 80.0)
             
             if suma_cartera_global > 0 and marca in reporte_matriz.columns:
                 cubiertos_totales = (reporte_matriz[marca] / 100.0 * reporte_matriz["Cartera"]).sum()
@@ -307,9 +303,15 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
             else:
                 cobertura_global_pct = 0.0
                 
-            color_borde = colores_tarjetas[idx % len(colores_tarjetas)]
+            # Borde gris unificado para todas las marcas
+            color_borde = "#64748b"
+            alcanzado = cobertura_global_pct >= obj_val
+            color_valor = "#22c55e" if alcanzado else "#ef4444"
+            
             with col_target:
-                st.markdown(tarjeta_metrica_html(f"{marca} (Obj: {obj_val:g}%)", f"{cobertura_global_pct:.2f}%", color_borde, "1.4rem", "0.95rem"), unsafe_allow_html=True)
+                # Etiquetas de nombres en color blanco y negrita
+                titulo_tarjeta = f"<span style='color: #ffffff; font-weight: 700;'>{marca} (OBJ: {obj_val:g}%)</span>"
+                st.markdown(tarjeta_metrica_html(titulo_tarjeta, f"{cobertura_global_pct:.2f}%", color_borde, "1.4rem", "0.95rem", color_valor=color_valor), unsafe_allow_html=True)
             
         st.divider()
 

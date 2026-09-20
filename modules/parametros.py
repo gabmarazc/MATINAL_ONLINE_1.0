@@ -71,9 +71,9 @@ def obtener_maestro_marcas_cebe_sql(anio: str = None, mes: str = None) -> pd.Dat
     try:
         df_all = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
         if df_all is None or df_all.empty:
-            return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
+            return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes", "Obj_Pepsico_Cobertura", "Obj_Empresa_Cobertura"])
         
-        for col_nec in ["Obj_TN_Mes", "Obj_Gross_Mes"]:
+        for col_nec in ["Obj_TN_Mes", "Obj_Gross_Mes", "Obj_Pepsico_Cobertura", "Obj_Empresa_Cobertura"]:
             if col_nec not in df_all.columns:
                 df_all[col_nec] = 0.0
 
@@ -88,7 +88,7 @@ def obtener_maestro_marcas_cebe_sql(anio: str = None, mes: str = None) -> pd.Dat
             
         return df_all
     except Exception:
-        return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
+        return pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes", "Obj_Pepsico_Cobertura", "Obj_Empresa_Cobertura"])
 
 def obtener_maestro_ccc_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
     """Carga los porcentajes y objetivos de clientes CCC por taxonomía desde SQLite aplicando versionado estricto."""
@@ -374,9 +374,9 @@ def render_parametros_view(filtros_globales: dict = None):
     st.divider()
 
     # =========================================================================
-    # 3. SECCIÓN: MAESTRO MARCA - CEBE Y OBJETIVOS
+    # 3. SECCIÓN: MAESTRO MARCA - CEBE Y OBJETIVOS (INCL. COBERTURA)
     # =========================================================================
-    st.markdown("### 🏷️ 3. Maestro de Marcas, CEBE y Objetivos (Obj_TN_Mes / Obj_Gross_Mes)")
+    st.markdown("### 🏷️ 3. Maestro de Marcas, CEBE, Objetivos de TN/Gross y Cobertura (Pepsico / Empresa)")
     col5, col6 = st.columns(2)
     with col5:
         sel_anio_m = st.text_input("Año Operativo (Marcas/CEBE)", value=anio_def, key="anio_marca_cebe")
@@ -389,7 +389,7 @@ def render_parametros_view(filtros_globales: dict = None):
     with pd.ExcelWriter(output_plantilla, engine='openpyxl') as writer:
         df_plantilla = df_marcas_cebe_actual.copy()
         if df_plantilla.empty:
-            df_plantilla = pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"])
+            df_plantilla = pd.DataFrame(columns=["Anio", "Mes", "Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes", "Obj_Pepsico_Cobertura", "Obj_Empresa_Cobertura"])
         df_plantilla.to_excel(writer, index=False, sheet_name='Maestro_Marcas_CEBE')
 
     st.download_button(
@@ -417,47 +417,51 @@ def render_parametros_view(filtros_globales: dict = None):
                     nuevos_nombres_cebe[col] = "Obj_TN_Mes"
                 elif "obj_gross" in col_str or "gross" in col_str:
                     nuevos_nombres_cebe[col] = "Obj_Gross_Mes"
+                elif "pepsico" in col_str or "coberturapepsico" in col_str:
+                    nuevos_nombres_cebe[col] = "Obj_Pepsico_Cobertura"
+                elif "empresa" in col_str or "coberturaempresa" in col_str:
+                    nuevos_nombres_cebe[col] = "Obj_Empresa_Cobertura"
 
             df_nuevo_cebe = df_nuevo_cebe.rename(columns=nuevos_nombres_cebe)
 
-            for col_req in ["Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"]:
+            cols_necesarias_cebe = ["Obj_TN_Mes", "Obj_Gross_Mes", "Obj_Pepsico_Cobertura", "Obj_Empresa_Cobertura"]
+            for col_req in cols_necesarias_cebe:
                 if col_req not in df_nuevo_cebe.columns:
-                    if col_req in ["Obj_TN_Mes", "Obj_Gross_Mes"]:
-                        df_nuevo_cebe[col_req] = 0.0
-                    else:
-                        df_nuevo_cebe[col_req] = ""
-
-            df_nuevo_cebe["Obj_TN_Mes"] = pd.to_numeric(df_nuevo_cebe["Obj_TN_Mes"], errors="coerce").fillna(0.0)
-            df_nuevo_cebe["Obj_Gross_Mes"] = pd.to_numeric(df_nuevo_cebe["Obj_Gross_Mes"], errors="coerce").fillna(0.0)
-
-            cols_requeridas = ["Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes"]
-            df_nuevo_cebe = df_nuevo_cebe[cols_requeridas].copy()
-            df_nuevo_cebe = df_nuevo_cebe.dropna(subset=["Marca", "CEBE"])
-            df_nuevo_cebe["Marca"] = df_nuevo_cebe["Marca"].astype(str).str.strip()
-            df_nuevo_cebe["CEBE"] = df_nuevo_cebe["CEBE"].astype(str).str.strip()
-
-            st.write("Vista previa de Marcas, CEBE y Objetivos mapeados:", df_nuevo_cebe.head())
-
-            if st.button("📥 Registrar y Guardar Marcas/CEBE y Objetivos en Base de Datos"):
-                if not sel_mes_m or str(sel_mes_m).strip() == "":
-                    st.error("⚠️ Debe especificar un Mes Operativo válido para registrar las marcas, CEBE y objetivos.")
+                    df_nuevo_cebe[col_req] = 0.0
                 else:
-                    df_nuevo_cebe["Anio"] = str(sel_anio_m)
-                    df_nuevo_cebe["Mes"] = str(sel_mes_m)
+                    df_nuevo_cebe[col_req] = pd.to_numeric(df_nuevo_cebe[col_req], errors="coerce").fillna(0.0)
 
-                    query_check = "SELECT name FROM sqlite_master WHERE type='table' AND name='maestro_marcas_cebe'"
-                    res_check = db.cargar_tabla_sql(query_check)
+            if "Marca" not in df_nuevo_cebe.columns or "CEBE" not in df_nuevo_cebe.columns:
+                st.error("⚠️ El archivo Excel debe contener al menos las columnas 'Marca' y 'CEBE'.")
+            else:
+                cols_requeridas = ["Marca", "CEBE", "Obj_TN_Mes", "Obj_Gross_Mes", "Obj_Pepsico_Cobertura", "Obj_Empresa_Cobertura"]
+                df_nuevo_cebe = df_nuevo_cebe[[c for c in cols_requeridas if c in df_nuevo_cebe.columns]].copy()
+                df_nuevo_cebe = df_nuevo_cebe.dropna(subset=["Marca", "CEBE"])
+                df_nuevo_cebe["Marca"] = df_nuevo_cebe["Marca"].astype(str).str.strip()
+                df_nuevo_cebe["CEBE"] = df_nuevo_cebe["CEBE"].astype(str).str.strip()
 
-                    if res_check is not None and not res_check.empty:
-                        df_existente_cebe = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
-                        df_existente_cebe = df_existente_cebe[~((df_existente_cebe["Anio"].astype(str) == str(sel_anio_m)) & (df_existente_cebe["Mes"].astype(str) == str(sel_mes_m)))]
-                        df_final_cebe = pd.concat([df_existente_cebe, df_nuevo_cebe], ignore_index=True)
+                st.write("Vista previa de Marcas, CEBE y Objetivos mapeados:", df_nuevo_cebe.head())
+
+                if st.button("📥 Registrar y Guardar Marcas/CEBE y Objetivos en Base de Datos"):
+                    if not sel_mes_m or str(sel_mes_m).strip() == "":
+                        st.error("⚠️ Debe especificar un Mes Operativo válido para registrar las marcas, CEBE y objetivos.")
                     else:
-                        df_final_cebe = df_nuevo_cebe
+                        df_nuevo_cebe["Anio"] = str(sel_anio_m)
+                        df_nuevo_cebe["Mes"] = str(sel_mes_m)
 
-                    db.guardar_dataframe_sql(df_final_cebe, "maestro_marcas_cebe", if_exists='replace')
-                    st.success(f"¡Maestro Marca/CEBE y Objetivos guardado exitosamente para el período {sel_mes_m}/{sel_anio_m}!")
-                    st.rerun()
+                        query_check = "SELECT name FROM sqlite_master WHERE type='table' AND name='maestro_marcas_cebe'"
+                        res_check = db.cargar_tabla_sql(query_check)
+
+                        if res_check is not None and not res_check.empty:
+                            df_existente_cebe = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
+                            df_existente_cebe = df_existente_cebe[~((df_existente_cebe["Anio"].astype(str) == str(sel_anio_m)) & (df_existente_cebe["Mes"].astype(str) == str(sel_mes_m)))]
+                            df_final_cebe = pd.concat([df_existente_cebe, df_nuevo_cebe], ignore_index=True)
+                        else:
+                            df_final_cebe = df_nuevo_cebe
+
+                        db.guardar_dataframe_sql(df_final_cebe, "maestro_marcas_cebe", if_exists='replace')
+                        st.success(f"¡Maestro Marca/CEBE y Objetivos guardado exitosamente para el período {sel_mes_m}/{sel_anio_m}!")
+                        st.rerun()
         except Exception as e:
             st.error(f"Error al procesar el archivo Excel de Marcas/CEBE: {e}")
 

@@ -164,7 +164,7 @@ def _calcular_base_cobertura_innovacion(df_vtas_operativo, df_cartera, vendedore
         vtas["Codigo_Prod"] = pd.to_numeric(vtas["Codigo_Prod"], errors="coerce").astype("Int64")
 
         vtas = vtas[vtas["Codigo_Prod"].isin(mapa_codigo_a_innovacion.keys())].copy()
-        vtas["Innovacion"] = vtas["Codigo_Prod"].map(mapa_codigo_a_innovacion)
+        vtas["Innovacion"] = vtas["Codigo_Prod"].map(mapa_codigo_a_innovacion) if "vtata" in locals() else vtas["Codigo_Prod"].map(mapa_codigo_a_innovacion)
 
         vtas_agrupadas = vtas.groupby(["CodVendedor", "Cliente", "Innovacion"], as_index=False).agg(
             Total_Cant=("cantbase", "sum")
@@ -294,11 +294,6 @@ def render_fragmento_interactivo_cobertura_innovacion(reporte_dummy, innovacione
 
     reporte_matriz = reporte_matriz.sort_values(by="CodVendedor").reset_index(drop=True)
 
-    colores_tarjetas = [
-        "#8b5cf6", "#3b82f6", "#ef4444", "#f97316", "#eab308", "#22c55e", 
-        "#ec4899", "#14b8a6", "#6366f1", "#84cc16", "#06b6d4", "#f43f5e"
-    ]
-    
     suma_cartera_global = reporte_matriz["Cartera"].sum()
     i_selec_ordenadas = [inv for inv in innovaciones if inv in i_selec]
 
@@ -314,9 +309,13 @@ def render_fragmento_interactivo_cobertura_innovacion(reporte_dummy, innovacione
             else:
                 cobertura_global_pct = 0.0
                 
-            color_borde = colores_tarjetas[idx % len(colores_tarjetas)]
+            color_borde = "#64748b"
+            alcanzado = cobertura_global_pct >= obj_val
+            color_valor = "#22c55e" if alcanzado else "#ef4444"
+            
             with col_target:
-                st.markdown(tarjeta_metrica_html(f"{inv} (Obj: {obj_val:g}%)", f"{cobertura_global_pct:.2f}%", color_borde, "1.4rem", "0.95rem"), unsafe_allow_html=True)
+                titulo_tarjeta = f"<span style='color: #ffffff; font-weight: 700;'>{inv} (OBJ: {obj_val:g}%)</span>"
+                st.markdown(tarjeta_metrica_html(titulo_tarjeta, f"{cobertura_global_pct:.2f}%", color_borde, "1.4rem", "0.95rem", color_valor=color_valor), unsafe_allow_html=True)
             
         st.divider()
 
