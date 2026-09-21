@@ -282,7 +282,7 @@ def main():
         with tab6:
             render_rep_mn(df_vta, df_universo, filtros_globales)
         with tab7:
-            render_rep_vespertina(df_vta, filtros_globales)
+            render_rep_vespertina(df_vta, df_universo, filtros_globales)
         if es_local:
             with tab8:
                 render_parametros_view(filtros_globales)
@@ -305,7 +305,7 @@ def main():
         with tab6:
             render_rep_mn(df_vta, df_universo, filtros_globales)
         with tab7:
-            render_rep_vespertina(df_vta, filtros_globales)
+            render_rep_vespertina(df_vta, df_universo, filtros_globales)
         with tab8:
             render_rep_obj_kilos(df_vta, filtros_globales)
     else:
@@ -321,7 +321,7 @@ def main():
         with tab5:
             render_rep_mn(df_vta, df_universo, filtros_globales)
         with tab6:
-            render_rep_vespertina(df_vta, filtros_globales)
+            render_rep_vespertina(df_vta, df_universo, filtros_globales)
 
     # Toast informativo discreto con el tiempo de procesamiento global de los motores analíticos
     st.toast(f"⚡ Procesamiento analítico completado en {duracion_procesamiento:.2f} segundos", icon="⏱️")
