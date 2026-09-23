@@ -11,7 +11,11 @@ from modules import database as db
 from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta, extraer_dia_de_ruta_vectorial
 
 def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
-    """Pipeline de ventas unificado para CCC consumiendo el Master DataFrame Corporativo con alta vectorización."""
+    """
+    Pipeline de ventas optimizado para CCC derivado del DataFrame Maestro N1 (EMPLEADOS).
+    Aplica los filtros N2: PEPSICO, COMODATOS, DEPOSITO, MATINAL y PERIODO.
+    """
+    # Nivel 1: Obtención del DataFrame corporativo base con filtro EMPLEADOS aplicado
     df_corp = db.obtener_df_maestro_corporativo()
     df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
     
@@ -27,6 +31,7 @@ def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia
     else:
         df["ImporteNeto"] = 0.0
 
+    # Nivel 2: Filtro COMODATOS (Exclusión de comodatos y préstamos)
     if "TipoDeVenta" in df.columns:
         tipos_excluidos = [
             "Comodato Devolución", 
@@ -36,6 +41,7 @@ def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia
         ]
         df = df[~df["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)]
 
+    # Nivel 2: Filtro PEPSICO (Selección exclusiva de proveedor PepsiCo)
     if "Proveedor" in df.columns:
         df = df[
             df["Proveedor"]
@@ -46,13 +52,10 @@ def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia
             .str.contains("PEPSICO", na=False)
         ]
 
-    if "Subramo" in df.columns:
-        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
-        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
-
     df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
     df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
 
+    # Nivel 2: Filtro MATINAL (Exclusión de registros cuya fecha de carga sea igual o posterior al Día Matinal)
     dia_matinal_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
     if pd.notna(dia_matinal_dt):
         es_mes_en_curso = (dia_matinal_dt.year == anio_operativo and dia_matinal_dt.month in [mes_operativo, mes_operativo + 1])
@@ -61,6 +64,8 @@ def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia
 
     col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
+    
+    # Nivel 2: Filtro DEPOSITO (Exclusión del vendedor 20 para aislar preventistas puros)
     df = df[df["CodVendedor"] != 20]
 
     df["MesCarga"] = df["FechaCarga_dt"].dt.month
@@ -80,6 +85,8 @@ def preparar_ventas_ccc(df_vta, df_ausencias, anio_operativo, mes_operativo, dia
         (df["AñoCarga"] == anio_operativo) & (df["MesCarga"] == mes_operativo) & (df["AñoEntrega"] == anio_sig) & (df["MesEntrega"] == mes_sig)
     ]
     choices = ["Arrastre", "Actual", "Futuro"]
+    
+    # Nivel 2: Filtro PERIODO (Clasificación de transacciones en Arrastre, Actual o Futuro)
     df["Periodo"] = np.select(conditions, choices, default="Fuera de Periodo")
 
     df["ClaveAUS_Carga"] = df["CodVendedor"].astype(str) + "-" + df["FechaCarga_dt"].dt.strftime("%Y-%m-%d")
@@ -216,6 +223,7 @@ def _calcular_base_ccc(df_vta, df_universo, vendedores, hoja_ccc_param, anio_op,
             Total_Imp=("_imp_calc", "sum")
         )
         
+        # Nivel 2: Filtro CCC (Restringe el universo a clientes que registren CantBase >= 3 e ImporteNeto >= 1)
         clientes_g["Es_CCC"] = clientes_g["Total_Cant"].ge(3) & clientes_g["Total_Imp"].ge(1)
     else:
         clientes_g = pd.DataFrame(columns=["Cliente", "Es_CCC"])

@@ -8,7 +8,10 @@ from modules import database as db
 from modules.utils import parsear_fecha_robusta
 
 def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_operativo, dia_matinal):
-    """Pipeline de ventas optimizado para Kilos utilizando el Master DataFrame Corporativo con alta vectorización."""
+    """
+    Pipeline de ventas optimizado para Kilos derivado del DataFrame Maestro N1 (EMPLEADOS).
+    Aplica los filtros N2: PEPSICO, COMODATOS, MATINAL y PERIODO.
+    """
     df_corp = db.obtener_df_maestro_corporativo()
     df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
     
@@ -36,19 +39,17 @@ def preparar_datos_ventas_segmento(df_vta, df_ausencias, anio_operativo, mes_ope
             .str.contains("PEPSICO", na=False)
         ]
 
-    if "Subramo" in df.columns:
-        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
-        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
-
     df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
     df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
 
-    dia_matinal_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
+    dia_matinal_dt = pd.to_datetime(str(dia_matinal), format="%d/%m/%Y", errors="coerce")
+    if pd.isna(dia_matinal_dt):
+        dia_matinal_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
     
     if pd.notna(dia_matinal_dt):
         es_mes_en_curso = (dia_matinal_dt.year == anio_operativo and dia_matinal_dt.month in [mes_operativo, mes_operativo + 1])
         if es_mes_en_curso:
-            df = df[df["FechaCarga_dt"].dt.date < dia_matinal_dt.date()]
+            df = df[df["FechaCarga_dt"].dt.date <= dia_matinal_dt.date()]
 
     col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
     if col_vend_tit not in df.columns:
@@ -143,6 +144,21 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     sup_map = vendedores_rep.set_index("CodVend")["SUP"].to_dict()
     ajuste_map = vendedores_rep.set_index("CodVend")["Ajuste_Entrega"].to_dict()
 
+    df_vtas_op_temp = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"]) & df_vta_prep["SEGMENTO"].notna()].copy()
+    cods_en_ventas = df_vtas_op_temp["CodVendedor"].dropna().unique()
+    for cv in cods_en_ventas:
+        if cv not in codigos_validos_padron:
+            val_int = int(cv)
+            nuevo_v = pd.DataFrame({
+                "CodVend": pd.Series([val_int], dtype="Int64"),
+                "Nombre": [f"VENDEDOR {val_int}"],
+                "SUP": ["GENERAL"],
+                "Ajuste_Entrega": [1]
+            })
+            vendedores_rep = pd.concat([vendedores_rep, nuevo_v], ignore_index=True)
+            sup_map[val_int] = "GENERAL"
+            ajuste_map[val_int] = 1
+
     orden_segmentos_maestro = [
         "GOLD Salty",
         "GOLD Crakers",
@@ -159,7 +175,7 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     segmentos_rep = pd.DataFrame({"SEGMENTO": orden_segmentos_maestro})
 
     df_comodines = pd.DataFrame({
-        "CodVend": [-998],
+        "CodVend": pd.Series([-998], dtype="Int64"),
         "Nombre": ["REEMPLAZO"],
         "SUP": ["GENERAL"],
         "Ajuste_Entrega": [0]
@@ -170,7 +186,7 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     segmentos_rep["_k"] = 1
     matriz = vendedores_rep_full.merge(segmentos_rep, on="_k").drop(columns="_k")
 
-    df_vtas_op = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"]) & df_vta_prep["SEGMENTO"].notna()].copy()
+    df_vtas_op = df_vtas_op_temp
     
     cod_op = df_vtas_op["CodVendedorOperativo"]
     cod_tit = df_vtas_op["CodVendedor"]

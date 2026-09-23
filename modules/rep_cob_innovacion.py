@@ -8,7 +8,11 @@ from modules import database as db
 from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta_vectorial, tarjeta_metrica_html
 
 def preparar_ventas_cobertura_innovacion(df_vta, anio_operativo, mes_operativo, dia_matinal):
-    """Pipeline de ventas unificado para Cobertura por Innovaciones consumiendo el Master DataFrame Corporativo con vectorización."""
+    """
+    Pipeline de ventas optimizado para Cobertura por Innovaciones derivado del DataFrame Maestro N1 (EMPLEADOS).
+    Aplica los filtros N2: PEPSICO, COMODATOS y PERIODO.
+    """
+    # Nivel 1: Obtención del DataFrame corporativo base con filtro EMPLEADOS aplicado
     df_corp = db.obtener_df_maestro_corporativo()
     df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
     
@@ -18,6 +22,7 @@ def preparar_ventas_cobertura_innovacion(df_vta, anio_operativo, mes_operativo, 
     col_cant = next((c for c in ["CantBase", "CANTBASE", "Cantidad", "CANTIDAD", "Unidades", "UNIDADES"] if c in df.columns), df.columns[0])
     df["cantbase"] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0.0)
 
+    # Nivel 2: Filtro COMODATOS (Exclusión de comodatos y préstamos)
     if "TipoDeVenta" in df.columns:
         tipos_excluidos = [
             "Comodato Devolución", 
@@ -27,6 +32,7 @@ def preparar_ventas_cobertura_innovacion(df_vta, anio_operativo, mes_operativo, 
         ]
         df = df[~df["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)]
 
+    # Nivel 2: Filtro PEPSICO (Selección exclusiva de proveedor PepsiCo)
     if "Proveedor" in df.columns:
         df = df[
             df["Proveedor"]
@@ -36,10 +42,6 @@ def preparar_ventas_cobertura_innovacion(df_vta, anio_operativo, mes_operativo, 
             .str.upper()
             .str.contains("PEPSICO", na=False)
         ]
-
-    if "Subramo" in df.columns:
-        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
-        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
 
     df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
     df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
@@ -71,6 +73,7 @@ def preparar_ventas_cobertura_innovacion(df_vta, anio_operativo, mes_operativo, 
     cond_act = (ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_operativo) & (me == mes_operativo)
     cond_fut = (ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_sig) & (me == mes_sig)
 
+    # Nivel 2: Filtro PERIODO (Clasificación de transacciones en Arrastre, Actual o Futuro)
     df["Periodo"] = np.select(
         [cond_arr, cond_act, cond_fut],
         ["Arrastre", "Actual", "Futuro"],
@@ -164,8 +167,9 @@ def _calcular_base_cobertura_innovacion(df_vtas_operativo, df_cartera, vendedore
         vtas["Codigo_Prod"] = pd.to_numeric(vtas["Codigo_Prod"], errors="coerce").astype("Int64")
 
         vtas = vtas[vtas["Codigo_Prod"].isin(mapa_codigo_a_innovacion.keys())].copy()
-        vtas["Innovacion"] = vtas["Codigo_Prod"].map(mapa_codigo_a_innovacion) if "vtata" in locals() else vtas["Codigo_Prod"].map(mapa_codigo_a_innovacion)
+        vtas["Innovacion"] = vtas["Codigo_Prod"].map(mapa_codigo_a_innovacion)
 
+        # Nivel 2: Filtro COBERTURA (Valida unidades compradas cantbase >= 3 agrupadas por innovación)
         vtas_agrupadas = vtas.groupby(["CodVendedor", "Cliente", "Innovacion"], as_index=False).agg(
             Total_Cant=("cantbase", "sum")
         )

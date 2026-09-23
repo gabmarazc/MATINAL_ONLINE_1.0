@@ -10,7 +10,11 @@ from modules import database as db
 from modules.utils import parsear_fecha_robusta, extraer_dia_de_ruta_vectorial, tarjeta_metrica_html
 
 def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_matinal):
-    """Pipeline de ventas unificado para Cobertura por Marca consumiendo el Master DataFrame Corporativo con vectorización."""
+    """
+    Pipeline de ventas optimizado para Cobertura por Marca derivado del DataFrame Maestro N1 (EMPLEADOS).
+    Aplica los filtros N2: PEPSICO, COMODATOS y PERIODO.
+    """
+    # Nivel 1: Obtención del DataFrame corporativo base con filtro EMPLEADOS aplicado
     df_corp = db.obtener_df_maestro_corporativo()
     df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
     
@@ -20,6 +24,7 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
     col_cant = next((c for c in ["CantBase", "CANTBASE", "Cantidad", "CANTIDAD", "Unidades", "UNIDADES"] if c in df.columns), df.columns[0])
     df["cantbase"] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0.0)
 
+    # Nivel 2: Filtro COMODATOS (Exclusión de comodatos y préstamos)
     if "TipoDeVenta" in df.columns:
         tipos_excluidos = [
             "Comodato Devolución", 
@@ -29,6 +34,7 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
         ]
         df = df[~df["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)]
 
+    # Nivel 2: Filtro PEPSICO (Selección exclusiva de proveedor PepsiCo)
     if "Proveedor" in df.columns:
         df = df[
             df["Proveedor"]
@@ -38,10 +44,6 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
             .str.upper()
             .str.contains("PEPSICO", na=False)
         ]
-
-    if "Subramo" in df.columns:
-        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
-        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
 
     df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
     df["FechaEntrega_dt"] = parsear_fecha_robusta(df.get("FechaEntrega"))
@@ -67,6 +69,7 @@ def preparar_ventas_cobertura_marca(df_vta, anio_operativo, mes_operativo, dia_m
     cond_act = (ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_operativo) & (me == mes_operativo)
     cond_fut = (ac == anio_operativo) & (mc == mes_operativo) & (ae == anio_sig) & (me == mes_sig)
 
+    # Nivel 2: Filtro PERIODO (Clasificación de transacciones en Arrastre, Actual o Futuro)
     df["Periodo"] = np.select(
         [cond_arr, cond_act, cond_fut],
         ["Arrastre", "Actual", "Futuro"],
@@ -164,6 +167,7 @@ def _calcular_base_cobertura_marca(df_vtas_operativo, df_cartera, vendedores, df
         vtas["Cliente"] = pd.to_numeric(vtas[cliente_col_vtas], errors="coerce").astype("Int64")
         vtas = vtas[vtas["Marca"].isin(marcas)].copy()
 
+        # Nivel 2: Filtro COBERTURA (Valida unidades compradas cantbase >= 3)
         vtas_agrupadas = vtas.groupby(["CodVendedor", "Cliente", "Marca"], as_index=False).agg(
             Total_Cant=("cantbase", "sum")
         )
@@ -303,13 +307,11 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
             else:
                 cobertura_global_pct = 0.0
                 
-            # Borde gris unificado para todas las marcas
             color_borde = "#64748b"
             alcanzado = cobertura_global_pct >= obj_val
             color_valor = "#22c55e" if alcanzado else "#ef4444"
             
             with col_target:
-                # Etiquetas de nombres en color blanco y negrita
                 titulo_tarjeta = f"<span style='color: #ffffff; font-weight: 700;'>{marca} (OBJ: {obj_val:g}%)</span>"
                 st.markdown(tarjeta_metrica_html(titulo_tarjeta, f"{cobertura_global_pct:.2f}%", color_borde, "1.4rem", "0.95rem", color_valor=color_valor), unsafe_allow_html=True)
             
@@ -485,7 +487,7 @@ def render_fragmento_interactivo_cobertura_marca(reporte_cobertura_dummy, marcas
                 lista_nc_formateada.append(f"[{cli}] {nom} - {dir_c} - {dia_v} - Marca: {marca_c} (U: {und:,.2f})")
 
             detalle_texto = "%0A".join(lista_nc_formateada)
-            aviso_limite = f"%0A(Mostrando 30 de {total_registros_batalla} en WA)" if total_registros_batalla > 30 else ""
+            aviso_limite = f"%0A(Mostrando 30 de {total_registros_batalla} in WA)" if total_registros_batalla > 30 else ""
             texto_wa = f"NC:{total_registros_batalla}%0A{detalle_texto}{aviso_limite}"
             url_wa = f"https://wa.me/?text={texto_wa}"
             

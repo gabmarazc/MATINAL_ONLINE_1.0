@@ -81,11 +81,10 @@ def tablas_existen() -> bool:
 
 def obtener_df_maestro_corporativo() -> pd.DataFrame:
     """
-    Retorna el Master DataFrame Corporativo de ventas base.
-    - Carga la tabla 'vta' de SQLite.
-    - Aplica la única exclusión universal obligatoria: elimina empleados ('EMPLOYEES' / 'EMPLEADOS').
-    - Mantiene el 100% de la operación total de la empresa (incluyendo Vendedor 20 / Depósito).
-    - Sin filtros de proveedores (soporte multi-marca a futuro) ni filtros temporales o de fecha matinal.
+    DataFrame Maestro de Nivel 1 (Filtro N1: EMPLEADOS).
+    - Carga la tabla 'vta' de SQLite[cite: 7].
+    - Aplica de forma universal el filtro N1 EMPLEADOS (elimina subramos 'EMPLOYEES' / 'EMPLEADOS')[cite: 7].
+    - Opera como la Única Fuente de Verdad (SSOT) para la derivación de DataFrames hijos en los reportes.
     """
     df = cargar_tabla_sql("SELECT * FROM vta")
     if df.empty:
@@ -175,7 +174,6 @@ def inicializar_bd_desde_excel(archivos_dict):
                         
                 df.to_sql(nombre_tabla, conn, if_exists='replace', index=False, chunksize=10000)
 
-        # Creación de índices optimizados para rendimiento
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_vendedor ON vta(CodVendedor);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_cliente ON vta(Cliente);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_fechacarga ON vta(FechaCarga);")

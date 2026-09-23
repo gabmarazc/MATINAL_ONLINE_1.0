@@ -10,7 +10,11 @@ from modules.utils import parsear_fecha_robusta, tarjeta_metrica_html
 from modules.rep_ccc import preparar_ventas_ccc
 
 def preparar_ventas_vespertina_resumen(df_vta, dia_venta):
-    """Pipeline de datos exclusivo para el resumen ejecutivo del Día Venta."""
+    """
+    Pipeline de datos exclusivo para el resumen ejecutivo del Día Venta derivado del DataFrame Maestro N1 (EMPLEADOS).
+    Aplica los filtros N2: PEPSICO, COMODATOS, DEPOSITO y PERIODO.
+    """
+    # Nivel 1: Obtención del DataFrame corporativo base con filtro EMPLEADOS aplicado
     df_corp = db.obtener_df_maestro_corporativo()
     df = df_corp.copy() if not df_corp.empty else (df_vta.copy() if df_vta is not None and not df_vta.empty else pd.DataFrame())
     
@@ -34,6 +38,7 @@ def preparar_ventas_vespertina_resumen(df_vta, dia_venta):
         df["OrigenDeVta"] = ""
         df["Es_MiNegocio"] = False
 
+    # Nivel 2: Filtro COMODATOS (Exclusión de comodatos y préstamos)
     if "TipoDeVenta" in df.columns:
         tipos_excluidos = [
             "Comodato Devolución", 
@@ -43,6 +48,7 @@ def preparar_ventas_vespertina_resumen(df_vta, dia_venta):
         ]
         df = df[~df["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)]
 
+    # Nivel 2: Filtro PEPSICO (Selección exclusiva de proveedor PepsiCo)
     if "Proveedor" in df.columns:
         df = df[
             df["Proveedor"]
@@ -53,14 +59,12 @@ def preparar_ventas_vespertina_resumen(df_vta, dia_venta):
             .str.contains("PEPSICO", na=False)
         ]
 
-    if "Subramo" in df.columns:
-        subramo_clean = df["Subramo"].fillna("").astype(str).str.strip().str.upper()
-        df = df[~subramo_clean.isin(["EMPLOYEES", "EMPLEADOS"])]
-
     df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
     
     col_vend_tit = next((cand for cand in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"] if cand in df.columns), "CodVendedor")
     df["CodVendedor"] = pd.to_numeric(df[col_vend_tit], errors="coerce").astype("Int64")
+    
+    # Nivel 2: Filtro DEPOSITO (Exclusión del vendedor 20 para aislar preventistas puros)
     df = df[df["CodVendedor"] != 20]
 
     col_rent = "SegmentoRentabilidad" if "SegmentoRentabilidad" in df.columns else None
@@ -106,7 +110,6 @@ def generar_reporte_vespertina_resumen(df_vta, df_universo_param, vendedores, fi
     dia_vta_dt = parsear_fecha_robusta(pd.Series([dia_venta])).iloc[0]
     target_date = dia_vta_dt.date() if pd.notna(dia_vta_dt) else None
 
-    # Merge riguroso con maestro de vendedores para asegurar supervisores
     vendedores_df = pd.DataFrame()
     vendedores_seguro = vendedores.copy() if vendedores is not None and not vendedores.empty else pd.DataFrame(columns=["Codigo_Vendedor", "Nombre_Vendedor", "Supervisor"])
     
@@ -125,7 +128,6 @@ def generar_reporte_vespertina_resumen(df_vta, df_universo_param, vendedores, fi
     else:
         df_full["SUP"] = "SIN SUPERVISOR"
 
-    # Carga robusta de la tabla universo para evitar taxonomías nulas
     univ_m = pd.DataFrame()
     try:
         univ_m = db.cargar_tabla_sql("SELECT * FROM universo")
@@ -190,10 +192,8 @@ def generar_reporte_vespertina_resumen(df_vta, df_universo_param, vendedores, fi
     df_full["Taxonomia"] = df_full["Taxonomia"].fillna("SIN TAXONOMIA").replace(["", "NAN", "NONE"], "SIN TAXONOMIA")
     df_full["NombreCliente"] = df_full["NombreCliente"].fillna("CLIENTE SIN NOMBRE")
 
-    # Separar estrictamente la foto operativa del Día Venta (`df_hoy`)
     df_hoy = df_full[df_full["FechaCarga_dt"].dt.date == target_date].copy() if target_date else df_full.copy()
 
-    # MOTOR HISTÓRICO ACUMULADO MENSUAL (Arrastre + Actual hasta el día anterior al Día Venta)
     try:
         df_ausencias = db.cargar_tabla_sql("SELECT * FROM ausencias")
     except Exception:
@@ -231,7 +231,6 @@ def generar_reporte_vespertina_resumen(df_vta, df_universo_param, vendedores, fi
     else:
         agg_hist = pd.DataFrame(columns=["Cliente", "Era_NC_hist", "Ratio_FD_hist"])
 
-    # ACUMULADO TOTAL DEL MES (Arrastre + Actual completo, incluyendo el Día Venta)
     if not df_vta_hist.empty:
         df_vta_mes_tot = df_vta_hist[df_vta_hist["Periodo"].isin(["Arrastre", "Actual"])].copy()
         col_c_tot = next((c for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"] if c in df_vta_mes_tot.columns), "Cliente")
@@ -258,14 +257,17 @@ def generar_reporte_vespertina_resumen(df_vta, df_universo_param, vendedores, fi
     else:
         agg_tot = pd.DataFrame(columns=["Cliente", "Cumple_CCC_tot", "Ratio_FD_tot"])
 
-    # Verificación de compra real en el Día Venta (admite montos netos positivos y negativos)
     df_neto_hoy = df_hoy.groupby("Cliente", as_index=False).agg(
         ImporteNeto_Dia=("ImporteNeto", "sum"),
         CantBase_Dia=("CantBase", "sum")
     )
-    clientes_compra_real = set(df_neto_hoy[(df_neto_hoy["ImporteNeto_Dia"] != 0) | (df_neto_hoy["CantBase_Dia"] != 0)]["Cliente"].dropna().tolist())
+    clientes_compra_real = set(
+        df_neto_hoy[
+            (df_neto_hoy["ImporteNeto_Dia"] >= 1) & 
+            (df_neto_hoy["CantBase_Dia"] >= 3)
+        ]["Cliente"].dropna().tolist()
+    )
 
-    # Consolidado y asignación de estados, activaciones CCC y triggers de conversión
     clientes_hoy = df_hoy[["Cliente"]].drop_duplicates().copy()
     clientes_hoy = clientes_hoy.merge(agg_hist[["Cliente", "Era_NC_hist", "Ratio_FD_hist"]], on="Cliente", how="left")
     clientes_hoy = clientes_hoy.merge(agg_tot[["Cliente", "Cumple_CCC_tot", "Ratio_FD_tot"]], on="Cliente", how="left")
@@ -279,11 +281,8 @@ def generar_reporte_vespertina_resumen(df_vta, df_universo_param, vendedores, fi
     clientes_hoy["Estado_Tot"] = clientes_hoy["Ratio_FD_tot"].apply(clasificar_estado_fd)
 
     clientes_hoy["Es_Compra_Real_Dia"] = clientes_hoy["Cliente"].isin(clientes_compra_real)
-    
-    # Trigger CCC: Era NC hasta el día anterior y con la venta de hoy alcanza los umbrales CCC
     clientes_hoy["Es_Activado_Dia"] = clientes_hoy["Es_Compra_Real_Dia"] & clientes_hoy["Era_NC_hist"] & clientes_hoy["Cumple_CCC_tot"]
     
-    # Trigger de Conversión Fully Digital: Estado previo No Digital u Híbrido que evoluciona a Fully Digital con compra real en el dia
     clientes_hoy["Es_Conversion_FullyDigital"] = (
         clientes_hoy["Es_Compra_Real_Dia"] &
         clientes_hoy["Estado_Hist"].isin(["No Digital", "Híbrido"]) &
@@ -338,16 +337,12 @@ def render_fragmento_vespertina_resumen(df_filtrado):
             margin-bottom: 0.1rem !important;
             border-color: #334155 !important;
         }
-        /* Estilo para asegurar que las tablas ajusten automáticamente el ancho de sus columnas */
         dataframe, table, [data-testid="stDataFrame"] div[data-testid="stTable"] {
             width: 100% !important;
         }
         </style>
     """, unsafe_allow_html=True)
 
-    # ==========================================
-    # BLOQUE 1: KILOS POR SEGMENTO
-    # ==========================================
     st.markdown("### 📦 1. Kilos e Importe por Segmento")
     cols_m1 = st.columns(2)
     with cols_m1[0]:
@@ -363,13 +358,10 @@ def render_fragmento_vespertina_resumen(df_filtrado):
     df_seg_disp["Kilos"] = df_seg_disp["Kilos"].apply(lambda x: f"{x:,.2f} kg")
     df_seg_disp["Importe_Neto"] = df_seg_disp["Importe_Neto"].apply(lambda x: f"${x:,.2f}")
     df_seg_disp = df_seg_disp.rename(columns={"SEGMENTO": "Segmento", "Kilos": "Kilos (kg)", "Importe_Neto": "Importe Neto ($)"})
-    st.dataframe(df_seg_disp, use_container_width=True, hide_index=True)
+    st.dataframe(df_seg_disp, width="stretch", hide_index=True)
 
     st.divider()
 
-    # ==========================================
-    # BLOQUE 2: CCC (CLIENTES Y ACTIVADOS POR TAXONOMÍA)
-    # ==========================================
     st.markdown("### 📈 2. CCC (Clientes Compradores y Activados por Taxonomía)")
     cols_m2 = st.columns(2)
     with cols_m2[0]:
@@ -382,13 +374,10 @@ def render_fragmento_vespertina_resumen(df_filtrado):
         Clientes_Activados=("Cliente", lambda x: df_filtrado.loc[x.index][df_filtrado.loc[x.index, "Es_Activado_Dia"]]["Cliente"].nunique()) if "Es_Activado_Dia" in df_filtrado.columns else ("Cliente", lambda x: 0)
     )
     df_ccc_tax = df_ccc_tax.rename(columns={"Taxonomia": "Taxonomía", "Clientes_Compra": "Clientes Compradores", "Clientes_Activados": "Clientes Activados (CCC)"})
-    st.dataframe(df_ccc_tax, use_container_width=True, hide_index=True)
+    st.dataframe(df_ccc_tax, width="stretch", hide_index=True)
 
     st.divider()
 
-    # ==========================================
-    # BLOQUE 3: MI NEGOCIO Y CONVERSIÓN
-    # ==========================================
     st.markdown("### 📱 3. Adopción MiNegocio y Conversiones Fully Digital")
     cols_m3 = st.columns(3)
     with cols_m3[0]:
@@ -409,16 +398,11 @@ def render_fragmento_vespertina_resumen(df_filtrado):
     df_mn_disp["Ventas_MN"] = df_mn_disp["Ventas_MN"].apply(lambda x: f"${x:,.2f}")
     df_mn_disp["% Adopción App"] = df_mn_disp["% Adopción App"].apply(lambda x: f"{x:,.2f}%")
     df_mn_disp = df_mn_disp.rename(columns={"Taxonomia": "Taxonomía", "Ventas_Totales": "Ventas Totales ($)", "Ventas_MN": "Ventas MiNegocio ($)"})
-    st.dataframe(df_mn_disp, use_container_width=True, hide_index=True)
+    st.dataframe(df_mn_disp, width="stretch", hide_index=True)
 
     st.divider()
 
-    # ==========================================
-    # BLOQUE 4: AUDITORÍA DE CLIENTES ACTIVADOS (CCC)
-    # ==========================================
     st.markdown("### 🔍 Auditoría: Detalle de Clientes Activados en el Día Venta")
-    st.markdown("Listado completo y consolidado de cada cliente único considerado **Activado** en la jornada:")
-
     df_activados_audit = df_filtrado[df_filtrado["Es_Activado_Dia"]].groupby("Cliente", as_index=False).agg(
         NombreCliente=("NombreCliente", "first"),
         SUP=("SUP", "first"),
@@ -443,18 +427,13 @@ def render_fragmento_vespertina_resumen(df_filtrado):
         df_act_view["Kilos Día (kg)"] = df_act_view["Kilos Día (kg)"].apply(lambda x: f"{x:,.2f} kg")
         df_act_view["Importe Día ($)"] = df_act_view["Importe Día ($)"].apply(lambda x: f"${x:,.2f}")
 
-        st.dataframe(df_act_view, use_container_width=True, hide_index=True)
+        st.dataframe(df_act_view, width="stretch", hide_index=True)
     else:
         st.info("No se registraron clientes activados para los filtros seleccionados.")
 
     st.divider()
 
-    # ==========================================
-    # BLOQUE 5: AUDITORÍA DE CONVERSIÓN A FULLY DIGITAL
-    # ==========================================
     st.markdown("### 📱 Auditoría: Clientes Convertidos a FullyDigital en el Día Venta")
-    st.markdown(f"**Total Convertidos a FullyDigital:** {tot_conversion_fd:,} clientes que alcanzaron el umbral del 70% de adopción digital en la jornada.")
-
     df_conversion_audit = df_filtrado[df_filtrado["Es_Conversion_FullyDigital"]].groupby("Cliente", as_index=False).agg(
         NombreCliente=("NombreCliente", "first"),
         SUP=("SUP", "first"),
@@ -479,13 +458,12 @@ def render_fragmento_vespertina_resumen(df_filtrado):
         df_conv_view["Kilos Día (kg)"] = df_conv_view["Kilos Día (kg)"].apply(lambda x: f"{x:,.2f} kg")
         df_conv_view["Importe Día ($)"] = df_conv_view["Importe Día ($)"].apply(lambda x: f"${x:,.2f}")
 
-        st.dataframe(df_conv_view, use_container_width=True, hide_index=True)
+        st.dataframe(df_conv_view, width="stretch", hide_index=True)
     else:
         st.info("No se registraron conversiones a FullyDigital para los filtros seleccionados.")
 
     st.divider()
 
-    # Descarga a Excel integrada con openpyxl e io.BytesIO
     buffer_vesp = io.BytesIO()
     with pd.ExcelWriter(buffer_vesp, engine="openpyxl") as writer:
         df_seg_view.to_excel(writer, index=False, sheet_name="Kilos_Por_Segmento")

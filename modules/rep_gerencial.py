@@ -78,17 +78,14 @@ def _calcular_ccc_taxonomia_gerencial(df_vta, df_universo, maestro_v, anio_op, m
     return df_res, df_display
 
 
-def _calcular_minegocio_taxonomia_detallado(df_vta, df_universo, maestro_v, anio_op, mes_op, dia_matinal, sup_seleccionado):
+def _calcular_minegocio_taxonomia_detallado(df_vta_prep_k, df_universo, maestro_v, anio_op, mes_op, dia_matinal, sup_seleccionado):
     try:
         df_ausencias = db.cargar_tabla_sql("SELECT * FROM ausencias")
     except Exception:
         df_ausencias = pd.DataFrame()
 
-    df_master_corp = db.obtener_df_maestro_corporativo()
-    if df_master_corp.empty:
-        df_master_corp = df_vta.copy()
-
-    df_vta_mn = preparar_ventas_mn(df_master_corp, df_ausencias, anio_op, mes_op, dia_matinal)
+    # UNIFICACIÓN ABSOLUTA: Usamos estrictamente el DataFrame preparado corporativo (df_vta_prep_k)
+    df_vta_mn = preparar_ventas_mn(df_vta_prep_k, df_ausencias, anio_op, mes_op, dia_matinal)
     vtas_per = df_vta_mn[df_vta_mn["Periodo"].isin(["Arrastre", "Actual"])].copy() if not df_vta_mn.empty and "Periodo" in df_vta_mn.columns else df_vta_mn.copy()
 
     col_pesos = next((c for c in ["ImporteNetoItem", "ImporteNeto", "IMIMPORTENETO", "Neto"] if c in vtas_per.columns), None)
@@ -182,6 +179,23 @@ def _calcular_minegocio_taxonomia_detallado(df_vta, df_universo, maestro_v, anio
         Gross_MN=("Gross_MN", "sum")
     )
     res_gross = tax_base.merge(gross_g, on="Taxonomia", how="left").fillna(0.0)
+    
+    try:
+        df_v20_total = df_vta_prep_k[
+            (df_vta_prep_k["CodVendedor"] == 20) & 
+            df_vta_prep_k["Periodo"].isin(["Arrastre", "Actual"])
+        ].copy() if not df_vta_prep_k.empty else pd.DataFrame()
+        
+        if not df_v20_total.empty:
+            val_v20_gross = pd.to_numeric(df_v20_total[col_pesos], errors="coerce").sum() if col_pesos else 0.0
+            suma_gross_actual = res_gross["Gross_Total"].sum()
+            if suma_gross_actual > 0:
+                for idx, row in res_gross.iterrows():
+                    proporcion = row["Gross_Total"] / suma_gross_actual
+                    res_gross.loc[idx, "Gross_Total"] += (val_v20_gross * proporcion)
+    except Exception:
+        pass
+
     res_gross["Adopcion_Gross_Pct"] = (res_gross["Gross_MN"] / res_gross["Gross_Total"].replace(0, pd.NA)).mul(100.0).fillna(0.0).round(2)
 
     kilos_g = df_merged.groupby("Taxonomia", as_index=False).agg(
@@ -240,7 +254,7 @@ def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias
     df_marcas_maestro = db.cargar_tabla_sql("SELECT * FROM parametros_marcas")
 
     if maestro_v.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), [], {}
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), [], {}, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     col_sup_v = next((c for c in maestro_v.columns if "sup" in str(c).strip().lower()), maestro_v.columns[2] if len(maestro_v.columns) > 2 else maestro_v.columns[0])
     col_cod_v = next((c for c in maestro_v.columns if "cod" in str(c).strip().lower()), maestro_v.columns[0])
@@ -331,11 +345,9 @@ def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias
         else:
             kilos_oper_todo["Importe_Operativo_Arg"] = 0.0
 
-        # CORRECCIÓN ROBUSTA DE PRECIO IMPLÍCITO Y PROYECTADO GROSS
         kilos_oper_todo["Precio_Implicito"] = kilos_oper_todo["Importe_Operativo_Arg"] / kilos_oper_todo["Kilos_Operativos_Kg"].replace(0, pd.NA)
         kilos_oper_todo["Precio_Implicito"] = kilos_oper_todo["Precio_Implicito"].fillna(0.0)
         
-        # Si el precio implícito es 0 pero hay importes y kilos totales, estimar un precio promedio general o usar 0
         precio_global_prom = kilos_oper_todo["Importe_Operativo_Arg"].sum() / max(1.0, kilos_oper_todo["Kilos_Operativos_Kg"].sum())
         kilos_oper_todo["Precio_Implicito"] = np.where(kilos_oper_todo["Precio_Implicito"] > 0, kilos_oper_todo["Precio_Implicito"], precio_global_prom)
 
@@ -440,7 +452,9 @@ def _calcular_motor_gerencial_global(df_vta, df_universo, df_rutas, df_ausencias
         marcas_lst = st.session_state.get("_cob_marcas", [])
         mapa_obj = st.session_state.get("_cob_mapa_objetivos", {})
 
-    return kilos_obj_g, kilos_oper_todo, kilos_oper_ajustado, v20_agg, futuro_seg_agg, rep_mn_global, cartera_base_global, vtas_agrup_global, marcas_lst, mapa_obj
+    res_gross_mn, res_kilos_mn, res_ccc_mn = _calcular_minegocio_taxonomia_detallado(df_vta_prep_k, df_universo, maestro_v, anio_op, mes_op, dia_matinal, sup_seleccionado)
+
+    return kilos_obj_g, kilos_oper_todo, kilos_oper_ajustado, v20_agg, futuro_seg_agg, rep_mn_global, cartera_base_global, vtas_agrup_global, marcas_lst, mapa_obj, res_gross_mn, res_kilos_mn, res_ccc_mn
 
 def render_rep_gerencial(df_vta, df_universo, df_rutas, df_ausencias, filtros_globales=None):
     st.subheader("📈 Tablero Ejecutivo Gerencial - Consolidado Integral")
@@ -469,7 +483,7 @@ def render_rep_gerencial(df_vta, df_universo, df_rutas, df_ausencias, filtros_gl
 
     huella_global = f"{len(df_vta)}_{len(df_universo)}_{anio_op}_{mes_op}_{dia_matinal}_{sup_seleccionado}"
 
-    kilos_obj_det_global, kilos_oper_todo, kilos_oper_ajustado, v20_agg_global, futuro_agg_global, rep_mn_global, cartera_base_global, vtas_agrup_global, marcas_lst, mapa_obj = _calcular_motor_gerencial_global(
+    kilos_obj_det_global, kilos_oper_todo, kilos_oper_ajustado, v20_agg_global, futuro_agg_global, rep_mn_global, cartera_base_global, vtas_agrup_global, marcas_lst, mapa_obj, res_gross_mn, res_kilos_mn, res_ccc_mn = _calcular_motor_gerencial_global(
         df_vta, df_universo, df_rutas, df_ausencias, anio_op, mes_op, dia_matinal, dia_venta, sup_seleccionado, huella_global
     )
 
@@ -638,12 +652,10 @@ def render_rep_gerencial(df_vta, df_universo, df_rutas, df_ausencias, filtros_gl
     tot_cartera_ger = int(df_ccc_tax_raw["Cartera_Neta"].sum()) if not df_ccc_tax_raw.empty else 0
     tot_obj_pep_ger = float(df_ccc_tax_raw["Obj_Pepsico"].sum()) if not df_ccc_tax_raw.empty else 0.0
     tot_obj_fv_ger = float(df_ccc_tax_raw["Obj_Fuerza_Ventas"].sum()) if not df_ccc_tax_raw.empty else 0.0
-    tot_avance_ccc_ger = int(df_ccc_tax_raw["Avance_CCC"].sum()) if not df_ccc_tax_raw.empty else 0.0
+    tot_avance_ccc_ger = int(df_ccc_tax_raw["Avance_CCC"].sum()) if not df_ccc_tax_raw.empty else 0
 
     cump_pep_ger_pct = (tot_avance_ccc_ger / tot_obj_pep_ger * 100.0) if tot_obj_pep_ger > 0 else 0.0
     cump_fv_ger_pct = (tot_avance_ccc_ger / tot_obj_fv_ger * 100.0) if tot_obj_fv_ger > 0 else 0.0
-
-    res_gross_mn, res_kilos_mn, res_ccc_mn = _calcular_minegocio_taxonomia_detallado(df_vta, df_universo, maestro_v, anio_op, mes_op, dia_matinal, sup_seleccionado)
 
     tot_ventas_mn_ger = float(res_gross_mn["Gross_Total"].sum()) if not res_gross_mn.empty else 0.0
     tot_app_mn_ger = float(res_gross_mn["Gross_MN"].sum()) if not res_gross_mn.empty else 0.0
