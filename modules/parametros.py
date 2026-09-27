@@ -27,12 +27,15 @@ def obtener_tabla_parametros() -> pd.DataFrame:
     return db.cargar_tabla_sql("SELECT * FROM parametros")
 
 def obtener_maestro_vendedores_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
-    """Carga el maestro de vendedores desde SQLite. Si mes está vacío, devuelve la base completa."""
+    """Carga el maestro de vendedores desde SQLite asegurando la columna Rutas_Ajustadas."""
     try:
         df_all = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
         if df_all is None or df_all.empty:
-            return pd.DataFrame(columns=["Anio", "Mes", "Codigo_Vendedor", "Nombre_Vendedor", "Supervisor"])
+            return pd.DataFrame(columns=["Anio", "Mes", "Codigo_Vendedor", "Nombre_Vendedor", "Supervisor", "Rutas_Ajustadas"])
         
+        if "Rutas_Ajustadas" not in df_all.columns:
+            df_all["Rutas_Ajustadas"] = 0
+
         if not mes or str(mes).strip() == "":
             return df_all
         
@@ -44,7 +47,7 @@ def obtener_maestro_vendedores_sql(anio: str = None, mes: str = None) -> pd.Data
             
         return df_all
     except Exception:
-        return pd.DataFrame(columns=["Anio", "Mes", "Codigo_Vendedor", "Nombre_Vendedor", "Supervisor"])
+        return pd.DataFrame(columns=["Anio", "Mes", "Codigo_Vendedor", "Nombre_Vendedor", "Supervisor", "Rutas_Ajustadas"])
 
 def obtener_maestro_segmentos_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
     """Carga el maestro de segmentos desde SQLite. Si mes está vacío, devuelve la base completa."""
@@ -249,7 +252,7 @@ def render_parametros_view(filtros_globales: dict = None):
     with col2:
         sel_mes_v = st.text_input("Mes Operativo (Vendedores)", value=mes_def, placeholder="Dejar vacío para ver toda la base", key="mes_vendedor")
 
-    archivo_vendedores = st.file_uploader("📂 Subir Excel de Vendedores", type=["xlsx", "xls"], key="up_excel_vendedores")
+    archivo_vendedores = st.file_uploader("📂 Subir Excel de Vendedores (Debe incluir 'Rutas_Ajustadas')", type=["xlsx", "xls"], key="up_excel_vendedores")
 
     if archivo_vendedores is not None:
         try:
@@ -266,6 +269,8 @@ def render_parametros_view(filtros_globales: dict = None):
                         nuevos_nombres[col] = "Nombre_Vendedor"
                     elif "super" in col_str or "sup" in col_str:
                         nuevos_nombres[col] = "Supervisor"
+                    elif "rutas_ajustadas" in col_str or "rutasajustadas" in col_str or "ajustadas" in col_str:
+                        nuevos_nombres[col] = "Rutas_Ajustadas"
                 
                 df_nuevo_master = df_nuevo_master.rename(columns=nuevos_nombres)
                 
@@ -275,6 +280,8 @@ def render_parametros_view(filtros_globales: dict = None):
                     df_nuevo_master = df_nuevo_master.rename(columns={columnas_originales[1]: "Nombre_Vendedor"})
                 if "Supervisor" not in df_nuevo_master.columns and len(columnas_originales) > 2:
                     df_nuevo_master = df_nuevo_master.rename(columns={columnas_originales[2]: "Supervisor"})
+                if "Rutas_Ajustadas" not in df_nuevo_master.columns:
+                    df_nuevo_master["Rutas_Ajustadas"] = 0
 
             st.write("Vista previa del archivo cargado:", df_nuevo_master.head())
             
@@ -284,6 +291,7 @@ def render_parametros_view(filtros_globales: dict = None):
                 else:
                     df_nuevo_master["Anio"] = str(sel_anio_v)
                     df_nuevo_master["Mes"] = str(sel_mes_v)
+                    df_nuevo_master["Rutas_Ajustadas"] = pd.to_numeric(df_nuevo_master.get("Rutas_Ajustadas", 0), errors="coerce").fillna(0).astype(int)
                     
                     query_check = "SELECT name FROM sqlite_master WHERE type='table' AND name='maestro_vendedores'"
                     res_check = db.cargar_tabla_sql(query_check)
@@ -296,7 +304,7 @@ def render_parametros_view(filtros_globales: dict = None):
                         df_final_master = df_nuevo_master
 
                     db.guardar_dataframe_sql(df_final_master, "maestro_vendedores", if_exists='replace')
-                    st.success(f"¡Maestro de vendedores guardado exitosamente para el período {sel_mes_v}/{sel_anio_v}!")
+                    st.success(f"¡Maestro de vendedores guardado exitosamente con Rutas Ajustadas para el período {sel_mes_v}/{sel_anio_v}!")
                     st.rerun()
         except Exception as e:
             st.error(f"Error al procesar el archivo Excel de vendedores: {e}")

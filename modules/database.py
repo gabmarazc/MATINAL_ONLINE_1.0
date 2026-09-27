@@ -2,6 +2,10 @@
 import sqlite3
 import pandas as pd
 import os
+from modules.logger import get_logger
+
+# Inicialización del logger institucional para la capa de acceso a datos
+logger = get_logger("database")
 
 DB_PATH = "data/matinal.db"
 
@@ -22,8 +26,9 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_fechaentrega ON vta(FechaEntrega);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_marca ON vta(Marca);")
         conn.commit()
+        logger.info("Índices de rendimiento de la tabla vta verificados/creados correctamente en SQLite.")
     except Exception:
-        pass
+        logger.exception("Error crítico al intentar crear los índices de rendimiento para la tabla vta.")
     finally:
         conn.close()
 
@@ -39,10 +44,12 @@ def cargar_tabla_sql(query: str) -> pd.DataFrame:
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name) = ?", (nombre_tabla,))
                 if not cursor.fetchone():
+                    logger.warning(f"La tabla consultada no existe en el catálogo de SQLite. Retornando DataFrame vacío para: {query}")
                     return pd.DataFrame()
         
         df = pd.read_sql(query, conn)
     except Exception:
+        logger.exception(f"Error al ejecutar la consulta SQL: {query}. Retornando DataFrame vacío por seguridad.")
         df = pd.DataFrame()
     finally:
         conn.close()
@@ -53,6 +60,7 @@ def guardar_dataframe_sql(df: pd.DataFrame, nombre_tabla: str, if_exists='replac
     conn = obtener_conexion()
     try:
         df.to_sql(nombre_tabla, conn, if_exists=if_exists, index=False, chunksize=10000)
+        logger.info(f"DataFrame persistido con éxito en la tabla '{nombre_tabla}' (modo: {if_exists}).")
     finally:
         conn.close()
 
@@ -65,16 +73,19 @@ def tablas_existen() -> bool:
         tablas = [row[0] for row in cursor.fetchall()]
         
         if len(set(tablas)) < 3:
+            logger.warning("Validación estructural: Faltan tablas operativas esenciales en SQLite.")
             return False
             
         for tabla in ['vta', 'universo', 'rutas']:
             cursor.execute(f"SELECT COUNT(*) FROM {tabla};")
             count = cursor.fetchone()[0]
             if count == 0:
+                logger.warning(f"Validación estructural: La tabla operativa '{tabla}' se encuentra vacía.")
                 return False
                 
         return True
     except Exception:
+        logger.exception("Error crítico al verificar la existencia y conteo de registros en las tablas operativas de SQLite.")
         return False
     finally:
         conn.close()
@@ -82,8 +93,8 @@ def tablas_existen() -> bool:
 def obtener_df_maestro_corporativo() -> pd.DataFrame:
     """
     DataFrame Maestro de Nivel 1 (Filtro N1: EMPLEADOS).
-    - Carga la tabla 'vta' de SQLite[cite: 7].
-    - Aplica de forma universal el filtro N1 EMPLEADOS (elimina subramos 'EMPLOYEES' / 'EMPLEADOS')[cite: 7].
+    - Carga la tabla 'vta' de SQLite.
+    - Aplica de forma universal el filtro N1 EMPLEADOS (elimina subramos 'EMPLOYEES' / 'EMPLEADOS').
     - Opera como la Única Fuente de Verdad (SSOT) para la derivación de DataFrames hijos en los reportes.
     """
     df = cargar_tabla_sql("SELECT * FROM vta")
@@ -105,6 +116,7 @@ def inicializar_bd_desde_excel(archivos_dict):
     conn = obtener_conexion()
     try:
         for nombre_tabla, archivo in archivos_dict.items():
+            logger.warning(f"CARGANDO TABLA: {nombre_tabla}")
             if "altas" in nombre_tabla.lower():
                 xls_altas = pd.ExcelFile(archivo)
                 dfs_all = []
@@ -137,6 +149,18 @@ def inicializar_bd_desde_excel(archivos_dict):
                 if dfs_all:
                     df_altas_unificado = pd.concat(dfs_all, ignore_index=True)
                     df_altas_unificado.to_sql("altas", conn, if_exists='replace', index=False, chunksize=10000)
+            elif nombre_tabla.lower() == "tp":
+                logger.warning(f"DETECTADA CARGA ESPECIAL TP: {nombre_tabla}")
+                df_raw = pd.read_excel(archivo, header=None)
+                header_row = None
+                for i, row in df_raw.iterrows():
+                    if "Cliente_id" in row.astype(str).values:
+                        header_row = i
+                        break
+                if header_row is None:
+                    raise ValueError("No se encontró Cliente_id en TP.xlsx")
+                df = pd.read_excel(archivo, header=header_row)
+                df.columns = [str(c).strip() for c in df.columns]
             else:
                 df = pd.read_excel(archivo)
             
@@ -146,6 +170,12 @@ def inicializar_bd_desde_excel(archivos_dict):
                     df["Ajuste_Entrega"] = pd.to_numeric(df[col_ajuste_cand], errors="coerce").fillna(1).astype(int)
                 else:
                     df["Ajuste_Entrega"] = 1
+
+                col_rutas_ajust = next((c for c in df.columns if any(k in str(c).strip().lower() for k in ["rutas_ajustadas", "rutasajustadas", "ajustadas"])), None)
+                if col_rutas_ajust:
+                    df["Rutas_Ajustadas"] = pd.to_numeric(df[col_rutas_ajust], errors="coerce").fillna(0).astype(int)
+                else:
+                    df["Rutas_Ajustadas"] = 0
 
             if nombre_tabla.lower() in ["maestro_marcas_cebe", "marcas_cebe", "cebes"]:
                 for col in df.columns:
@@ -180,6 +210,48 @@ def inicializar_bd_desde_excel(archivos_dict):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_fechaentrega ON vta(FechaEntrega);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_marca ON vta(Marca);")
         conn.commit()
+    finally:
+        conn.close()
+
+def importar_maestros_multisolapa_atomica(archivo_buffer_or_path, anio_def, mes_def) -> tuple[bool, str]:
+    """Importa masivamente todas las solapas del Excel consolidado en una transacción atómica única."""
+    try:
+        xls_global = pd.ExcelFile(archivo_buffer_or_path)
+    except Exception as e:
+        return False, f"Error al leer el archivo Excel: {e}"
+
+    sheet_to_table = {
+        'Maestro_Vendedores': 'maestro_vendedores',
+        'Maestro_Segmentos': 'maestro_segmentos',
+        'Maestro_Marcas_CEBE': 'maestro_marcas_cebe',
+        'Maestro_CCC_Config': 'maestro_ccc',
+        'Maestro_Innovaciones': 'maestro_innovaciones',
+        'Objetivos_Calibrados': 'objetivos_vendedores'
+    }
+
+    conn = obtener_conexion()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN TRANSACTION;")
+        
+        importados_count = 0
+        for sheet_name, table_name in sheet_to_table.items():
+            if sheet_name in xls_global.sheet_names:
+                df_sheet = pd.read_excel(archivo_buffer_or_path, sheet_name=sheet_name)
+                if not df_sheet.empty:
+                    if 'Anio' in df_sheet.columns:
+                        df_sheet['Anio'] = pd.to_numeric(df_sheet['Anio'], errors='coerce').fillna(int(anio_def)).astype(int)
+                    if 'Mes' in df_sheet.columns:
+                        df_sheet['Mes'] = pd.to_numeric(df_sheet['Mes'], errors='coerce').fillna(int(mes_def)).astype(int)
+                    
+                    df_sheet.to_sql(table_name, conn, if_exists='replace', index=False, chunksize=5000)
+                    importados_count += 1
+
+        conn.commit()
+        return True, f"¡Se han importado y actualizado exitosamente {importados_count} tablas en SQLite de forma atómica e instantánea!"
+    except Exception as e:
+        conn.rollback()
+        return False, f"Error crítico en la transacción SQL: {e}"
     finally:
         conn.close()
 
@@ -278,23 +350,27 @@ def guardar_innovaciones_desde_excel(file_buffer_or_path, anio, mes):
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS maestro_innovaciones (
+            CREATE TABLE IF NOT EXISTS objetivos_vendedores (
                 Anio INTEGER,
                 Mes INTEGER,
-                Codigo INTEGER,
-                Articulo TEXT,
-                Innovacion TEXT,
-                Condicion_Vta REAL,
-                PRIMARY KEY (Anio, Mes, Codigo, Innovacion)
+                CodVendedor INTEGER,
+                Nombre TEXT,
+                Supervisor TEXT,
+                SEGMENTO TEXT,
+                Kilos_Mes_Anterior REAL,
+                Objetivo_Mes_Anterior_Kg REAL,
+                Logro_Anterior_Pct REAL,
+                Obj_Sugerido_Kg REAL,
+                PRIMARY KEY (Anio, Mes, CodVendedor, SEGMENTO)
             )
         """)
         conn.commit()
 
-        cursor.execute("DELETE FROM maestro_innovaciones WHERE Anio = ? AND Mes = ?", (anio_int, mes_int))
+        cursor.execute("DELETE FROM objetivos_vendedores WHERE Anio = ? AND Mes = ?", (anio_int, mes_int))
         conn.commit()
 
-        df_subida.to_sql("maestro_innovaciones", conn, if_exists="append", index=False, chunksize=10000)
+        df_subida.to_sql("objetivos_vendedores", conn, if_exists="append", index=False, chunksize=10000)
     finally:
         conn.close()
 
-    return True, f"¡Maestro de innovaciones del período {mes_int:02d}/{anio_int} guardado con éxito en la base de datos!"
+    return True, f"¡Objetivos del período {mes_int:02d}/{anio_int} cargados y versionados con éxito en la base de datos!"

@@ -132,17 +132,20 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     col_sup = "Supervisor" if "Supervisor" in maestro_vend.columns else maestro_vend.columns[2]
     
     col_ajuste = next((c for c in maestro_vend.columns if str(c).strip().lower() in ["ajuste_entrega", "ajusteentrega", "dias_entrega"]), None)
+    col_rutas_ajust = next((c for c in maestro_vend.columns if str(c).strip().lower() in ["rutas_ajustadas", "rutasajustadas", "ajustadas"]), None)
 
     vendedores_rep["CodVend"] = pd.to_numeric(maestro_vend[col_cod], errors="coerce").astype("Int64")
     vendedores_rep["Nombre"] = maestro_vend[col_nom].fillna("").astype(str).str.strip()
     vendedores_rep["SUP"] = maestro_vend[col_sup].fillna("").astype(str).str.strip()
     vendedores_rep["Ajuste_Entrega"] = pd.to_numeric(maestro_vend[col_ajuste], errors="coerce").fillna(1).astype(int) if col_ajuste else 1
+    vendedores_rep["Rutas_Ajustadas"] = pd.to_numeric(maestro_vend[col_rutas_ajust], errors="coerce").fillna(0).astype(int) if col_rutas_ajust else 0
     
     vendedores_rep = vendedores_rep.dropna(subset=["CodVend"]).drop_duplicates(subset=["CodVend"])
 
     codigos_validos_padron = set(vendedores_rep["CodVend"].dropna().tolist())
     sup_map = vendedores_rep.set_index("CodVend")["SUP"].to_dict()
     ajuste_map = vendedores_rep.set_index("CodVend")["Ajuste_Entrega"].to_dict()
+    rutas_ajust_map = vendedores_rep.set_index("CodVend")["Rutas_Ajustadas"].to_dict()
 
     df_vtas_op_temp = df_vta_prep[df_vta_prep["Periodo"].isin(["Arrastre", "Actual"]) & df_vta_prep["SEGMENTO"].notna()].copy()
     cods_en_ventas = df_vtas_op_temp["CodVendedor"].dropna().unique()
@@ -153,11 +156,13 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
                 "CodVend": pd.Series([val_int], dtype="Int64"),
                 "Nombre": [f"VENDEDOR {val_int}"],
                 "SUP": ["GENERAL"],
-                "Ajuste_Entrega": [1]
+                "Ajuste_Entrega": [1],
+                "Rutas_Ajustadas": [0]
             })
             vendedores_rep = pd.concat([vendedores_rep, nuevo_v], ignore_index=True)
             sup_map[val_int] = "GENERAL"
             ajuste_map[val_int] = 1
+            rutas_ajust_map[val_int] = 0
 
     orden_segmentos_maestro = [
         "GOLD Salty",
@@ -178,7 +183,8 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
         "CodVend": pd.Series([-998], dtype="Int64"),
         "Nombre": ["REEMPLAZO"],
         "SUP": ["GENERAL"],
-        "Ajuste_Entrega": [0]
+        "Ajuste_Entrega": [0],
+        "Rutas_Ajustadas": [0]
     })
     vendedores_rep_full = pd.concat([vendedores_rep, df_comodines], ignore_index=True)
 
@@ -281,11 +287,13 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
     reporte["Rutas"] = reporte["Rutas"].fillna(0).astype("Int64")
     
     reporte["Ajuste_Entrega"] = reporte["CodVend"].map(ajuste_map).fillna(1).astype(int)
+    reporte["Rutas_Ajustadas"] = reporte["CodVend"].map(rutas_ajust_map).fillna(0).astype(int)
 
     reporte["Días Restantes Todo"] = (reporte["Rutas"] - reporte["Días Pasados"]).clip(lower=0).astype("Int64")
     
-    rutas_efectivas_utiles = (reporte["Rutas"] - reporte["Ajuste_Entrega"]).clip(lower=1)
-    reporte["Días Restantes Ajustado"] = (rutas_efectivas_utiles - reporte["Días Pasados"]).clip(lower=0).astype("Int64")
+    # APLICACIÓN DE RUTAS AJUSTADAS ESPECÍFICAS POR VENDEDOR
+    dias_restantes_base = (reporte["Rutas"] - reporte["Días Pasados"]).clip(lower=0)
+    reporte["Días Restantes Ajustado"] = (dias_restantes_base - reporte["Rutas_Ajustadas"]).clip(lower=0).astype("Int64")
 
     df_obj_db = db.cargar_tabla_sql(
         f"SELECT CodVendedor, SEGMENTO, Obj_Sugerido_Kg FROM objetivos_vendedores WHERE Anio = {int(anio_operativo)} AND Mes = {int(mes_operativo)}"
@@ -339,7 +347,7 @@ def generar_reporte_avance_kilos_segmento(df_vta_prep, df_rutas, maestro_vend, m
         mov_titular["Ajuste_Valor"] = -mov_titular.pop("PesoKg")
         
         mov_reemp = reemplazos[["CodVend_Op", "SEGMENTO", "Periodo", "PesoKg"]].rename(columns={"CodVend_Op": "CodVend"})
-        mov_reemp["Ajuste_Valor"] = mov_reemp.pop("PesoKg") if "PesoKg" in mov_reemp.columns else 0.0
+        mov_reemp["Ajuste_Valor"] = movimentos_reemp_val = mov_reemp.pop("PesoKg") if "PesoKg" in mov_reemp.columns else 0.0
 
         ajustes_totales = pd.concat([mov_titular, mov_reemp], ignore_index=True)
         ajustes_totales["CodVend"] = pd.to_numeric(ajustes_totales["CodVend"], errors="coerce").astype("Int64")
@@ -409,7 +417,7 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     col_dias_restantes_activo = "Días Restantes Ajustado" if modo_ajuste == "AJUSTADO" else "Días Restantes Todo"
 
     rep_detalle = rep_filtrado[
-        ["CodVendedor", "Nombre", "SUP", "SEGMENTO", "Objetivo Mes Corriente", "Arrastre", "Actual", "Ajuste_Reemp_Arrastre", "Ajuste_Reemp_Actual", "Ajuste_Por_Reemp", "Días Pasados", "Rutas", "Ajuste_Entrega", col_dias_restantes_activo]
+        ["CodVendedor", "Nombre", "SUP", "SEGMENTO", "Objetivo Mes Corriente", "Arrastre", "Actual", "Ajuste_Reemp_Arrastre", "Ajuste_Reemp_Actual", "Ajuste_Por_Reemp", "Días Pasados", "Rutas", "Ajuste_Entrega", "Rutas_Ajustadas", col_dias_restantes_activo]
     ].copy()
     
     rep_detalle = rep_detalle.rename(columns={col_dias_restantes_activo: "Días Restantes"})
@@ -516,7 +524,7 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     
     st.divider()
 
-    cols_excepcion = ["CodVendedor", "Nombre", "SUP", "SEGMENTO", "Días Pasados", "Rutas", "Ajuste_Entrega", "Días Restantes"]
+    cols_excepcion = ["CodVendedor", "Nombre", "SUP", "SEGMENTO", "Días Pasados", "Rutas", "Ajuste_Entrega", "Rutas_Ajustadas", "Días Restantes"]
     for col in rep_detalle.columns:
         if col not in cols_excepcion and pd.api.types.is_numeric_dtype(rep_detalle[col]):
             rep_detalle[col] = pd.to_numeric(rep_detalle[col], errors="coerce").round(2)
@@ -524,7 +532,7 @@ def render_fragmento_interactivo_kilos(reporte_vendedores_puro, df_comodines_Row
     columnas_ordenadas = [
         "CodVendedor", "Nombre", "SUP", "SEGMENTO", "Objetivo Mes Corriente", "Arrastre", "Actual", 
         "Ultima_Vta", "Penultima_Vta", "OPERATIVO", "Ajuste_Por_Reemp", "Tendencia_Total_Kg", 
-        "Cumplimiento_Proyectado_Pct", "Promedio_Diario", "Media_Necesaria_Diaria", "Días Pasados", "Rutas", "Ajuste_Entrega", "Días Restantes"
+        "Cumplimiento_Proyectado_Pct", "Promedio_Diario", "Media_Necesaria_Diaria", "Días Pasados", "Rutas", "Ajuste_Entrega", "Rutas_Ajustadas", "Días Restantes"
     ]
     rep_detalle = rep_detalle[columnas_ordenadas]
 

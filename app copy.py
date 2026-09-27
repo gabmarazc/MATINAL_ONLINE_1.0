@@ -10,7 +10,6 @@ from modules.parametros import (
     obtener_tabla_parametros,
 )
 from modules.rep_kilos import render_rep_kilos
-from modules.rep_kilos_core import render_rep_kilos_core
 from modules.rep_obj_kilos import render_rep_obj_kilos
 from modules.rep_ccc import render_rep_ccc
 from modules.rep_MN import render_rep_mn
@@ -318,25 +317,22 @@ def main():
 
     if "Nivel 1" in nivel_actual or "Nivel 2" in nivel_actual:
         if es_local and "Nivel 1" in nivel_actual:
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab_core = (
-                st.tabs(
-                    [
-                        "📈 Tablero Gerencial",
-                        "📊 Avance Kilos",
-                        "📈 Avance CCC",
-                        "🎯 Cobertura Marca",
-                        "🚀 Cobertura Innovación",
-                        "📱 Adopción MiNegocio",
-                        "🌙 Vespertina",
-                        "⭐ Tienda Perfecta",
-                        "⚙️ Parámetros",
-                        "📦 Composición Obj Kilos",
-                        "🧪 Avance Kilos CORE",
-                    ]
-                )
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(
+                [
+                    "📈 Tablero Gerencial",
+                    "📊 Avance Kilos",
+                    "📈 Avance CCC",
+                    "🎯 Cobertura Marca",
+                    "🚀 Cobertura Innovación",
+                    "📱 Adopción MiNegocio",
+                    "🌙 Vespertina",
+                    "⭐ Tienda Perfecta",
+                    "⚙️ Parámetros",
+                    "📦 Composición Obj Kilos",
+                ]
             )
         else:
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab_core = st.tabs(
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(
                 [
                     "📈 Tablero Gerencial",
                     "📊 Avance Kilos",
@@ -347,11 +343,10 @@ def main():
                     "🌙 Vespertina",
                     "⭐ Tienda Perfecta",
                     "📦 Composición Obj Kilos",
-                    "🧪 Avance Kilos CORE",
                 ]
             )
     else:
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_core = st.tabs(
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
             [
                 "📊 Avance Kilos",
                 "📈 Avance CCC",
@@ -360,7 +355,6 @@ def main():
                 "📱 Adopción MiNegocio",
                 "🌙 Vespertina",
                 "⭐ Tienda Perfecta",
-                "🧪 Avance Kilos CORE",
             ]
         )
 
@@ -432,10 +426,6 @@ def main():
         else:
             with tab9:
                 render_rep_obj_kilos(df_vta, filtros_globales)
-        with tab_core:
-            t0_kc = time.perf_counter()
-            render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
-            print(f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s")
     elif "Nivel 2" in nivel_actual:
         with tab1:
             t0_g = time.perf_counter()
@@ -477,10 +467,6 @@ def main():
             print(f"[PERF] render_rep_tp: {time.perf_counter() - t0_tp:.2f} s")
         with tab9:
             render_rep_obj_kilos(df_vta, filtros_globales)
-        with tab_core:
-            t0_kc = time.perf_counter()
-            render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
-            print(f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s")
     else:
         # Nivel 3: Supervisión
         with tab1:
@@ -513,10 +499,6 @@ def main():
             t0_tp = time.perf_counter()
             render_rep_tp(datos)
             print(f"[PERF] render_rep_tp: {time.perf_counter() - t0_tp:.2f} s")
-        with tab_core:
-            t0_kc = time.perf_counter()
-            render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
-            print(f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s")
 
     t_rerun_total = time.perf_counter() - t_rerun_start
     print(
