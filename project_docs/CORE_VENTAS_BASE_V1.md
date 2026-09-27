@@ -1,79 +1,155 @@
 # CORE_VENTAS_BASE V1
 
-## Estado
+Versión: 2.0
 
-Proyecto: MATINAL ONLINE
-
-Fase:
-5.3
+Fecha última actualización:
+27/09/2026
 
 Estado:
 DISEÑADO
 
 Implementación:
-Pendiente
+PLANIFICADA
+
+Prioridad:
+ALTA
+
+Dependencia Arquitectónica:
+FASE 5+
 
 ---
 
-# Objetivo
+# Propósito
 
-CORE_VENTAS_BASE constituye la definición corporativa única de una venta dentro del ecosistema MATINAL.
+CORE_VENTAS_BASE representa la definición institucional única de una venta dentro del ecosistema MATINAL.
 
-Su misión es transformar una venta proveniente de STAGING_VTA en una venta corporativa normalizada, tipada y temporalmente clasificada.
+Su objetivo es construir una entidad corporativa común que pueda ser reutilizada por todos los motores analíticos del sistema.
 
-CORE_VENTAS_BASE debe ser completamente independiente de cualquier reporte específico.
-
-No pertenece a CCC.
-
-No pertenece a MN+.
-
-No pertenece a TP.
-
-No pertenece a Coberturas.
-
-Debe servir como base común para todos ellos.
+La existencia de CORE_VENTAS_BASE evita que cada reporte vuelva a interpretar de forma independiente qué es una venta válida.
 
 ---
 
-# Fuente
+# Posición Arquitectónica
 
-Entrada:
-
-STAGING_VTA
+RAW
+↓
+SQLITE
+↓
+STAGING
+↓
+CORE_VENTAS_BASE
+↓
+CORE_OPERACION
+↓
+BUSINESS RULES
+↓
+REPORTES
 
 ---
 
-# Preguntas que responde
+# Principio Fundamental
+
+Toda venta consumida por:
+
+- CCC
+- Mi Negocio
+- Kilos
+- Coberturas
+- Tienda Perfecta
+- Gerencial
+- Vespertina
+
+debería provenir de la misma definición institucional.
+
+---
+
+# Estado Actual
+
+Actualmente el sistema funciona correctamente sin una implementación formal de CORE_VENTAS_BASE.
+
+Las reglas se encuentran distribuidas entre:
+
+- rep_kilos.py
+- rep_ccc.py
+- rep_MN.py
+- rep_gerencial.py
+- rep_tp.py
+- funciones auxiliares
+
+El objetivo de CORE_VENTAS_BASE es centralizar esta interpretación.
+
+---
+
+# Fuente Oficial de Entrada
+
+Entrada obligatoria:
+
+obtener_staging_vta()
+
+---
+
+# Dependencia Obligatoria
+
+Debe consumir exclusivamente:
+
+obtener_staging_vta()
+
+No debe leer:
+
+- Excel
+- SQLite
+- CSV
+- APIs externas
+
+---
+
+# Preguntas que Responde
 
 CORE_VENTAS_BASE responde:
 
 ¿Qué venta existe?
 
-¿Quién realizó originalmente la venta?
+¿Quién es el vendedor titular?
 
-¿Cuándo ocurrió?
+¿Qué cliente interviene?
 
-¿Cómo debe interpretarse temporalmente?
+¿Qué fechas posee?
+
+¿Qué atributos comerciales tiene?
+
+¿A qué período temporal pertenece?
+
+---
+
+# Preguntas que NO Responde
 
 No responde:
 
 ¿Cuenta para CCC?
 
-¿Cuenta para MN?
+¿Cuenta para Mi Negocio?
+
+¿Cuenta para Cobertura?
 
 ¿Cuenta para TP?
 
-¿Tiene reemplazo?
+¿Cuenta para Objetivos?
 
-¿Es PepsiCo?
+¿Tiene compensación?
+
+¿Tiene comisión?
+
+¿Debe excluirse por una regla comercial específica?
+
+Estas preguntas pertenecen a BUSINESS RULES.
 
 ---
 
 # Responsabilidades
 
-## 1. Normalización de identificadores
+## 1. Normalización de Identificadores
 
-Normalizar y tipar:
+Convertir a tipos institucionales:
 
 Cliente
 
@@ -85,15 +161,15 @@ Int64
 
 ---
 
-## 2. Normalización de magnitudes
+## 2. Normalización de Magnitudes
 
-Normalizar:
+Convertir:
 
 CantBase
 
-ImporteNeto
-
 PesoKg
+
+ImporteNetoItem
 
 Resultado esperado:
 
@@ -101,9 +177,9 @@ Numérico
 
 ---
 
-## 3. Parseo corporativo de fechas
+## 3. Normalización Temporal
 
-Generar:
+Garantizar:
 
 FechaCarga_dt
 
@@ -115,9 +191,9 @@ cuando corresponda.
 
 ---
 
-## 4. Conservación de atributos comerciales
+## 4. Conservación de Atributos Comerciales
 
-Mantener sin filtrar:
+Mantener sin modificar:
 
 Proveedor
 
@@ -125,6 +201,188 @@ Marca
 
 Articulo
 
+Subramo
+
+TipoDeVenta
+
+Segmento
+
+Canal
+
+Taxonomía
+
+Toda clasificación posterior pertenece a otras capas.
+
+---
+
+# Relación con Problema de Cierre
+
+CORE_VENTAS_BASE deberá ser compatible con la definición oficial:
+
+"Una venta es operativa del período cuando FechaCarga y FechaLiquidación pertenecen al mismo mes operativo o cuando FechaLiquidación es nula."
+
+La decisión institucional denominada:
+
+Problema de Cierre
+
+posee prioridad superior al diseño técnico.
+
+---
+
+# Relación con Día Matinal
+
+CORE_VENTAS_BASE no aplica filtros de Día Matinal.
+
+Debe preservar la información.
+
+Los filtros temporales son responsabilidad del CORE y BUSINESS RULES.
+
+---
+
+# Relación con Ausencias
+
+CORE_VENTAS_BASE no debe aplicar reemplazos.
+
+No debe generar:
+
+CodVendedorOperativo
+
+No debe interpretar:
+
+Ausencias
+
+Reemplazos
+
+Estas responsabilidades pertenecen a:
+
+CORE_OPERACION
+
+---
+
+# Contrato de Salida Esperado
+
+La entidad final deberá contener como mínimo:
+
+Cliente
+
+CodVendedor
+
+FechaCarga_dt
+
+FechaEntrega_dt
+
+FechaLiquidacion_dt
+
+CantBase
+
+PesoKg
+
+ImporteNetoItem
+
+Marca
+
+Proveedor
+
+Articulo
+
+Subramo
+
 TipoDeVenta
 
 ---
+
+# Restricciones Arquitectónicas
+
+CORE_VENTAS_BASE:
+
+✅ Puede normalizar.
+
+✅ Puede tipar.
+
+✅ Puede clasificar temporalmente.
+
+✅ Puede validar consistencia.
+
+---
+
+CORE_VENTAS_BASE:
+
+❌ No calcula objetivos.
+
+❌ No calcula coberturas.
+
+❌ No calcula CCC.
+
+❌ No calcula Mi Negocio.
+
+❌ No calcula compensaciones.
+
+❌ No aplica reemplazos.
+
+❌ No aplica filtros comerciales.
+
+---
+
+# Consumidores Futuros
+
+La implementación definitiva deberá servir como entrada única para:
+
+CORE_OPERACION
+
+CCC
+
+Mi Negocio
+
+Kilos
+
+Cobertura Marca
+
+Cobertura Innovación
+
+Tienda Perfecta
+
+Gerencial
+
+Vespertina
+
+---
+
+# Beneficio Esperado
+
+Eliminar múltiples interpretaciones de una venta.
+
+Garantizar consistencia transversal entre todos los módulos.
+
+Reducir duplicación de lógica.
+
+Mejorar auditabilidad.
+
+Facilitar futuras migraciones hacia capas BUSINESS RULES más desacopladas.
+
+---
+
+# Estado de Roadmap
+
+Situación actual:
+
+Diseñado.
+
+No implementado.
+
+Implementación prevista después de la consolidación completa de:
+
+STAGING
+
+CORE_OPERACION
+
+FASE 4.8
+
+---
+
+# Observación Institucional
+
+Este documento describe una entidad objetivo de arquitectura.
+
+No necesariamente refleja una implementación completa existente en código al momento de su lectura.
+
+Su finalidad es preservar la definición institucional que deberá respetarse durante futuras refactorizaciones del núcleo comercial del sistema.

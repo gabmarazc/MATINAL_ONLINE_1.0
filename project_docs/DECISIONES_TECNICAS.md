@@ -1,137 +1,310 @@
-## Decisiones Técnicas y Arquitectónicas - MATINAL (Versión 1.1)
+---
 
-### 1. Identificación y Propósito
-
-El presente documento consolida y formaliza todas las decisiones arquitectónicas, operativas y tecnológicas vigentes en el proyecto **MATINAL**. Su propósito es servir como marco normativo inalterable para orientar cualquier evolución futura, garantizando la estabilidad operativa del sistema en producción.
+##### H. Decisiones de Arquitectura por Capas (Fase 4)
 
 ---
 
-### 2. Inventario Normativo de Decisiones Técnicas
+### DT.15: Implementación Formal de la Capa STAGING
 
-#### A. Decisiones de Stack y Tecnología
+#### Fecha
+27/09/2026
 
-- **DT.1: Aprobación y Vigencia de Monolito Modular en Python**
-- _Descripción_: Se ratifica el uso de Python, Streamlit, Pandas y SQLite como la arquitectura base inalterable del producto. Se prohíben explícitamente migraciones a arquitecturas distribuidas, bases de datos relacionales pesadas (PostgreSQL/MySQL) o frameworks de frontend complejos (React/Angular) por carecer de justificación de negocio para un motor analítico comercial.
+#### Estado
+Vigente ✅
 
-- **DT.2: Uso Exclusivo de Grillas AgGrid (st-aggrid)**
-- _Descripción_: Estandarización de la librería st-aggrid para la renderización de tablas analíticas complejas y grillas de detalle ("Batallas"), asegurando filtrado avanzado y una experiencia visual directiva profesional.
+#### Descripción
+
+Se declara oficialmente implementada la capa STAGING dentro de la arquitectura institucional MATINAL.
+
+La transición desde el modelo histórico:
+
+RAW
+↓
+SQLite
+↓
+Pipelines Analíticos
+
+hacia el modelo objetivo:
+
+RAW
+↓
+SQLITE
+↓
+STAGING
+↓
+CORE
+↓
+BUSINESS RULES
+↓
+REPORTES
+
+deja de ser un objetivo teórico y pasa a ser una realidad operativa validada.
+
+#### Principios
+
+La capa STAGING debe encargarse exclusivamente de:
+
+- Lectura SQLite
+- Parseo de fechas
+- Detección de columnas
+- Normalización
+- Conversión de tipos
+- Limpieza técnica
+- Contratos de datos
+
+La capa STAGING no debe contener:
+
+- Objetivos
+- KPIs
+- Pace
+- Compensaciones
+- CCC
+- MN+
+- Coberturas
+- Lógica comercial
 
 ---
 
-#### B. Decisiones de Persistencia y Datos
+### DT.16: Implementación del Módulo obtener_staging_ausencias()
 
-- **DT.3: SQLite con Modo WAL Activo**
-- _Descripción_: Uso de SQLite (`data/matinal.db`) configurado con `PRAGMA journal_mode=WAL;` para garantizar concurrencia segura y estabilidad en lecturas y escrituras concurrentes durante la operación en producción.
+#### Fecha
 
-- **DT.4: Ingesta Plana por Volcado Masivo (to_sql)**
-- _Descripción_: Adopción del método de reemplazo total (`if_exists='replace'`) por bloques (`chunksize`) para la sincronización inicial de fuentes RAW desde Excel, priorizando la simplicidad operativa frente a procesos ETL complejos.
+27/09/2026
 
----
+#### Estado
 
-#### C. Decisiones de Rendimiento y Estado
+Vigente ✅
 
-- **DT.5: Estrategia de Caché por Huellas de Datos (@st.cache_data)**
-- _Descripción_: Aceleración de motores analíticos pesados mediante decoradores de caché en Pandas parametrizados con cadenas de huellas (`huella_datos`), evitando recomputaciones redundantes ante cambios menores en la interfaz.
+#### Descripción
 
-- **DT.6: Persistencia Volátil en st.session_state**
-- _Descripción_: Utilización del estado de sesión de Streamlit exclusivamente para control de credenciales, perfiles de usuario, estado de autenticación y carga inicial de DataFrames maestros globales.
+Se crea la función:
 
----
+obtener_staging_ausencias()
 
-#### D. Decisiones de Gobierno de Negocio
+como punto oficial de entrada para la entidad AUSENCIAS.
 
-- **DT.7: SSOT Corporativo e Inmutabilidad del Maestro N1**
-- _Descripción_: Centralización de la limpieza de cuentas de empleados a través de `obtener_df_maestro_corporativo()`, garantizando que ninguna vista derive su información de fuentes que no hayan atravesado este filtro normativo.
+#### Motivación
 
-- **DT.8: Desacoplamiento del Bloque "Futuro"**
-- _Descripción_: Decisión explícita de separar la analítica operativa diaria (sometida al corte estricto del Día Matinal) frente al potencial disponible futuro (procesado sin restricciones temporales), permitiendo auditar el volumen disponible inminente.
+Históricamente el procesamiento de ausencias se encontraba mezclado con lógica operativa dentro del CORE.
 
----
+La decisión institucional consiste en trasladar progresivamente toda responsabilidad ETL asociada a ausencias hacia la capa STAGING.
 
-#### E. Decisiones Arquitectónicas Fundacionales
+#### Responsabilidades asignadas
 
-- **DT.9: Evolución Incremental y Prohibición de Reescritura Total**
-- _Descripción_: Toda evolución de software debe preservar compatibilidad absoluta con la operación en producción. Queda terminantemente prohibida la reescritura completa o masiva del sistema.
+obtener_staging_ausencias() es responsable de:
 
-- **DT.10: Prioridad de las Reglas de Negocio sobre las Decisiones Técnicas**
-- _Descripción_: Las definiciones funcionales instituidas en el GLOSARIO_REGLAS.md tienen prioridad absoluta y prevalecen por encima de cualquier optimización o decisión técnica futura.
+- Lectura de la tabla SQLite ausencias
+- Detección de vendedor
+- Detección de fecha
+- Detección de reemplazo
+- Parseo robusto de fechas
+- Conversión a Int64
+- Generación de columnas normalizadas
 
-- **DT.11: Arquitectura Objetivo Aprobada**
-- _Descripción_: Se adopta formalmente el modelo de transición gradual hacia las cinco capas objetivo:
+#### Contrato de salida aprobado
 
-RAW → STAGING → CORE → BUSINESS_RULES → REPORTES
+Columnas garantizadas:
 
-Asegurando que cualquier cambio acerque progresivamente al sistema a esta estructura sin afectar la producción.
-
-- **DT.12: Documentación Institucional como Activo Estratégico**
-- _Descripción_: Toda decisión relevante de diseño o negocio debe reflejarse en la memoria institucional. Los documentos ESTADO_ACTUAL.md, ARQUITECTURA.md, GLOSARIO_REGLAS.md, DICCIONARIO_TABLAS.md, DECISIONES_TECNICAS.md y ROADMAP.md constituyen la verdad oficial vigente del proyecto.
+- Fecha_dt
+- CodVend_clean
+- Reemplazo_clean
 
 ---
 
-#### F. Decisiones de Observabilidad y Diagnóstico
+### DT.17: Cambio de Orquestación para Ausencias
 
-- **DT.13: Logging Estructurado Institucional y Observabilidad Operativa**
-- _Descripción_: Se adopta formalmente un subsistema centralizado de logging basado en la librería estándar logging de Python y archivos rotativos locales mediante RotatingFileHandler.
+#### Fecha
 
-##### Implementación Inicial (Fase 2A)
+27/09/2026
 
-- Creación de modules/logger.py como punto único de configuración.
-- Creación automática del directorio logs/.
-- Creación automática del archivo logs/matinal.log.
-- Incorporación de trazas estructuradas en el núcleo de la DAL.
+#### Estado
 
-##### Componentes Alcanzados
+Vigente ✅
 
-- init_db()
-- cargar_tabla_sql()
-- tablas_existen()
-- guardar_dataframe_sql()
+#### Cambio aprobado
 
-##### Principios de Implementación
+Antes:
 
-- No modificar lógica de negocio.
-- No modificar consultas SQL.
-- No modificar firmas de funciones.
-- No modificar tipos de retorno.
-- No modificar transacciones existentes.
-- Mantener compatibilidad total con SQLite en modo WAL.
+df_ausencias = maestros["ausencias"]
 
-##### Resultado Validado
+Después:
 
-- Logging INFO validado.
-- Logging WARNING validado.
-- Persistencia UTF-8 validada.
-- Lectura SQLite validada.
-- Streamlit validado.
-- Ausencia de regresiones observadas.
-- Compatibilidad operativa confirmada sobre entorno de desarrollo.
+df_ausencias = obtener_staging_ausencias()
 
-##### Estado
+#### Resultado
 
-- Vigente ✅
-- Implementado y validado durante la Fase 2A del Roadmap Institucional.
+El CORE deja de depender de estructuras internas del diccionario de maestros para obtener ausencias.
 
-##### G. Decisiones de Padrones Corporativos
+La entidad pasa a poseer un acceso especializado y desacoplado.
 
-- **DT.14: Maestro Único de Preventistas y Supervisores**
-- _Descripción_: Se establece a `maestro_vendedores` como fuente oficial y única para la identificación de preventistas y supervisores en los módulos analíticos. Los códigos operativos contenidos en fuentes transaccionales o relevamientos externos deberán considerarse exclusivamente claves técnicas de cruce.
+#### Beneficios
 
-###### Alcance Inicial
-- Avance CCC (`rep_ccc.py`)
-- Tienda Perfecta (`rep_tp.py`)
+- Menor acoplamiento
+- Mejor mantenibilidad
+- Preparación para futuras entidades STAGING
+- Contratos de datos explícitos
 
-###### Criterios de Implementación
-- Visualización mediante nombre corporativo del preventista.
-- Obtención del supervisor desde `maestro_vendedores`.
-- Compatibilidad con filtros globales de supervisor.
-- Regeneración dinámica de catálogos dependientes del supervisor seleccionado.
-- Conservación de compatibilidad con los mecanismos existentes de `st.session_state`.
+---
 
-###### Resultado Esperado
-- Coherencia transversal entre módulos.
-- Eliminación de dependencias visuales sobre códigos de vendedor.
-- Unificación de criterios de filtrado por supervisor.
+### DT.18: Estrategia de Migración Incremental STAGING → CORE
 
-###### Estado
-- Vigente ✅
-- Implementado y validado en CCC y Tienda Perfecta (25/09/2026).
+#### Fecha
+
+27/09/2026
+
+#### Estado
+
+Vigente ✅
+
+#### Decisión
+
+Toda migración arquitectónica deberá realizarse mediante dos etapas separadas:
+
+ETAPA 1
+
+Crear STAGING especializado.
+
+ETAPA 2
+
+Consumir STAGING desde CORE.
+
+ETAPA 3
+
+Validar producción.
+
+ETAPA 4
+
+Eliminar duplicidades.
+
+#### Prohibición
+
+No realizar simultáneamente:
+
+- creación de STAGING
+- cambio de orquestación
+- eliminación de lógica heredada
+
+en una única iteración.
+
+Motivo:
+
+Dificulta la detección de regresiones.
+
+---
+
+### DT.19: Validación Operativa de la FASE 4.7
+
+#### Fecha
+
+27/09/2026
+
+#### Estado
+
+Vigente ✅
+
+#### Resultado
+
+La implementación fue validada mediante ejecución real del sistema.
+
+Verificaciones aprobadas:
+
+✅ Arranque Streamlit
+
+✅ Carga SQLite
+
+✅ Ejecución STAGING
+
+✅ Ejecución CORE
+
+✅ Generación de reportes
+
+✅ Integración de ausencias
+
+✅ Ausencia de errores de importación
+
+✅ Ausencia de errores de ejecución
+
+#### Evidencia
+
+Tiempos observados:
+
+obtener_staging_ausencias:
+0.0087 s
+
+procesar_ausencias_y_reemplazos:
+0.7176 s
+
+obtener_core_operacion:
+13.4367 s
+
+obtener_matriz_kilos_comercial:
+14.6438 s
+
+#### Conclusión
+
+La FASE 4.7 queda formalmente cerrada.
+
+---
+
+### DT.20: Refactor Pendiente de Ausencias (FASE 4.8)
+
+#### Estado
+
+Pendiente ⏳
+
+#### Objetivo
+
+Eliminar ETL redundante dentro de:
+
+procesar_ausencias_y_reemplazos()
+
+#### Elementos candidatos
+
+- cols_vend_cand
+- cols_f_cand
+- cols_reemp_cand
+- parsear_fecha_robusta()
+- CodVend_clean
+- Reemplazo_clean
+
+#### Resultado esperado
+
+STAGING:
+
+100% ETL.
+
+CORE:
+
+100% lógica operativa.
+
+#### Restricción
+
+No ejecutar esta refactorización sin validación previa de producción.
+
+---
+
+### DT.21: Política de Conservación del Conocimiento Institucional
+
+#### Fecha
+
+27/09/2026
+
+#### Estado
+
+Vigente ✅
+
+#### Decisión
+
+Los siguientes documentos constituyen la memoria mínima obligatoria del proyecto:
+
+- ARQUITECTURA.md
+- ESTADO_ACTUAL.md
+- DECISIONES_TECNICAS.md
+- ROADMAP.md
+- PIPELINE_CORE.md
+- DICCIONARIO_TABLAS.md
+- GLOSARIO_REGLAS.md
+
+#### Objetivo
+
+Permitir que cualquier instancia futura de Copilot, desarrollador o auditor reconstruya el contexto técnico y funcional completo sin depender del historial de conversaciones.
