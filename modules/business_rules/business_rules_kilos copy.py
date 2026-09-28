@@ -254,168 +254,16 @@ def calcular_compensaciones_reemplazos(df_vta_operativa: pd.DataFrame) -> pd.Dat
     return resultado
 
 
-def _calcular_calendario_ajustado_comercial(
-    matriz_comercial: pd.DataFrame, padron_vendedores: pd.DataFrame
-) -> pd.DataFrame:
-    """
-    BUSINESS_RULES: Incorpora los parámetros logísticos de Ajuste_Entrega y Rutas_Ajustadas
-    desde CORE (padron_vendedores) y calcula el campo 'Días Restantes Ajustado'.
-    """
-    df = matriz_comercial.copy()
-    if df.empty or padron_vendedores.empty:
-        df["Ajuste_Entrega"] = 1
-        df["Rutas_Ajustadas"] = 0
-        df["Días Restantes Ajustado"] = df.get("Días Restantes", 0)
-        return df
-
-    mv = padron_vendedores.copy()
-
-    map_ajuste = (
-        mv.set_index("CodVendedor")["Ajuste_Entrega"].to_dict()
-        if "Ajuste_Entrega" in mv.columns
-        else {}
-    )
-    map_rutas_ajust = (
-        mv.set_index("CodVendedor")["Rutas_Ajustadas"].to_dict()
-        if "Rutas_Ajustadas" in mv.columns
-        else {}
-    )
-
-    df["Ajuste_Entrega"] = df["CodVendedor"].map(map_ajuste).fillna(1).astype(int)
-    df["Rutas_Ajustadas"] = df["CodVendedor"].map(map_rutas_ajust).fillna(0).astype(int)
-
-    dias_restantes_base = (df.get("Rutas", 0) - df.get("Días Pasados", 0)).clip(lower=0)
-    df["Días Restantes Ajustado"] = (
-        (dias_restantes_base - df["Rutas_Ajustadas"]).clip(lower=0).astype("Int64")
-    )
-
-    return df
-
-
-def _calcular_proyecciones_y_tendencias(matriz_comercial: pd.DataFrame) -> pd.DataFrame:
-    """
-    BUSINESS_RULES: Calcula de manera centralizada el Promedio Diario, la Tendencia Total en Kg,
-    el Cumplimiento Proyectado en Porcentaje y la Media Necesaria Diaria.
-    """
-    df = matriz_comercial.copy()
-    if df.empty:
-        df["Promedio_Diario"] = 0.0
-        df["Tendencia_Total_Kg"] = 0.0
-        df["Cumplimiento_Proyectado_Pct"] = 0.0
-        df["Media_Necesaria_Diaria"] = 0.0
-        return df
-
-    dp_s = (
-        df.get("Días Pasados", pd.Series(0, index=df.index))
-        .astype(float)
-        .replace(0, 1.0)
-    )
-    dr_s = df.get(
-        "Días Restantes Ajustado",
-        df.get("Días Restantes", pd.Series(0, index=df.index)),
-    ).astype(float)
-
-    actual_val = df.get("Actual", 0.0)
-    ajuste_act_val = df.get("Ajuste_Reemp_Actual", 0.0)
-    operativo_val = df.get("OPERATIVO", 0.0)
-    objetivo_val = df.get("Objetivo Mes Corriente", 0.0)
-
-    p_diario = (actual_val + ajuste_act_val) / dp_s
-    df["Promedio_Diario"] = p_diario
-
-    tendencia = operativo_val.copy()
-    mask_activos = dr_s > 0
-    if mask_activos.any():
-        tendencia.loc[mask_activos] = (
-            p_diario[mask_activos] * dr_s[mask_activos]
-        ) + operativo_val.loc[mask_activos]
-    df["Tendencia_Total_Kg"] = tendencia
-
-    df["Cumplimiento_Proyectado_Pct"] = (
-        (tendencia / objetivo_val.replace(0, pd.NA)).mul(100).fillna(0.0)
-    )
-
-    media_nec = pd.Series(0.0, index=df.index)
-    if mask_activos.any():
-        media_nec.loc[mask_activos] = (
-            (objetivo_val.loc[mask_activos] - operativo_val.loc[mask_activos])
-            / dr_s[mask_activos]
-        ).clip(lower=0)
-    df["Media_Necesaria_Diaria"] = media_nec
-
-    return df
-
-
-def _incorporar_ventas_temporales_soporte(
-    matriz_comercial: pd.DataFrame, df_vta_operativa: pd.DataFrame, dia_matinal: str
-) -> pd.DataFrame:
-    """
-    BUSINESS_RULES: Extrae y adjunta los volúmenes de la última y penúltima semana a partir
-    del histórico operativo bruto para trazabilidad analítica de soporte.
-    """
-    df = matriz_comercial.copy()
-    if df.empty or df_vta_operativa is None or df_vta_operativa.empty:
-        df["Ultima_Vta"] = 0.0
-        df["Penultima_Vta"] = 0.0
-        return df
-
-    from modules.utils import parsear_fecha_robusta
-
-    fecha_mat_dt = parsear_fecha_robusta(pd.Series([dia_matinal])).iloc[0]
-    if pd.notna(fecha_mat_dt):
-        f_ult = (fecha_mat_dt - pd.Timedelta(days=7)).date()
-        f_penult = (fecha_mat_dt - pd.Timedelta(days=14)).date()
-
-        u_vta = (
-            df_vta_operativa[df_vta_operativa["FechaCarga_dt"].dt.date.eq(f_ult)]
-            .groupby(["CodVendedor", "SEGMENTO"])["PesoKg"]
-            .sum()
-            .reset_index()
-            .rename(columns={"PesoKg": "Ultima_Vta"})
-        )
-        p_vta = (
-            df_vta_operativa[df_vta_operativa["FechaCarga_dt"].dt.date.eq(f_penult)]
-            .groupby(["CodVendedor", "SEGMENTO"])["PesoKg"]
-            .sum()
-            .reset_index()
-            .rename(columns={"PesoKg": "Penultima_Vta"})
-        )
-    else:
-        u_vta = pd.DataFrame(columns=["CodVendedor", "SEGMENTO", "Ultima_Vta"])
-        p_vta = pd.DataFrame(columns=["CodVendedor", "SEGMENTO", "Penultima_Vta"])
-
-    if not u_vta.empty:
-        u_vta["CodVendedor"] = pd.to_numeric(
-            u_vta["CodVendedor"], errors="coerce"
-        ).astype("Int64")
-        df = df.merge(u_vta, on=["CodVendedor", "SEGMENTO"], how="left")
-    else:
-        df["Ultima_Vta"] = 0.0
-
-    if not p_vta.empty:
-        p_vta["CodVendedor"] = pd.to_numeric(
-            p_vta["CodVendedor"], errors="coerce"
-        ).astype("Int64")
-        df = df.merge(p_vta, on=["CodVendedor", "SEGMENTO"], how="left")
-    else:
-        df["Penultima_Vta"] = 0.0
-
-    df["Ultima_Vta"] = df.get("Ultima_Vta", 0.0).fillna(0.0)
-    df["Penultima_Vta"] = df.get("Penultima_Vta", 0.0).fillna(0.0)
-
-    return df
-
-
 @st.cache_data(show_spinner=False)
 def obtener_matriz_kilos_comercial(
     anio: int, mes: int, filtros_globales: dict
 ) -> pd.DataFrame:
     """
     BUSINESS_RULES (Orquestador Comercial): Consume exclusivamente servicios de la Capa CORE y el Repositorio,
-    incorpora objetivos comerciales, compensaciones por reemplazo, parámetros logísticos desde CORE y proyecciones analíticas.
+    incorpora objetivos comerciales y compensaciones por reemplazo para construir la matriz final.
     """
     t0 = time.perf_counter()
-    # 1. Consumo estricto de CORE_VENDEDORES (incluye padrón y parámetros logísticos de padrón)
+    # 1. Consumo estricto de CORE_VENDEDORES
     padron_vend = obtener_core_vendedores()
     if padron_vend.empty:
         print(
@@ -587,19 +435,6 @@ def obtener_matriz_kilos_comercial(
         + matriz_comercial["Ajuste_Por_Reemp"]
     )
 
-    # Incorporación de Parámetros Logísticos de Padrón (CORE) y Días Restantes Ajustados (BUSINESS RULES)
-    matriz_comercial = _calcular_calendario_ajustado_comercial(
-        matriz_comercial, padron_vend
-    )
-
-    # Incorporación de Métricas Analíticas de Proyección y Tendencia
-    matriz_comercial = _calcular_proyecciones_y_tendencias(matriz_comercial)
-
-    # Incorporación de Ventas Temporales de Soporte (Última y Penúltima semana)
-    matriz_comercial = _incorporar_ventas_temporales_soporte(
-        matriz_comercial, df_vta_op, dia_matinal
-    )
-
     # Ordenamiento institucional por supervisor, preventista y segmento
     mapping_orden = {str(seg).strip(): i for i, seg in enumerate(orden_segmentos)}
     matriz_comercial["_orden_idx"] = (
@@ -623,22 +458,13 @@ def obtener_matriz_kilos_comercial(
         "Objetivo Mes Corriente",
         "Arrastre",
         "Actual",
-        "Ultima_Vta",
-        "Penultima_Vta",
         "OPERATIVO",
         "Ajuste_Reemp_Arrastre",
         "Ajuste_Reemp_Actual",
         "Ajuste_Por_Reemp",
-        "Tendencia_Total_Kg",
-        "Cumplimiento_Proyectado_Pct",
-        "Promedio_Diario",
-        "Media_Necesaria_Diaria",
         "Días Pasados",
         "Rutas",
-        "Ajuste_Entrega",
-        "Rutas_Ajustadas",
         "Días Restantes",
-        "Días Restantes Ajustado",
     ]
 
     resultado_final = matriz_comercial[

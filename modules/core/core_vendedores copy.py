@@ -1,4 +1,3 @@
-# modules/core/core_vendedores.py
 import streamlit as st
 import pandas as pd
 
@@ -8,14 +7,13 @@ from modules import database as db
 @st.cache_data(show_spinner=False)
 def obtener_core_vendedores():
     """
-    CORE_VENDEDORES V2
+    CORE_VENDEDORES V1
 
     Responsabilidades:
     - Cargar maestro_vendedores
     - Normalizar CodVendedor
     - Mantener Nombre
     - Mantener SUP
-    - Extraer Ajuste_Entrega y Rutas_Ajustadas
     - Excluir vendedor 20
     - Eliminar duplicados
     """
@@ -59,38 +57,6 @@ def obtener_core_vendedores():
         core["SUP"] = df[col_sup].fillna("").astype(str).str.strip()
     else:
         core["SUP"] = ""
-
-    col_ajuste = next(
-        (
-            c
-            for c in df.columns
-            if str(c).strip().lower()
-            in ["ajuste_entrega", "ajusteentrega", "dias_entrega"]
-        ),
-        None,
-    )
-    if col_ajuste:
-        core["Ajuste_Entrega"] = (
-            pd.to_numeric(df[col_ajuste], errors="coerce").fillna(1).astype(int)
-        )
-    else:
-        core["Ajuste_Entrega"] = 1
-
-    col_rutas_ajust = next(
-        (
-            c
-            for c in df.columns
-            if str(c).strip().lower()
-            in ["rutas_ajustadas", "rutasajustadas", "ajustadas"]
-        ),
-        None,
-    )
-    if col_rutas_ajust:
-        core["Rutas_Ajustadas"] = (
-            pd.to_numeric(df[col_rutas_ajust], errors="coerce").fillna(0).astype(int)
-        )
-    else:
-        core["Rutas_Ajustadas"] = 0
 
     core = core[core["CodVendedor"].notna()].copy()
 
