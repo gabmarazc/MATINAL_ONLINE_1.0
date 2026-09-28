@@ -1,159 +1,251 @@
-import os
+# contexto.py
 
-ARCHIVO_SALIDA = "todo_el_proyecto.txt"
+from pathlib import Path
+
+# ==========================================================
+# CONFIGURACION
+# ==========================================================
+
+ROOT = Path(".")
+
+PROJECT_DOCS = ROOT / "project_docs"
 
 ARCHIVOS_RAIZ = [
     "app.py",
     "config.py",
-    "contexto.py",
     "data_loader.py",
     "generar_objetivos_manuales.py",
     "requirements.txt",
     "runtime.txt",
     ".gitignore",
-    "iniciar_sistema.bat"
+    "iniciar_sistema.bat",
 ]
 
-DIRECTORIOS = [
-    ("modules", [".py"]),
-    ("project_docs", [".md"])
+DOCS_PRIORITARIOS = [
+    "ARQUITECTURA.md",
+    "ESTADO_ACTUAL.md",
+    "ROADMAP.md",
+    "DECISIONES_TECNICAS.md",
+    "DICCIONARIO_TABLAS.md",
+    "GLOSARIO_REGLAS.md",
+    "CORE_OPERACION_V1.md",
+    "CORE_VENTAS_BASE_V1.md",
+    "BITACORA.md",
 ]
 
+DIRECTORIOS_CODIGO = ["modules"]
 
-def escribir_separador(outfile):
-    outfile.write("\n\n" + "=" * 100 + "\n\n")
+SALIDA_CONTEXTO = PROJECT_DOCS / "CONTEXTO_IA.md"
+SALIDA_CODIGO = PROJECT_DOCS / "CODIGO_CONSOLIDADO.md"
+SALIDA_INVENTARIO = PROJECT_DOCS / "INVENTARIO_PROYECTO.md"
+
+EXCLUIR_DIRECTORIOS = {"__pycache__", ".git", ".venv", ".vscode"}
+
+EXCLUIR_EXTENSIONES = {".pyc"}
+
+# ==========================================================
+# UTILIDADES
+# ==========================================================
 
 
-def agregar_archivo(outfile, filepath, categoria):
+def separador(f):
+    f.write("\n\n" + "=" * 100 + "\n\n")
 
+
+def leer_archivo(path):
     try:
-
-        outfile.write(
-            f"=== {categoria}: {filepath} ===\n\n"
-        )
-
-        with open(
-            filepath,
-            "r",
-            encoding="utf-8"
-        ) as infile:
-
-            outfile.write(infile.read())
-
-        escribir_separador(outfile)
-
+        with open(path, "r", encoding="utf-8") as fp:
+            return fp.read()
     except Exception as e:
+        return f"ERROR LEYENDO {path}\n{e}"
 
-        outfile.write(
-            f"ERROR LEYENDO {filepath}: {e}\n"
+
+# ==========================================================
+# CONTEXTO IA
+# ==========================================================
+
+
+def generar_contexto_ia():
+
+    with open(SALIDA_CONTEXTO, "w", encoding="utf-8") as out:
+        out.write("# CONTEXTO IA - MATINAL\n\n")
+
+        out.write("## RESUMEN EJECUTIVO\n\n")
+
+        out.write(
+            """
+Proyecto: MATINAL
+
+Estado:
+Producción Operativa
+
+Objetivo:
+Permitir que una nueva IA o una nueva sesión de Copilot
+continúe el proyecto sin pérdida de contexto.
+
+Arquitectura Oficial:
+
+RAW
+↓
+SQLITE
+↓
+STAGING
+↓
+CORE
+↓
+BUSINESS RULES
+↓
+REPORTES
+
+Prioridad de lectura:
+
+1. ARQUITECTURA.md
+2. ESTADO_ACTUAL.md
+3. ROADMAP.md
+4. DECISIONES_TECNICAS.md
+5. DICCIONARIO_TABLAS.md
+6. GLOSARIO_REGLAS.md
+7. CORE_OPERACION_V1.md
+8. CORE_VENTAS_BASE_V1.md
+9. BITACORA.md
+"""
         )
 
-        escribir_separador(outfile)
+        separador(out)
+
+        for doc in DOCS_PRIORITARIOS:
+            ruta = PROJECT_DOCS / doc
+
+            if not ruta.exists():
+                continue
+
+            out.write(f"# DOCUMENTO: {doc}\n\n")
+            out.write(leer_archivo(ruta))
+            separador(out)
+
+    print(f"✅ CONTEXTO IA generado: {SALIDA_CONTEXTO}")
 
 
-def agregar_archivos_raiz(outfile):
-
-    outfile.write(
-        "###############################\n"
-    )
-
-    outfile.write(
-        "# ARCHIVOS PRINCIPALES\n"
-    )
-
-    outfile.write(
-        "###############################\n\n"
-    )
-
-    for archivo in ARCHIVOS_RAIZ:
-
-        if os.path.exists(archivo):
-
-            agregar_archivo(
-                outfile,
-                archivo,
-                "ARCHIVO"
-            )
+# ==========================================================
+# CODIGO CONSOLIDADO
+# ==========================================================
 
 
-def agregar_directorio(
-    outfile,
-    directorio,
-    extensiones
-):
+def generar_codigo_consolidado():
 
-    if not os.path.exists(directorio):
-        return
+    with open(SALIDA_CODIGO, "w", encoding="utf-8") as out:
+        out.write("# CODIGO CONSOLIDADO MATINAL\n\n")
 
-    outfile.write(
-        f"\n###############################\n"
-    )
+        # ARCHIVOS RAIZ
 
-    outfile.write(
-        f"# DIRECTORIO: {directorio}\n"
-    )
+        for archivo in ARCHIVOS_RAIZ:
+            ruta = Path(archivo)
 
-    outfile.write(
-        f"###############################\n\n"
-    )
+            if not ruta.exists():
+                continue
 
-    archivos = sorted(os.listdir(directorio))
+            out.write(f"\n### ARCHIVO: {archivo}\n\n")
 
-    for archivo in archivos:
+            out.write(leer_archivo(ruta))
 
-        ruta = os.path.join(
-            directorio,
-            archivo
-        )
+            separador(out)
 
-        if not os.path.isfile(ruta):
-            continue
+        # MODULOS
 
-        if any(
-            archivo.endswith(ext)
-            for ext in extensiones
-        ):
-            agregar_archivo(
-                outfile,
-                ruta,
-                directorio.upper()
-            )
+        for directorio in DIRECTORIOS_CODIGO:
+            base = Path(directorio)
+
+            if not base.exists():
+                continue
+
+            for ruta in sorted(base.rglob("*.py")):
+                if any(parte in EXCLUIR_DIRECTORIOS for parte in ruta.parts):
+                    continue
+
+                out.write(f"\n### ARCHIVO: {ruta}\n\n")
+
+                out.write(leer_archivo(ruta))
+
+                separador(out)
+
+    print(f"✅ CODIGO CONSOLIDADO generado: {SALIDA_CODIGO}")
 
 
-def consolidar_proyecto():
+# ==========================================================
+# INVENTARIO
+# ==========================================================
 
-    with open(
-        ARCHIVO_SALIDA,
-        "w",
-        encoding="utf-8"
-    ) as outfile:
 
-        outfile.write(
-            "MATINAL - CONTEXTO COMPLETO DEL PROYECTO\n"
-        )
+def generar_inventario():
 
-        outfile.write(
-            "VERSIÓN CONSOLIDADA PARA IA\n"
-        )
+    with open(SALIDA_INVENTARIO, "w", encoding="utf-8") as out:
+        out.write("# INVENTARIO DEL PROYECTO MATINAL\n\n")
 
-        outfile.write(
-            "=" * 100 + "\n\n"
-        )
+        # ----------------------------------
+        # RAIZ
+        # ----------------------------------
 
-        agregar_archivos_raiz(outfile)
+        out.write("## ARCHIVOS RAIZ\n\n")
 
-        for directorio, extensiones in DIRECTORIOS:
+        for item in sorted(ROOT.iterdir()):
+            if not item.is_file():
+                continue
 
-            agregar_directorio(
-                outfile,
-                directorio,
-                extensiones
-            )
+            if item.suffix.lower() in EXCLUIR_EXTENSIONES:
+                continue
 
-    print(
-        f"Proyecto consolidado correctamente en: {ARCHIVO_SALIDA}"
-    )
+            out.write(f"- {item.name}\n")
+
+        # ----------------------------------
+        # MODULES
+        # ----------------------------------
+
+        out.write("\n## MODULES\n\n")
+
+        modules = ROOT / "modules"
+
+        if modules.exists():
+            for ruta in sorted(modules.rglob("*")):
+                if not ruta.is_file():
+                    continue
+
+                if ruta.suffix.lower() in EXCLUIR_EXTENSIONES:
+                    continue
+
+                if any(parte in EXCLUIR_DIRECTORIOS for parte in ruta.parts):
+                    continue
+
+                out.write(f"- {ruta.relative_to(ROOT)}\n")
+
+        # ----------------------------------
+        # PROJECT DOCS
+        # ----------------------------------
+
+        out.write("\n## PROJECT_DOCS\n\n")
+
+        if PROJECT_DOCS.exists():
+            for doc in sorted(PROJECT_DOCS.glob("*")):
+                if doc.is_file():
+                    out.write(f"- {doc.name}\n")
+
+    print(f"✅ INVENTARIO generado: {SALIDA_INVENTARIO}")
+
+
+# ==========================================================
+# MAIN
+# ==========================================================
+
+
+def generar_contexto():
+
+    PROJECT_DOCS.mkdir(parents=True, exist_ok=True)
+
+    generar_contexto_ia()
+    generar_codigo_consolidado()
+    generar_inventario()
+
+    print("\n✅ Contexto MATINAL generado correctamente")
 
 
 if __name__ == "__main__":
-    consolidar_proyecto()
+    generar_contexto()

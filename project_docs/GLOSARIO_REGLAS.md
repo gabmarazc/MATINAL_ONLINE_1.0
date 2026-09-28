@@ -1,166 +1,893 @@
-# Glosario de Reglas de Negocio - MATINAL (Versión 1.0)
+### Glosario de Reglas de Negocio - MATINAL
+  
+Versión: 2.0
+Fecha de actualización: 28/09/2026
+Estado: Vigente
+Estado de validación: Producción Operativa
 
 ## 1. Identificación y Propósito
-El presente documento constituye la **Fuente de Verdad Institucional** sobre la inteligencia comercial de MATINAL. Ninguna decisión técnica o de infraestructura futura puede contradecir las definiciones funcionales aquí estipuladas. Las reglas se estructuran por dominios operativos y establecen el estándar para la futura capa de **`BUSINESS RULES`**.
+  
+El presente documento constituye la Fuente de Verdad Institucional sobre las reglas funcionales, operativas y comerciales del sistema MATINAL.
+  
+Su propósito es:
+- Definir las reglas vigentes.
+- Clasificar cada regla dentro de una capa arquitectónica.
+- Preservar el conocimiento funcional del negocio.
+- Mantener alineación entre documentación y código.
 
----
+Arquitectura oficial:
 
-## 2. Inventario Normativo de Reglas
+```text
+RAW
+↓
+SQLITE
+↓
+STAGING
+↓
+CORE
+↓
+BUSINESS RULES
+↓
+REPORTES
+```
 
-### A. Reglas Corporativas N1
-*   **1. Filtro Global de Empleados (SSOT)**
-    *   **Objetivo**: Aislar la operación comercial real descartando preventistas internos o cuentas de empleados.
-    *   **Definición Funcional**: Evalúa la columna `Subramo` de la tabla de transacciones de ventas (`vta`) y elimina de forma universal todos los registros que pertenezcan a cuentas marcadas como `EMPLOYEES` o `EMPLEADOS`. Opera como la Única Fuente de Verdad transversal.
-    *   **Fuente de Datos**: Tabla SQLite `vta`.
-    *   **Campos Involucrados**: `Subramo`, `CodVendedor`.
-    *   **Módulos de Aplicación**: `database.py` (`obtener_df_maestro_corporativo`), `rep_MN.py`, `rep_ccc.py`, `rep_kilos.py`, `rep_gerencial.py`[cite: 2].
-    *   **Prioridad**: Crítica / Absoluta.
-    *   **Naturaleza**: Obligatoria.
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+Principio institucional:
 
----
+```text
+STAGING normaliza.
+CORE interpreta operación.
+BUSINESS RULES aplica decisiones comerciales.
+REPORTES construyen indicadores y visualizaciones.
+```
 
-### B. Reglas Operativas N2
-*   **2. Exclusión de Comodatos y Préstamos**
-    *   **Objetivo**: Evitar la distorsión del volumen comercial con operaciones logísticas o financieras que no constituyen ventas netas.
-    *   **Definición Funcional**: Descarta transacciones cuyo tipo de venta corresponda a "Comodato Devolución", "Comodato Ficticio", "Comodato Ficticio Devolución" o "Comodato Préstamo"[cite: 3].
-    *   **Fuente de Datos**: Transacciones de ventas (`vta`).
-    *   **Campos Involucrados**: `TipoDeVenta`.
-    *   **Módulos de Aplicación**: Todos los motores analíticos de reportes[cite: 3, 4].
-    *   **Prioridad**: Alta.
-    *   **Naturaleza**: Obligatoria.
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+## 2. REGLAS DE STAGING
+  
+Las reglas de esta sección pertenecen exclusivamente a STAGING.
 
-*   **3. Selección Exclusiva de Proveedor PepsiCo**
-    *   **Objetivo**: Delimitar el análisis analítico exclusivamente al fabricante corporativo oficial.
-    *   **Definición Funcional**: Filtra las transacciones conservando únicamente aquellas donde el campo de proveedor contenga la cadena `PEPSICO`[cite: 3].
-    *   **Fuente de Datos**: Transacciones de ventas (`vta`).
-    *   **Campos Involucrados**: `Proveedor`.
-    *   **Módulos de Aplicación**: Todos los motores analíticos de reportes[cite: 3, 4].
-    *   **Prioridad**: Alta.
-    *   **Naturaleza**: Obligatoria.
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+Objetivo:
 
-*   **4. Aislamiento del Vendedor 20 / Depósito**
-    *   **Objetivo**: Aislar a la fuerza de ventas preventista pura, evitando sesgos provocados por cargas de inventario o movimientos de depósito central.
-    *   **Definición Funcional**: Exclusión sistemática del preventista código `20` en los reportes analíticos de preventistas (excepto para prorrateos financieros globales en el tablero gerencial)[cite: 3].
-    *   **Fuente de Datos**: Transacciones de ventas (`vta`) y padrón de vendedores.
-    *   **Campos Involucrados**: `CodVendedor`.
-    *   **Módulos de Aplicación**: `rep_MN.py`, `rep_ccc.py`, `rep_gerencial.py`, `rep_vespertina.py`[cite: 3, 5].
-    *   **Prioridad**: Crítica.
-    *   **Naturaleza**: Obligatoria.
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+```text
+Construir contratos de datos consistentes.
+```
 
----
+STAGING no puede contener:
 
-### C. Reglas Temporales y de Cierre Operativo
-*   **5. Corte por Día Matinal**
-    *   **Objetivo**: Establecer la foto operativa estricta al corte cronológico de la mañana (Día Matinal).
-    *   **Definición Funcional**: Suprime registros cuya fecha de carga (`FechaCarga`) sea igual o posterior al Día Matinal seleccionado para el mes en curso[cite: 3].
-    *   **Fuente de Datos**: Transacciones de ventas y filtros globales de usuario.
-    *   **Campos Involucrados**: `FechaCarga`.
-    *   **Módulos de Aplicación**: `rep_gerencial.py`, `rep_ccc.py`, `rep_MN.py`, `rep_kilos.py`[cite: 3].
-    *   **Prioridad**: Crítica.
-    *   **Naturaleza**: Configurable por usuario.
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+```text
+Objetivos
+CCC
+MN+
+Coberturas
+Compensaciones
+Pace
+KPIs
+Lógica Comercial
+```
 
-*   **6. Clasificación por Período Comercial**
-    *   **Objetivo**: Distribuir el volumen transaccional en ventanas temporales de impacto contable y logístico.
-    *   **Definición Funcional**: Clasifica las transacciones en *Arrastre* (mes anterior con entrega en mes actual), *Actual* (carga y entrega en mes corriente) y *Futuro* (mes siguiente)[cite: 3].
-    *   **Fuente de Datos**: `FechaCarga`, `FechaEntrega`.
-    *   **Campos Involucrados**: Fechas de carga/entrega y mes/año operativo.
-    *   **Módulos de Aplicación**: Motores de preparación de ventas en todos los submódulos[cite: 3, 4].
-    *   **Prioridad**: Alta.
-    *   **Naturaleza**: Obligatoria.
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+### STG-001 - Normalización de Ventas
 
-*   **7. Problema de Cierre del Día Venta (Vespertina)**
-    *   **Objetivo**: Auditar en tiempo real el impacto comercial exclusivo de las transacciones ejecutadas durante el Día Venta.
-    *   **Definición Funcional**: Contrasta las activaciones de CCC y conversiones digitales producidas durante el día contra la historia acumulada previa del mes (Arrastre + Actual)[cite: 5].
-    *   **Fuente de Datos**: Transacciones de ventas y padrón de universo.
-    *   **Campos Involucrados**: `FechaCarga`, `Cliente`, `ImporteNeto`, `CantBase`.
-    *   **Módulos de Aplicación**: `rep_vespertina.py`[cite: 5].
-    *   **Prioridad**: Alta.
-    *   **Naturaleza**: Obligatoria.
+#### Capa
 
----
+STAGING
 
-### D. Reglas de Cartera y CCC
-*   **8. Definición Operativa de Comprador CCC**
-    *   **Objetivo**: Cuantificar con precisión la efectividad de compra de los clientes en la cartera.
-    *   **Definición Funcional**: Un cliente califica como CCC (*Clientes con Compra*) si en el período (*Arrastre* + *Actual*) acumula una cantidad base (`CantBase`) $\ge$ 3 y un importe neto $\ge$ 1[cite: 3].
-    *   **Fuente de Datos**: Transacciones de ventas procesadas.
-    *   **Campos Involucrados**: `CantBase`, `ImporteNetoItem`, `Cliente`.
-    *   **Módulos de Aplicación**: `rep_ccc.py`, `rep_gerencial.py`, `rep_MN.py`[cite: 3].
-    *   **Prioridad**: Crítica.
-    *   **Naturaleza**: Obligatoria.
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+#### Entidad
 
-*   **9. Cartera Neta y Exclusión de Cierre Definitivo**
-    *   **Objetivo**: Establecer el universo neto de clientes evaluables para metas institucionales.
-    *   **Definición Funcional**: Calcula la cartera neta restando del padrón total las altas nuevas y reactivaciones mensuales, descartando de forma terminante a los clientes con estatus de `"CIERRE DEFINITIVO"` en el padrón de altas[cite: 3].
-    *   **Fuente de Datos**: `universo`, `altas`.
-    *   **Campos Involucrados**: `Cliente`, `Estado`, `Origen_Hoja`.
-    *   **Módulos de Aplicación**: `rep_ccc.py`[cite: 3].
-    *   **Prioridad**: Alta.
-    *   **Naturaleza**: Obligatoria.
+obtener_staging_vta()
 
----
+#### Objetivo
+  
+Convertir la tabla transaccional de ventas en una entidad técnicamente consistente.
 
-### E. Reglas MiNegocio (Adopción Digital)
-*   **10. Clasificación Digital por Adopción de Facturación**
-    *   **Objetivo**: Segmentar la cartera según su nivel de madurez en canales digitales de autogestión.
-    *   **Definición Funcional**: Categoriza a los clientes cruzando sus ventas por la app `MiNegocio` frente a sus ventas totales:
-        *   *No Digital*: Adopción $\le 1\%$ ($\le 0.01$).
-        *   *Híbrido*: Adopción $> 1\%$ y $< 70\%$.
-        *   *Fully Digital*: Adopción $\ge 70\%$ ($\ge 0.70$).
-    *   **Fuente de Datos**: Transacciones de ventas e indicador de canal.
-    *   **Campos Involucrados**: `OrigenDeVta`, `ImporteNetoItem`, `Cliente`.
-    *   **Módulos de Aplicación**: `rep_MN.py`, `rep_gerencial.py`, `rep_vespertina.py`.
-    *   **Prioridad**: Alta.
-    *   **Naturaleza**: Obligatoria.
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+#### Responsabilidades
 
-*   **11. Cálculo del Faltante para el Umbral del 70%**
-    *   **Objetivo**: Proveer una métrica accionable para la fuerza de ventas orientada a convertir clientes híbridos.
-    *   **Definición Funcional**: Calcula el monto monetario exacto adicional que un cliente no digital o híbrido debe facturar por la aplicación para alcanzar el 70% de participación digital[cite: 2].
-    *   **Fuente de Datos**: `Ventas_Totales`, `Ventas_MiNegocio`.
-    *   **Campos Involucrados**: Importes netos por canal.
-    *   **Módulos de Aplicación**: `rep_MN.py`[cite: 2].
-    *   **Prioridad**: Media-Alta.
-    *   **Naturaleza**: Obligatoria.
+```text
+Tipado de identificadores
+Conversión numérica
+Parseo robusto de fechas
+Normalización de marcas
+Generación de contrato técnico
+```
 
----
+#### Contrato Generado
 
-### F. Reglas de Cobertura (Marca e Innovación)
-*   **12. Validación de Compra Mínima por Cobertura**
-    *   **Objetivo**: Auditar la penetración de marcas estratégicas y lanzamientos en los puntos de venta.
-    *   **Definición Funcional**: Un cliente se considera cubierto en una Marca o Producto de Innovación si registra una cantidad comprada (`CantBase`) acumulada $\ge$ 3 unidades en el período evaluado[cite: 4].
-    *   **Fuente de Datos**: Transacciones de ventas y maestros de marcas/innovaciones[cite: 4].
-    *   **Campos Involucrados**: `Marca`, `Codigo` (producto), `CantBase`, `Cliente`.
-    *   **Módulos de Aplicación**: `rep_cob_marca.py`, `rep_cob_innovacion.py`, `rep_gerencial.py`[cite: 4].
-    *   **Prioridad**: Alta.
-    *   **Naturaleza**: Obligatoria (con metas de cobertura configurables, ej. 80%).
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+```text
+FechaCarga_dt
+FechaEntrega_dt
+CodVendedor
+Cliente
+PesoKg
+CantBase
+ImporteNetoItem
+Marca
+```
 
----
+### STG-002 - Normalización de Clientes
 
-### G. Reglas de Ausencias, Reemplazos y Operación Kilos
-*   **13. Reasignación Dinámica por Clave AUS**
-    *   **Objetivo**: Garantizar que el volumen de preventa no se pierda ante la ausencia temporal de un preventista titular.
-    *   **Definición Funcional**: Cruza transacciones con el padrón de ausencias mediante claves compuestas por preventista y fecha (`ClaveAUS`), reasignando el volumen al preventista de reemplazo operativo (`CodVendedorOperativo`)[cite: 3].
-    *   **Fuente de Datos**: `vta`, `ausencias`.
-    *   **Campos Involucrados**: `CodVendedor`, `FechaCarga`, `FechaEntrega`, `Reemplazo`.
-    *   **Módulos de Aplicación**: `rep_ccc.py`, `rep_kilos.py`, `rep_gerencial.py`[cite: 3].
-    *   **Prioridad**: Alta.
-    *   **Naturaleza**: Obligatoria.
-    *   **Candidata a BUSINESS RULES**: **Sí (Obligatoria)**.
+#### Capa
 
-*   **14. Proyección Lineal de Kilos por Días Restantes**
-    *   **Objetivo**: Estimar el volumen proyectado de cierre mensual para la toma de decisiones gerenciales.
-    *   **Definición Funcional**: Multiplica el promedio diario actual del preventista por los días hábiles restantes del mes (pudiendo descontar ineficiencias logísticas mediante el modo de ajuste `AJUSTADO` basado en `Rutas_Ajustadas`).
-    *   **Fuente de Datos**: `vta`, `rutas`, `maestro_vendedores`.
-    *   **Campos Involucrados**: `PesoKg`, fechas de rutas, `Rutas_Ajustadas`.
-    *   **Módulos de Aplicación**: `rep_kilos.py`, `rep_gerencial.py`.
-    *   **Prioridad**: Alta.
-    *   **Naturaleza**: Configurable (modos `TODO` vs `AJUSTADO`).
+STAGING
+
+#### Entidad
+
+obtener_staging_clientes()
+
+#### Objetivo
+  
+Normalizar el padrón institucional de clientes.
+
+#### Responsabilidades
+
+```text
+Tipado de identificadores
+Normalización de taxonomías
+Normalización de nombre cliente
+Normalización de vendedor
+```
+
+#### Contrato Generado
+
+```text
+Cliente
+Taxonomia
+NombreCliente
+CodVendedor
+```
+
+### STG-003 - Normalización de Rutas
+
+#### Capa
+
+STAGING
+
+#### Entidad
+
+obtener_staging_rutas()
+
+#### Objetivo
+  
+Centralizar el acceso técnico al calendario operativo.
+
+#### Responsabilidades
+
+```text
+Lectura SQLite
+Entrega consistente del calendario
+```
+
+### STG-004 - Normalización de Ausencias
+
+#### Capa
+
+STAGING
+
+#### Entidad
+
+obtener_staging_ausencias()
+
+#### Estado
+
+```text
+Implementada
+Validada en Producción
+FASE 4.7 Completada
+```
+
+#### Objetivo
+  
+Convertir ausencias en una entidad técnica independiente.
+
+#### Responsabilidades
+
+```text
+Lectura SQLite
+Detección de columnas
+Parseo robusto de fechas
+Conversión a Int64
+Normalización
+```
+
+#### Contrato Generado
+
+```text
+Fecha_dt
+CodVend_clean
+Reemplazo_clean
+```
+
+### STG-005 - Centralización de Maestros
+
+#### Capa
+
+STAGING
+
+#### Entidad
+
+obtener_staging_maestros()
+
+#### Objetivo
+  
+Centralizar maestros institucionales consumidos por CORE.
+
+#### Entidades Incluidas
+
+```text
+maestro_vendedores
+maestro_ccc
+maestro_marcas_cebe
+maestro_segmentos
+ausencias
+```
+
+## 3. REGLAS CORE
+  
+Las reglas de esta sección pertenecen a CORE.
+
+CORE transforma contratos técnicos en estructuras operativas.
+
+### COR-001 - Titularidad Operativa de Venta
+
+#### Capa
+
+CORE
+
+#### Entidad
+
+procesar_ausencias_y_reemplazos()
+
+#### Objetivo
+  
+Determinar quién ejecutó realmente una venta.
+
+#### Resultado
+
+```text
+CodVendedorOperativo
+```
+
+### COR-002 - Reasignación por Ausencias
+
+#### Capa
+
+CORE
+
+#### Entidad
+
+procesar_ausencias_y_reemplazos()
+
+#### Objetivo
+  
+Garantizar continuidad operativa ante ausencias.
+
+#### Regla
+
+Sin reemplazo:
+
+```text
+CodVendedorOperativo = CodVendedor
+```
+
+Con reemplazo:
+
+```text
+CodVendedorOperativo = Reemplazo
+```
+
+### COR-003 - Construcción de Claves AUS
+
+#### Capa
+
+CORE
+
+#### Objetivo
+  
+Vincular ventas con ausencias.
+
+#### ClaveAUS_Carga
+
+```text
+CodVendedor + FechaCarga
+```
+
+#### ClaveAUS_Entrega
+
+```text
+CodVendedor + FechaEntrega
+```
+
+#### ClaveAUS
+
+```text
+CodVend_clean + Fecha_dt
+```
+
+### COR-004 - Corte por Día Matinal
+
+#### Capa
+
+CORE
+
+#### Entidad
+
+calcular_ritmo_operativo()
+
+#### Objetivo
+  
+Construir la fotografía operacional del período.
+
+#### Regla
+
+```text
+Excluir registros cuya FechaCarga sea igual o posterior al Día Matinal.
+```
+
+### COR-005 - Clasificación Temporal Institucional
+
+#### Capa
+
+CORE
+
+#### Entidad
+
+calcular_ritmo_operativo()
+
+#### Clasificaciones
+
+##### Arrastre
+
+```text
+Carga mes anterior
+Entrega mes actual
+```
+
+##### Actual
+
+```text
+Carga mes actual
+Entrega mes actual
+```
+
+##### Futuro
+
+```text
+Carga mes actual
+Entrega mes siguiente
+```
+
+##### Fuera de Periodo
+
+```text
+No cumple criterios institucionales
+```
+
+### COR-006 - Calendario Operativo
+
+#### Capa
+
+CORE
+
+#### Entidad
+
+calcular_calendario_y_rutas()
+
+#### Objetivo
+  
+Determinar días operativos por vendedor.
+
+#### Resultados
+
+```text
+dias_pasados_map
+dias_restantes_map
+total_dias_pasados
+total_dias_restantes
+```
+
+### COR-007 - Ajuste por Rutas Ajustadas
+
+#### Capa
+
+CORE
+
+#### Entidad
+
+calcular_calendario_y_rutas()
+
+#### Objetivo
+  
+Descontar rutas ajustadas de los días restantes.
+
+#### Modo AJUSTADO
+
+```text
+Aplica descuento de rutas ajustadas.
+```
+
+#### Modo TODO
+
+```text
+No aplica descuento.
+```
+
+### COR-008 - Definición de Venta Base
+
+#### Capa
+
+CORE
+
+#### Entidad
+
+obtener_core_ventas_base()
+
+#### Estado
+
+IMPLEMENTADO PARCIALMENTE
+
+#### Situación Arquitectónica
+
+La entidad existe en producción y actualmente proporciona una primera definición institucional de venta basada en contratos normalizados provenientes de STAGING.
+
+La consolidación definitiva de CORE_VENTAS_BASE continúa formando parte del roadmap arquitectónico y evolucionará hasta convertirse en la fuente única de verdad para todas las interpretaciones comerciales de venta.
+
+#### Objetivo
+
+Representar una venta mediante una definición institucional única y reutilizable para toda la plataforma.
+
+#### Entidad Base
+
+```text
+Cliente
+CodVendedor
+FechaCarga_dt
+FechaEntrega_dt
+FechaLiquidacion_dt
+CantBase
+PesoKg
+ImporteNetoItem
+Marca
+Proveedor
+Articulo
+Subramo
+TipoDeVenta
+```
+
+#### Restricciones
+
+No aplica:
+
+```text
+CCC
+MN+
+Coberturas
+Compensaciones
+Objetivos
+Reemplazos
+```
+
+#### Evolución Esperada
+
+CORE_VENTAS_BASE deberá transformarse progresivamente en la entidad institucional común consumida por:
+
+- CCC
+- Mi Negocio
+- Kilos
+- Coberturas
+- Gerencial
+- Vespertina
+- Objetivos
+
+con el fin de eliminar interpretaciones divergentes sobre qué constituye una venta válida dentro de MATINAL.
+
+## 4. REGLAS BUSINESS RULES
+  
+Las reglas de esta sección representan decisiones de negocio.
+
+Actualmente la capa BUSINESS RULES se encuentra parcialmente desacoplada.
+
+### BR-001 - Filtro Global de Empleados
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Excluir empleados de los análisis comerciales.
+
+#### Campo
+
+Subramo
+
+#### Valores
+
+```text
+EMPLOYEES
+EMPLEADOS
+```
+
+#### Prioridad
+
+```text
+Crítica
+```
+
+### BR-002 - Exclusión de Comodatos y Préstamos
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Excluir operaciones que no representan ventas comerciales.
+
+#### Valores Excluidos
+
+```text
+Comodato Devolución
+Comodato Ficticio
+Comodato Ficticio Devolución
+Comodato Préstamo
+```
+
+### BR-003 - Filtro Corporativo PepsiCo
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Delimitar los análisis a ventas PepsiCo.
+
+#### Campo
+
+```text
+Proveedor
+```
+
+### BR-004 - Exclusión del Vendedor 20
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Excluir movimientos correspondientes al depósito.
+
+#### Campo
+
+```text
+CodVendedor
+```
+
+#### Regla
+
+```text
+Excluir vendedor 20.
+```
+
+### BR-005 - Problema de Cierre
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Estado
+
+```text
+Regla Institucional Prioritaria
+```
+
+#### Definición
+
+Una venta pertenece al período operativo cuando:
+
+```text
+FechaCarga y FechaLiquidacion
+pertenecen al mismo período operativo
+```
+
+o bien:
+
+```text
+FechaLiquidacion es nula.
+```
+
+### BR-006 - Definición de Cliente CCC
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Determinar clientes con compra válida.
+
+#### Requisitos
+
+```text
+CantBase >= 3
+Importe Neto > 0
+```
+
+### BR-007 - Cartera Neta
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Construir el universo evaluable de CCC.
+
+#### Consideraciones
+
+```text
+Altas
+Reactivaciones
+Inactivaciones
+Cierre Definitivo
+```
+
+### BR-008 - Cobertura por Marca
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Determinar cobertura efectiva de marca.
+
+#### Regla
+
+```text
+CantBase >= 3
+```
+
+### BR-009 - Cobertura por Innovación
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Determinar cobertura efectiva de innovación.
+
+#### Regla
+
+```text
+CantBase >= 3
+```
+
+#### Fuente
+
+```text
+maestro_innovaciones
+```
+
+### BR-010 - Clasificación Digital
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Clasificar adopción digital.
+
+#### Categorías
+
+```text
+No Digital
+Híbrido
+Fully Digital
+```
+
+### BR-011 - Gap a 70% Digital
+
+#### Capa Objetivo
+
+BUSINESS RULES
+
+#### Objetivo
+  
+Determinar el faltante para alcanzar 70% de adopción digital.
+
+### BR-012 - Objetivos de Vendedores
+
+#### Capa
+
+BUSINESS RULES
+
+#### Entidad
+
+obtener_objetivos_vendedores()
+
+#### Fuente
+
+```text
+objetivos_vendedores
+```
+
+#### Contrato
+
+```text
+CodVendedor
+SEGMENTO
+Obj_Sugerido_Kg
+```
+
+## 5. REGLAS DE REPORTES
+  
+Las reglas de esta sección pertenecen a los reportes y tableros.
+
+### REP-001 - Proyección de Kilos
+
+#### Capa
+
+REPORTES
+
+#### Objetivo
+  
+Estimar el cierre mensual.
+
+#### Insumos
+
+```text
+CORE_OPERACION
+Dias Restantes
+PesoKg
+Calendario Operativo
+```
+
+### REP-002 - Pace
+
+#### Capa
+
+REPORTES
+
+#### Objetivo
+  
+Medir velocidad de ejecución comercial.
+
+### REP-003 - Efectividad
+
+#### Capa
+
+REPORTES
+
+#### Objetivo
+  
+Medir desempeño comercial respecto de objetivos.
+
+### REP-004 - Compensaciones
+
+#### Capa
+
+REPORTES
+
+#### Objetivo
+  
+Determinar niveles de cumplimiento y compensación.
+
+### REP-005 - Dashboard Gerencial
+
+#### Capa
+
+REPORTES
+
+#### Funciones
+
+```text
+Seguimiento Directivo
+Consolidación Comercial
+Proyecciones
+```
+
+### REP-006 - Kilos
+
+#### Capa
+
+REPORTES
+
+#### Funciones
+
+```text
+Avance
+Objetivos
+Proyecciones
+Compensaciones
+Reemplazos
+```
+
+### REP-007 - CCC
+
+#### Capa
+
+REPORTES
+
+#### Funciones
+
+```text
+Cartera
+Altas
+Reactivaciones
+Batalla NC
+```
+
+### REP-008 - Mi Negocio
+
+#### Capa
+
+REPORTES
+
+#### Funciones
+
+```text
+Adopción Digital
+Clasificación Digital
+Gap a Objetivo
+```
+
+### REP-009 - Cobertura Marca
+
+#### Capa
+
+REPORTES
+
+#### Función
+
+```text
+Cobertura de marcas estratégicas.
+```
+
+### REP-010 - Cobertura Innovación
+
+#### Capa
+
+REPORTES
+
+#### Función
+
+```text
+Cobertura de innovaciones estratégicas.
+```
+
+### REP-011 - Vespertina
+
+#### Capa
+
+REPORTES
+
+#### Función
+
+```text
+Auditoría operativa del Día Venta.
+```
+
+### REP-012 - Objetivos
+
+#### Capa
+
+REPORTES
+
+#### Función
+
+```text
+Seguimiento de objetivos comerciales.
+```
+
+## 6. Fuente de Verdad
+  
+Las reglas definidas en este documento constituyen la referencia institucional vigente para:
+
+```text
+STAGING
+CORE
+BUSINESS RULES
+REPORTES
+```
+
+Toda nueva regla deberá clasificarse explícitamente dentro de una de estas capas antes de incorporarse al sistema.

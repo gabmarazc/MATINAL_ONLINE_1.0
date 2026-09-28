@@ -20,6 +20,7 @@ def procesar_ausencias_y_reemplazos(
     """
     Capa CORE: Procesa la tabla de ausencias y asigna la titularidad operativa (CodVendedorOperativo)
     cruzando las fechas de carga y entrega contra las inasistencias registradas.
+    Consume directamente las columnas normalizadas provistas por obtener_staging_ausencias().
     """
     t0 = time.perf_counter()
     if df_vta is None or df_vta.empty:
@@ -72,44 +73,6 @@ def procesar_ausencias_y_reemplazos(
         else pd.DataFrame()
     )
     if not df_aus.empty:
-        # PUNTO 2: Eliminación de heurísticas frágiles por índices posicionales
-        cols_vend_cand = [
-            "Ausente",
-            "CodVend",
-            "CodVendedor",
-            "Vendedor",
-            "Cod_Vendedor",
-        ]
-        col_aus_vend = next((c for c in cols_vend_cand if c in df_aus.columns), None)
-        if not col_aus_vend:
-            raise ValueError(
-                "No se encontró columna de vendedor en la tabla de ausencias."
-            )
-
-        cols_f_cand = ["Fecha", "FechaAusencia", "Dia"]
-        col_aus_fecha = next((c for c in cols_f_cand if c in df_aus.columns), None)
-        if not col_aus_fecha:
-            raise ValueError(
-                "No se encontró columna de fecha en la tabla de ausencias."
-            )
-
-        cols_reemp_cand = [
-            "Reemplazo",
-            "CodReemplazo",
-            "Cod_Reemplazo",
-            "PreventistaReemplazo",
-        ]
-        col_aus_reemp = next((c for c in cols_reemp_cand if c in df_aus.columns), None)
-        if not col_aus_reemp:
-            raise ValueError(
-                "No se encontró columna de reemplazo en la tabla de ausencias."
-            )
-
-        df_aus["Fecha_dt"] = parsear_fecha_robusta(df_aus[col_aus_fecha])
-        df_aus["CodVend_clean"] = pd.to_numeric(
-            df_aus[col_aus_vend], errors="coerce"
-        ).astype("Int64")
-
         mask_aus_f = df_aus["Fecha_dt"].notna()
         df_aus["ClaveAUS"] = pd.Series(pd.NA, dtype="string")
         df_aus.loc[mask_aus_f, "ClaveAUS"] = (
@@ -117,10 +80,6 @@ def procesar_ausencias_y_reemplazos(
             + "-"
             + df_aus.loc[mask_aus_f, "Fecha_dt"].dt.strftime("%Y-%m-%d")
         )
-
-        df_aus["Reemplazo_clean"] = pd.to_numeric(
-            df_aus[col_aus_reemp], errors="coerce"
-        ).astype("Int64")
 
         aus_map = (
             df_aus.dropna(subset=["ClaveAUS", "Reemplazo_clean"])

@@ -1,31 +1,29 @@
+## Decisiones Técnicas - MATINAL
+
+Versión: 2.0  
+Fecha de actualización: 28/09/2026  
+Estado: Vigente  
+Estado de validación: Producción Operativa
+
 ---
 
-##### H. Decisiones de Arquitectura por Capas (Fase 4)
+# A. Decisiones Arquitectónicas Fundamentales
 
----
+## DT.01: Arquitectura Institucional Oficial
 
-### DT.15: Implementación Formal de la Capa STAGING
+### Fecha
 
-#### Fecha
 27/09/2026
 
-#### Estado
+### Estado
+
 Vigente ✅
 
-#### Descripción
+### Decisión
 
-Se declara oficialmente implementada la capa STAGING dentro de la arquitectura institucional MATINAL.
+La arquitectura oficial de MATINAL es:
 
-La transición desde el modelo histórico:
-
-RAW
-↓
-SQLite
-↓
-Pipelines Analíticos
-
-hacia el modelo objetivo:
-
+```text
 RAW
 ↓
 SQLITE
@@ -37,274 +35,784 @@ CORE
 BUSINESS RULES
 ↓
 REPORTES
+```
 
-deja de ser un objetivo teórico y pasa a ser una realidad operativa validada.
+### Objetivo
 
-#### Principios
+Separar responsabilidades técnicas y funcionales.
 
-La capa STAGING debe encargarse exclusivamente de:
+### Principios
 
-- Lectura SQLite
-- Parseo de fechas
-- Detección de columnas
-- Normalización
-- Conversión de tipos
-- Limpieza técnica
-- Contratos de datos
-
-La capa STAGING no debe contener:
-
-- Objetivos
-- KPIs
-- Pace
-- Compensaciones
-- CCC
-- MN+
-- Coberturas
-- Lógica comercial
+```text
+RAW recibe datos.
+SQLITE persiste datos.
+STAGING normaliza.
+CORE interpreta operación.
+BUSINESS RULES aplica reglas.
+REPORTES presentan resultados.
+```
 
 ---
 
-### DT.16: Implementación del Módulo obtener_staging_ausencias()
+## DT.02: SQLite como Fuente Física Única
 
-#### Fecha
+### Fecha
 
 27/09/2026
 
-#### Estado
+### Estado
 
 Vigente ✅
 
-#### Descripción
+### Decisión
 
-Se crea la función:
+SQLite constituye la fuente física única de datos del sistema.
 
+### Ubicación
+
+```text
+data/matinal.db
+```
+
+### Tecnología
+
+```text
+SQLite
+```
+
+### Configuración
+
+```text
+WAL (Write Ahead Logging)
+```
+
+### Objetivos
+
+```text
+Reducir lecturas de Excel.
+Aumentar rendimiento.
+Centralizar persistencia.
+Garantizar consistencia.
+```
+
+---
+
+## DT.03: Separación Formal de Capas
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+Cada capa posee responsabilidades exclusivas.
+
+### STAGING
+
+Permitido:
+
+```text
+Lectura SQLite
+Tipado
+Normalización
+Parseo de Fechas
+Contratos de Datos
+```
+
+Prohibido:
+
+```text
+Objetivos
+CCC
+MN+
+Coberturas
+Pace
+Compensaciones
+KPIs
+Lógica Comercial
+```
+
+### CORE
+
+Permitido:
+
+```text
+Interpretación Operativa
+Calendario
+Períodos
+Reemplazos
+Titularidad Operativa
+```
+
+Prohibido:
+
+```text
+ETL
+Parseos heredados
+Normalización técnica
+```
+
+### BUSINESS RULES
+
+Permitido:
+
+```text
+Aplicación de reglas comerciales
+Objetivos
+Coberturas
+CCC
+MN+
+Problema de Cierre
+```
+
+### REPORTES
+
+Permitido:
+
+```text
+KPIs
+Proyecciones
+Visualizaciones
+Compensaciones
+Dashboards
+```
+
+---
+
+# B. Decisiones sobre STAGING
+
+## DT.10: Implementación Formal de STAGING
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+La capa STAGING se encuentra oficialmente implementada.
+
+### Entidades Activas
+
+```python
+obtener_staging_vta()
+obtener_staging_clientes()
+obtener_staging_rutas()
 obtener_staging_ausencias()
+obtener_staging_maestros()
+```
 
-como punto oficial de entrada para la entidad AUSENCIAS.
+### Resultado
 
-#### Motivación
-
-Históricamente el procesamiento de ausencias se encontraba mezclado con lógica operativa dentro del CORE.
-
-La decisión institucional consiste en trasladar progresivamente toda responsabilidad ETL asociada a ausencias hacia la capa STAGING.
-
-#### Responsabilidades asignadas
-
-obtener_staging_ausencias() es responsable de:
-
-- Lectura de la tabla SQLite ausencias
-- Detección de vendedor
-- Detección de fecha
-- Detección de reemplazo
-- Parseo robusto de fechas
-- Conversión a Int64
-- Generación de columnas normalizadas
-
-#### Contrato de salida aprobado
-
-Columnas garantizadas:
-
-- Fecha_dt
-- CodVend_clean
-- Reemplazo_clean
+```text
+STAGING implementado y operativo.
+```
 
 ---
 
-### DT.17: Cambio de Orquestación para Ausencias
+## DT.11: STAGING como Dueño Exclusivo del ETL
 
-#### Fecha
+### Fecha
 
 27/09/2026
 
-#### Estado
+### Estado
 
 Vigente ✅
 
-#### Cambio aprobado
+### Decisión
 
-Antes:
+Toda transformación técnica debe residir en STAGING.
 
-df_ausencias = maestros["ausencias"]
+### Incluye
 
-Después:
+```text
+Parseo de fechas
+Tipado
+Normalización
+Detección de columnas
+Conversión de tipos
+Contratos técnicos
+```
 
-df_ausencias = obtener_staging_ausencias()
+### Objetivo
 
-#### Resultado
-
-El CORE deja de depender de estructuras internas del diccionario de maestros para obtener ausencias.
-
-La entidad pasa a poseer un acceso especializado y desacoplado.
-
-#### Beneficios
-
-- Menor acoplamiento
-- Mejor mantenibilidad
-- Preparación para futuras entidades STAGING
-- Contratos de datos explícitos
+Eliminar ETL duplicado en capas superiores.
 
 ---
 
-### DT.18: Estrategia de Migración Incremental STAGING → CORE
+## DT.12: Contratos Obligatorios de STAGING
 
-#### Fecha
+### Fecha
 
 27/09/2026
 
-#### Estado
+### Estado
 
 Vigente ✅
 
-#### Decisión
+### Decisión
 
-Toda migración arquitectónica deberá realizarse mediante dos etapas separadas:
+Las entidades STAGING deben entregar contratos estables.
 
+### STAGING_VTA
+
+Contrato mínimo:
+
+```text
+FechaCarga_dt
+FechaEntrega_dt
+CodVendedor
+Cliente
+PesoKg
+CantBase
+ImporteNetoItem
+Marca
+```
+
+### STAGING_CLIENTES
+
+Contrato mínimo:
+
+```text
+Cliente
+Taxonomia
+NombreCliente
+CodVendedor
+```
+
+### STAGING_AUSENCIAS
+
+Contrato mínimo:
+
+```text
+Fecha_dt
+CodVend_clean
+Reemplazo_clean
+```
+
+---
+
+# C. Decisiones sobre CORE
+
+## DT.20: Implementación Formal de CORE
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+La capa CORE se encuentra implementada y operativa en producción.
+
+### Componentes Activos
+
+```python
+procesar_ausencias_y_reemplazos()
+calcular_ritmo_operativo()
+calcular_calendario_y_rutas()
+obtener_core_operacion()
+```
+
+### Resultado
+
+```text
+CORE implementado.
+CORE validado.
+CORE operativo.
+```
+
+---
+
+## DT.21: CORE como Dueño de la Interpretación Operativa
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+CORE es responsable de interpretar entidades provenientes de STAGING.
+
+### Responsabilidades
+
+```text
+Titularidad operativa
+Vendedor operativo
+Ausencias
+Reemplazos
+Calendario
+Clasificación temporal
+```
+
+### No Responsabilidades
+
+```text
+Objetivos
+CCC
+MN+
+Coberturas
+KPIs
+Compensaciones
+```
+
+---
+
+## DT.22: Clasificación Oficial de Períodos
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+Toda transacción debe clasificarse en uno de los siguientes estados:
+
+```text
+Arrastre
+Actual
+Futuro
+Fuera de Periodo
+```
+
+### Implementación
+
+```python
+calcular_ritmo_operativo()
+```
+
+---
+
+## DT.23: Gestión Oficial de Reemplazos
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+La reasignación operativa de ventas corresponde a CORE.
+
+### Implementación
+
+```python
+procesar_ausencias_y_reemplazos()
+```
+
+### Resultado
+
+```text
+CodVendedorOperativo
+```
+
+---
+
+# D. Decisiones sobre AUSENCIAS
+
+## DT.30: Implementación de STAGING_AUSENCIAS
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+Se implementa la entidad:
+
+```python
+obtener_staging_ausencias()
+```
+
+como puerta oficial de entrada para ausencias.
+
+### Responsabilidades
+
+```text
+Lectura SQLite
+Detección de columnas
+Parseo robusto
+Tipado
+Normalización
+```
+
+### Contrato Oficial
+
+```text
+Fecha_dt
+CodVend_clean
+Reemplazo_clean
+```
+
+---
+
+## DT.31: Cambio de Orquestación de AUSENCIAS
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Antes
+
+```python
+maestros["ausencias"]
+```
+
+### Después
+
+```python
+obtener_staging_ausencias()
+```
+
+### Resultado
+
+```text
+Menor acoplamiento.
+Contratos explícitos.
+Mayor mantenibilidad.
+```
+
+---
+
+## DT.32: Cierre Formal de la Fase 4.7
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+La Fase 4.7 se encuentra cerrada.
+
+### Nombre
+
+```text
+Migración de AUSENCIAS a STAGING
+```
+
+### Resultado
+
+```text
+Validada en producción.
+```
+
+### Verificaciones
+
+```text
+Arranque Streamlit
+Carga SQLite
+Ejecución STAGING
+Ejecución CORE
+Integración AUSENCIAS
+Renderizado de reportes
+Sin errores de ejecución
+```
+
+---
+
+# E. Decisiones sobre BUSINESS RULES
+
+## DT.40: Estado Actual de BUSINESS RULES
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+La capa BUSINESS RULES existe y se encuentra parcialmente desacoplada.
+
+### Situación Actual
+
+Implementado:
+
+```python
+business_rules_repository.py
+```
+
+Disponible:
+
+```python
+obtener_objetivos_vendedores()
+```
+
+### Estado Arquitectónico
+
+```text
+Parcialmente desacoplado.
+En evolución.
+```
+
+---
+
+## DT.41: Acceso Controlado a Objetivos
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+La consulta de objetivos debe realizarse mediante:
+
+```python
+obtener_objetivos_vendedores()
+```
+
+### Fuente
+
+```text
+objetivos_vendedores
+```
+
+### Contrato
+
+```text
+CodVendedor
+SEGMENTO
+Obj_Sugerido_Kg
+```
+
+---
+
+# F. Estrategia de Migración Arquitectónica
+
+## DT.50: Estrategia de Migración Incremental
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+Toda migración arquitectónica deberá seguir el siguiente proceso:
+
+```text
 ETAPA 1
-
-Crear STAGING especializado.
+Crear entidad STAGING
 
 ETAPA 2
-
-Consumir STAGING desde CORE.
+Consumir desde CORE
 
 ETAPA 3
-
-Validar producción.
+Validar en producción
 
 ETAPA 4
+Eliminar duplicidades
+```
 
-Eliminar duplicidades.
+### Objetivo
 
-#### Prohibición
+Reducir riesgo operativo.
 
-No realizar simultáneamente:
+---
 
-- creación de STAGING
-- cambio de orquestación
-- eliminación de lógica heredada
+## DT.51: Prohibición de Refactorización Masiva
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+No combinar simultáneamente:
+
+```text
+Creación de STAGING
+Cambio de Orquestación
+Eliminación de Lógica Heredada
+```
 
 en una única iteración.
 
-Motivo:
+### Motivo
 
-Dificulta la detección de regresiones.
-
----
-
-### DT.19: Validación Operativa de la FASE 4.7
-
-#### Fecha
-
-27/09/2026
-
-#### Estado
-
-Vigente ✅
-
-#### Resultado
-
-La implementación fue validada mediante ejecución real del sistema.
-
-Verificaciones aprobadas:
-
-✅ Arranque Streamlit
-
-✅ Carga SQLite
-
-✅ Ejecución STAGING
-
-✅ Ejecución CORE
-
-✅ Generación de reportes
-
-✅ Integración de ausencias
-
-✅ Ausencia de errores de importación
-
-✅ Ausencia de errores de ejecución
-
-#### Evidencia
-
-Tiempos observados:
-
-obtener_staging_ausencias:
-0.0087 s
-
-procesar_ausencias_y_reemplazos:
-0.7176 s
-
-obtener_core_operacion:
-13.4367 s
-
-obtener_matriz_kilos_comercial:
-14.6438 s
-
-#### Conclusión
-
-La FASE 4.7 queda formalmente cerrada.
+```text
+Facilitar detección de regresiones.
+```
 
 ---
 
-### DT.20: Refactor Pendiente de Ausencias (FASE 4.8)
+# G. Próxima Fase Aprobada
 
-#### Estado
+## DT.60: Fase 4.8
+
+### Estado
 
 Pendiente ⏳
 
-#### Objetivo
+### Nombre
 
-Eliminar ETL redundante dentro de:
+```text
+Eliminación de ETL duplicado en CORE
+```
 
+### Objetivo
+
+Eliminar lógica técnica redundante de:
+
+```python
 procesar_ausencias_y_reemplazos()
+```
 
-#### Elementos candidatos
+### Elementos Candidatos
 
-- cols_vend_cand
-- cols_f_cand
-- cols_reemp_cand
-- parsear_fecha_robusta()
-- CodVend_clean
-- Reemplazo_clean
+```text
+cols_vend_cand
+cols_f_cand
+cols_reemp_cand
+parsear_fecha_robusta()
+CodVend_clean
+Reemplazo_clean
+```
 
-#### Resultado esperado
+### Resultado Esperado
 
-STAGING:
+```text
+STAGING = 100% ETL
+CORE = 100% Operación
+```
 
-100% ETL.
+### Restricción
 
-CORE:
-
-100% lógica operativa.
-
-#### Restricción
-
-No ejecutar esta refactorización sin validación previa de producción.
+```text
+Requiere validación en producción posterior.
+```
 
 ---
 
-### DT.21: Política de Conservación del Conocimiento Institucional
+# H. Conservación del Conocimiento Institucional
 
-#### Fecha
+## DT.70: Documentación Mínima Obligatoria
+
+### Fecha
 
 27/09/2026
 
-#### Estado
+### Estado
 
 Vigente ✅
 
-#### Decisión
+### Decisión
 
-Los siguientes documentos constituyen la memoria mínima obligatoria del proyecto:
+Los siguientes documentos constituyen la memoria institucional mínima obligatoria del sistema:
 
-- ARQUITECTURA.md
-- ESTADO_ACTUAL.md
-- DECISIONES_TECNICAS.md
-- ROADMAP.md
-- PIPELINE_CORE.md
-- DICCIONARIO_TABLAS.md
-- GLOSARIO_REGLAS.md
+```text
+ARQUITECTURA.md
+ESTADO_ACTUAL.md
+DECISIONES_TECNICAS.md
+ROADMAP.md
+DICCIONARIO_TABLAS.md
+GLOSARIO_REGLAS.md
+CORE_OPERACION_V1.md
+CORE_VENTAS_BASE_V1.md
+```
 
-#### Objetivo
+### Objetivo
 
-Permitir que cualquier instancia futura de Copilot, desarrollador o auditor reconstruya el contexto técnico y funcional completo sin depender del historial de conversaciones.
+Permitir reconstruir el contexto técnico y funcional completo independientemente de conversaciones previas.
+
+---
+
+## DT.71: Prioridad de la Documentación
+
+### Fecha
+
+27/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+Ante discrepancias:
+
+```text
+Documentación institucional
+↓
+Código fuente
+```
+
+### Orden de Consulta
+
+```text
+ARQUITECTURA.md
+ESTADO_ACTUAL.md
+ROADMAP.md
+DECISIONES_TECNICAS.md
+DICCIONARIO_TABLAS.md
+GLOSARIO_REGLAS.md
+CORE_OPERACION_V1.md
+CORE_VENTAS_BASE_V1.md
+```
+
+---
+
+## Estado General
+
+```text
+RAW               ✅
+SQLITE            ✅
+STAGING           ✅
+CORE              ✅
+BUSINESS RULES    🟡 Parcial
+REPORTES          ✅
+```
+
+## Estado de Fase
+
+```text
+FASE 4.7 COMPLETADA ✅
+FASE 4.8 APROBADA ⏳
+```
