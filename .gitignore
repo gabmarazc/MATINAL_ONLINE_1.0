@@ -5,3 +5,4 @@ data/*.db
 data/*.xlsx
 data/*.parquet
 .DS_Store
+Backup/

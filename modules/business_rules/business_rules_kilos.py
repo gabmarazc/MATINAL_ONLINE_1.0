@@ -12,6 +12,43 @@ from modules.business_rules.business_rules_repository import (
 )
 
 
+def _filtrar_universo_comercial_kilos(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    BUSINESS_RULES: Aplica las reglas institucionales de exclusión sobre el universo bruto operativo.
+    - Filtra transacciones restringiendo al proveedor PEPSICO.
+    - Excluye tipologías de venta atípicas (Comodatos, Préstamos y Devoluciones Ficticias).
+    """
+    if df is None or df.empty:
+        return df
+
+    df_filtrado = df.copy()
+
+    # Regla 1: Restricción exclusiva a Portafolio PEPSICO
+    if "Proveedor" in df_filtrado.columns:
+        df_filtrado = df_filtrado[
+            df_filtrado["Proveedor"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .str.contains("PEPSICO", na=False)
+        ]
+
+    # Regla 2: Exclusión de Comodatos y Préstamos Logísticos
+    if "TipoDeVenta" in df_filtrado.columns:
+        tipos_excluidos = [
+            "Comodato Devolución",
+            "Comodato Ficticio",
+            "Comodato Ficticio Devolución",
+            "Comodato Préstamo",
+        ]
+        df_filtrado = df_filtrado[
+            ~df_filtrado["TipoDeVenta"].astype(str).str.strip().isin(tipos_excluidos)
+        ]
+
+    return df_filtrado
+
+
 def _asegurar_segmento_comercial(df: pd.DataFrame) -> pd.DataFrame:
     """
     BUSINESS_RULES: Replica exactamente la lógica de segmentación del legacy (rep_kilos.py)
@@ -440,13 +477,22 @@ def obtener_matriz_kilos_comercial(
     datos_operativos = obtener_core_operacion(
         anio, mes, dia_matinal, dia_venta, modo_ajuste="AJUSTADO"
     )
-    df_vta_op = datos_operativos["df_vta_operativa"]
+    df_vta_op_bruto = datos_operativos["df_vta_operativa"]
     dias_pasados_map = datos_operativos["dias_pasados_map"]
     dias_restantes_map = datos_operativos["dias_restantes_map"]
 
-    if df_vta_op.empty:
+    if df_vta_op_bruto.empty:
         print(
             f"[PERF_CORE] 10) obtener_matriz_kilos_comercial (vta_op vacía) -> {time.perf_counter() - t0:.4f} s"
+        )
+        return pd.DataFrame()
+
+    # APLICACIÓN DE LA REGLA INSTITUCIONAL DE PORTAFOLIO (PEPSICO Y SIN COMODATOS)
+    df_vta_op = _filtrar_universo_comercial_kilos(df_vta_op_bruto)
+
+    if df_vta_op.empty:
+        print(
+            f"[PERF_CORE] 10) obtener_matriz_kilos_comercial (vta_op vacía tras filtrado de portafolio) -> {time.perf_counter() - t0:.4f} s"
         )
         return pd.DataFrame()
 
