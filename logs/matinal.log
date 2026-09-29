@@ -317,3 +317,5 @@
 2026-09-28 12:56:55 | WARNING  | matinal.database | CARGANDO TABLA: vta
 2026-09-28 13:01:17 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
 2026-09-29 12:03:17 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-09-29 12:07:06 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-09-29 12:07:29 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
