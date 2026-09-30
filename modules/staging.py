@@ -1,4 +1,3 @@
-```python
 # modules/staging.py
 import time
 import streamlit as st
