@@ -319,3 +319,13 @@
 2026-09-29 12:03:17 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
 2026-09-29 12:07:06 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
 2026-09-29 12:07:29 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-09-29 12:14:12 | WARNING  | matinal.database | CARGANDO TABLA: altas
+2026-09-29 12:14:12 | WARNING  | matinal.database | CARGANDO TABLA: rutas
+2026-09-29 12:14:23 | WARNING  | matinal.database | CARGANDO TABLA: tp
+2026-09-29 12:14:23 | WARNING  | matinal.database | DETECTADA CARGA ESPECIAL TP: tp
+2026-09-29 12:14:26 | WARNING  | matinal.database | CARGANDO TABLA: universo
+2026-09-29 12:14:28 | WARNING  | matinal.database | CARGANDO TABLA: vta
+2026-09-29 12:17:46 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-09-29 14:05:27 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-09-29 15:02:41 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-09-29 15:03:15 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).

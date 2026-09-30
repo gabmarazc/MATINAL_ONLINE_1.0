@@ -49,7 +49,6 @@ def procesar_ausencias_y_reemplazos(
             df.get(col_vend_tit, 0), errors="coerce"
         ).astype("Int64")
 
-    # PUNTO 4: Protección explícita ante fechas nulas (NaT) en generación de claves
     mask_carg = df["FechaCarga_dt"].notna()
     mask_ent = df["FechaEntrega_dt"].notna()
 
@@ -113,10 +112,10 @@ def calcular_calendario_y_rutas(
     mes: int,
     dia_venta: str,
     modo_ajuste: str = "AJUSTADO",
-) -> tuple[dict, dict, int, int]:
+) -> tuple[dict, dict, dict, dict, int, int]:
     """
-    Capa CORE: Calcula los días pasados, rutas totales y días restantes (totales y ajustados) por vendedor
-    utilizando el maestro de vendedores y el calendario de rutas.
+    Capa CORE: Calcula los días pasados, rutas totales del mes, días restantes todo y días restantes ajustados por vendedor.
+    Expone explícitamente tanto el contrato histórico (para mantener compatibilidad hacia atrás) como los nuevos mapas requeridos.
     """
     t0 = time.perf_counter()
     rutas = (
@@ -160,11 +159,13 @@ def calcular_calendario_y_rutas(
 
     dias_pasados_map = {}
     dias_restantes_map = {}
+    rutas_totales_map = {}
+    dias_restantes_todo_map = {}
+    dias_restantes_ajustado_map = {}
     total_dias_pasados_val = 0
     total_dias_restantes_val = 0
 
     if not rutas.empty:
-        # PUNTO 2: Validaciones explícitas de columnas en lugar de accesos posicionales
         cols_f_rutas = ["Fecha", "fecha", "Dia", "Date", "FECHA"]
         col_fecha_r = next((c for c in cols_f_rutas if c in rutas.columns), None)
         if not col_fecha_r:
@@ -225,6 +226,7 @@ def calcular_calendario_y_rutas(
         )
 
         dias_pasados_map = pasadas.groupby("CodVend")["Fecha_dt"].nunique().to_dict()
+        rutas_totales_map = rutas_mes.groupby("CodVend")["Fecha_dt"].nunique().to_dict()
         dias_restantes_base_map = (
             restantes_base.groupby("CodVend")["Fecha_dt"].nunique().to_dict()
         )
@@ -232,16 +234,21 @@ def calcular_calendario_y_rutas(
         for cv, dr_b in dias_restantes_base_map.items():
             cv_clean_str = str(int(cv)) if pd.notna(cv) else ""
             desc = rutas_ajust_map.get(cv_clean_str, 0) if cv_clean_str else 0
+            dias_restantes_todo_map[cv] = dr_b
+            dias_restantes_ajustado_map[cv] = max(0, dr_b - desc)
             if modo_ajuste == "AJUSTADO":
                 dias_restantes_map[cv] = max(0, dr_b - desc)
             else:
                 dias_restantes_map[cv] = dr_b
 
         total_dias_pasados_val = int(pasadas["Fecha_dt"].nunique())
-        if dias_restantes_map:
-            total_dias_restantes_val = int(
-                pd.Series(list(dias_restantes_map.values())).mean()
-            )
+        mapa_activo = (
+            dias_restantes_ajustado_map
+            if modo_ajuste == "AJUSTADO"
+            else dias_restantes_todo_map
+        )
+        if mapa_activo:
+            total_dias_restantes_val = int(pd.Series(list(mapa_activo.values())).mean())
         else:
             total_dias_restantes_val = int(restantes_base["Fecha_dt"].nunique())
 
@@ -251,6 +258,9 @@ def calcular_calendario_y_rutas(
     return (
         dias_pasados_map,
         dias_restantes_map,
+        rutas_totales_map,
+        dias_restantes_todo_map,
+        dias_restantes_ajustado_map,
         total_dias_pasados_val,
         total_dias_restantes_val,
     )
@@ -264,7 +274,6 @@ def calcular_ritmo_operativo(
     Capa CORE (Clasificador de Períodos Operativos):
     Aplica el filtro corporativo de fecha matinal y clasifica las transacciones
     en períodos comerciales institucionales (Arrastre, Actual, Futuro).
-    No calcula KPIs, proyecciones ni ritmos (responsabilidad de Business Rules / Reportes).
     """
     t0 = time.perf_counter()
     if df_vta is None or df_vta.empty:
@@ -335,7 +344,8 @@ def obtener_core_operacion(
 ) -> dict:
     """
     Capa CORE (Función Orquestadora Pública): Retorna un diccionario consolidado con todas las métricas
-    y asignaciones operativas procesadas por CORE_OPERACION.
+    y asignaciones operativas procesadas por CORE_OPERACION, manteniendo compatibilidad hacia atrás
+    y agregando nuevas claves de forma segura.
     """
     t0 = time.perf_counter()
     df_vta = obtener_staging_vta()
@@ -353,10 +363,16 @@ def obtener_core_operacion(
     df_vta_temporal = calcular_ritmo_operativo(
         df_vta_procesada, anio_op, mes_op, dia_matinal
     )
-    dias_pasados, dias_restantes, tot_pasados, tot_restantes = (
-        calcular_calendario_y_rutas(
-            df_rutas, df_vendedores, anio_op, mes_op, dia_venta, modo_ajuste
-        )
+    (
+        dias_pasados,
+        dias_restantes,
+        rutas_totales,
+        dias_restantes_todo,
+        dias_restantes_ajustado,
+        tot_pasados,
+        tot_restantes,
+    ) = calcular_calendario_y_rutas(
+        df_rutas, df_vendedores, anio_op, mes_op, dia_venta, modo_ajuste
     )
 
     print(f"[PERF_CORE] 7) obtener_core_operacion -> {time.perf_counter() - t0:.4f} s")
@@ -364,6 +380,9 @@ def obtener_core_operacion(
         "df_vta_operativa": df_vta_temporal,
         "dias_pasados_map": dias_pasados,
         "dias_restantes_map": dias_restantes,
+        "rutas_totales_map": rutas_totales,
+        "dias_restantes_todo_map": dias_restantes_todo,
+        "dias_restantes_ajustado_map": dias_restantes_ajustado,
         "total_dias_pasados": tot_pasados,
         "total_dias_restantes": tot_restantes,
     }

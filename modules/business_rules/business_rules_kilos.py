@@ -292,17 +292,26 @@ def calcular_compensaciones_reemplazos(df_vta_operativa: pd.DataFrame) -> pd.Dat
 
 
 def _calcular_calendario_ajustado_comercial(
-    matriz_comercial: pd.DataFrame, padron_vendedores: pd.DataFrame
+    matriz_comercial: pd.DataFrame,
+    padron_vendedores: pd.DataFrame,
+    dias_pasados_map: dict,
+    rutas_totales_map: dict,
+    dias_restantes_todo_map: dict,
+    dias_restantes_ajustado_map: dict,
 ) -> pd.DataFrame:
     """
-    BUSINESS_RULES: Incorpora los parámetros logísticos de Ajuste_Entrega y Rutas_Ajustadas
-    desde CORE (padron_vendedores) y calcula el campo 'Días Restantes Ajustado'.
+    BUSINESS_RULES: Incorpora los parámetros logísticos utilizando los mapas seguros y explícitos
+    provistos por CORE, garantizando que Rutas sea el total del mes y que TODO y AJUSTADO diverjan correctamente.
     """
     df = matriz_comercial.copy()
     if df.empty or padron_vendedores.empty:
         df["Ajuste_Entrega"] = 1
         df["Rutas_Ajustadas"] = 0
-        df["Días Restantes Ajustado"] = df.get("Días Restantes", 0)
+        df["Días Pasados"] = 0
+        df["Rutas"] = 0
+        df["Días Restantes Todo"] = 0
+        df["Días Restantes Ajustado"] = 0
+        df["Días Restantes"] = 0
         return df
 
     mv = padron_vendedores.copy()
@@ -321,10 +330,17 @@ def _calcular_calendario_ajustado_comercial(
     df["Ajuste_Entrega"] = df["CodVendedor"].map(map_ajuste).fillna(1).astype(int)
     df["Rutas_Ajustadas"] = df["CodVendedor"].map(map_rutas_ajust).fillna(0).astype(int)
 
-    dias_restantes_base = (df.get("Rutas", 0) - df.get("Días Pasados", 0)).clip(lower=0)
-    df["Días Restantes Ajustado"] = (
-        (dias_restantes_base - df["Rutas_Ajustadas"]).clip(lower=0).astype("Int64")
+    df["Días Pasados"] = (
+        df["CodVendedor"].map(dias_pasados_map).fillna(0).astype("Int64")
     )
+    df["Rutas"] = df["CodVendedor"].map(rutas_totales_map).fillna(0).astype("Int64")
+    df["Días Restantes Todo"] = (
+        df["CodVendedor"].map(dias_restantes_todo_map).fillna(0).astype("Int64")
+    )
+    df["Días Restantes Ajustado"] = (
+        df["CodVendedor"].map(dias_restantes_ajustado_map).fillna(0).astype("Int64")
+    )
+    df["Días Restantes"] = df["Días Restantes Ajustado"]
 
     return df
 
@@ -332,14 +348,15 @@ def _calcular_calendario_ajustado_comercial(
 def _calcular_proyecciones_y_tendencias(matriz_comercial: pd.DataFrame) -> pd.DataFrame:
     """
     BUSINESS_RULES: Calcula de manera centralizada el Promedio Diario, la Tendencia Total en Kg,
-    el Cumplimiento Proyectado en Porcentaje y la Media Necesaria Diaria.
+    el Cumplimiento Proyectado en Porcentaje y la Media Necesaria Diaria para ambos escenarios (TODO y AJUSTADO).
     """
     df = matriz_comercial.copy()
     if df.empty:
-        df["Promedio_Diario"] = 0.0
-        df["Tendencia_Total_Kg"] = 0.0
-        df["Cumplimiento_Proyectado_Pct"] = 0.0
-        df["Media_Necesaria_Diaria"] = 0.0
+        for suf in ["_TODO", "_AJUSTADO", ""]:
+            df[f"Promedio_Diario{suf}"] = 0.0
+            df[f"Tendencia_Total_Kg{suf}"] = 0.0
+            df[f"Cumplimiento_Proyectado_Pct{suf}"] = 0.0
+            df[f"Media_Necesaria_Diaria{suf}"] = 0.0
         return df
 
     dp_s = (
@@ -347,10 +364,6 @@ def _calcular_proyecciones_y_tendencias(matriz_comercial: pd.DataFrame) -> pd.Da
         .astype(float)
         .replace(0, 1.0)
     )
-    dr_s = df.get(
-        "Días Restantes Ajustado",
-        df.get("Días Restantes", pd.Series(0, index=df.index)),
-    ).astype(float)
 
     actual_val = df.get("Actual", 0.0)
     ajuste_act_val = df.get("Ajuste_Reemp_Actual", 0.0)
@@ -358,27 +371,58 @@ def _calcular_proyecciones_y_tendencias(matriz_comercial: pd.DataFrame) -> pd.Da
     objetivo_val = df.get("Objetivo Mes Corriente", 0.0)
 
     p_diario = (actual_val + ajuste_act_val) / dp_s
-    df["Promedio_Diario"] = p_diario
 
-    tendencia = operativo_val.copy()
-    mask_activos = dr_s > 0
-    if mask_activos.any():
-        tendencia.loc[mask_activos] = (
-            p_diario[mask_activos] * dr_s[mask_activos]
-        ) + operativo_val.loc[mask_activos]
-    df["Tendencia_Total_Kg"] = tendencia
+    # Escenario TODO (Usa Días Restantes Todo)
+    dr_todo = df.get("Días Restantes Todo", pd.Series(0, index=df.index)).astype(float)
+    tend_todo = operativo_val.copy()
+    mask_todo = dr_todo > 0
+    if mask_todo.any():
+        tend_todo.loc[mask_todo] = (
+            p_diario[mask_todo] * dr_todo[mask_todo]
+        ) + operativo_val.loc[mask_todo]
 
-    df["Cumplimiento_Proyectado_Pct"] = (
-        (tendencia / objetivo_val.replace(0, pd.NA)).mul(100).fillna(0.0)
-    )
-
-    media_nec = pd.Series(0.0, index=df.index)
-    if mask_activos.any():
-        media_nec.loc[mask_activos] = (
-            (objetivo_val.loc[mask_activos] - operativo_val.loc[mask_activos])
-            / dr_s[mask_activos]
+    media_nec_todo = pd.Series(0.0, index=df.index)
+    if mask_todo.any():
+        media_nec_todo.loc[mask_todo] = (
+            (objetivo_val.loc[mask_todo] - operativo_val.loc[mask_todo])
+            / dr_todo[mask_todo]
         ).clip(lower=0)
-    df["Media_Necesaria_Diaria"] = media_nec
+
+    df["Promedio_Diario_TODO"] = p_diario
+    df["Tendencia_Total_Kg_TODO"] = tend_todo
+    df["Cumplimiento_Proyectado_Pct_TODO"] = (
+        (tend_todo / objetivo_val.replace(0, pd.NA)).mul(100).fillna(0.0)
+    )
+    df["Media_Necesaria_Diaria_TODO"] = media_nec_todo
+
+    # Escenario AJUSTADO (Usa Días Restantes Ajustado)
+    dr_ajust = df.get("Días Restantes Ajustado", dr_todo).astype(float)
+    tend_ajust = operativo_val.copy()
+    mask_ajust = dr_ajust > 0
+    if mask_ajust.any():
+        tend_ajust.loc[mask_ajust] = (
+            p_diario[mask_ajust] * dr_ajust[mask_ajust]
+        ) + operativo_val.loc[mask_ajust]
+
+    media_nec_ajust = pd.Series(0.0, index=df.index)
+    if mask_ajust.any():
+        media_nec_ajust.loc[mask_ajust] = (
+            (objetivo_val.loc[mask_ajust] - operativo_val.loc[mask_ajust])
+            / dr_ajust[mask_ajust]
+        ).clip(lower=0)
+
+    df["Promedio_Diario_AJUSTADO"] = p_diario
+    df["Tendencia_Total_Kg_AJUSTADO"] = tend_ajust
+    df["Cumplimiento_Proyectado_Pct_AJUSTADO"] = (
+        (tend_ajust / objetivo_val.replace(0, pd.NA)).mul(100).fillna(0.0)
+    )
+    df["Media_Necesaria_Diaria_AJUSTADO"] = media_nec_ajust
+
+    # Columnas por defecto (AJUSTADO como principal)
+    df["Promedio_Diario"] = df["Promedio_Diario_AJUSTADO"]
+    df["Tendencia_Total_Kg"] = df["Tendencia_Total_Kg_AJUSTADO"]
+    df["Cumplimiento_Proyectado_Pct"] = df["Cumplimiento_Proyectado_Pct_AJUSTADO"]
+    df["Media_Necesaria_Diaria"] = df["Media_Necesaria_Diaria_AJUSTADO"]
 
     return df
 
@@ -448,8 +492,8 @@ def obtener_matriz_kilos_comercial(
     anio: int, mes: int, filtros_globales: dict
 ) -> pd.DataFrame:
     """
-    BUSINESS_RULES (Orquestador Comercial): Consume exclusivamente servicios de la Capa CORE y el Repositorio,
-    incorpora objetivos comerciales, compensaciones por reemplazo, parámetros logísticos desde CORE y proyecciones analíticas.
+    BUSINESS_RULES (Orquestador Comercial): Consume servicios de la Capa CORE y el Repositorio,
+    manteniendo compatibilidad con las claves legacy (dias_restantes_map) y consumiendo los nuevos mapas de rutas y días.
     """
     t0 = time.perf_counter()
     # 1. Consumo estricto de CORE_VENDEDORES (incluye padrón y parámetros logísticos de padrón)
@@ -480,6 +524,15 @@ def obtener_matriz_kilos_comercial(
     df_vta_op_bruto = datos_operativos["df_vta_operativa"]
     dias_pasados_map = datos_operativos["dias_pasados_map"]
     dias_restantes_map = datos_operativos["dias_restantes_map"]
+
+    # Consumo seguro de las nuevas claves adicionales sin romper compatibilidad
+    rutas_totales_map = datos_operativos.get("rutas_totales_map", dias_restantes_map)
+    dias_restantes_todo_map = datos_operativos.get(
+        "dias_restantes_todo_map", dias_restantes_map
+    )
+    dias_restantes_ajustado_map = datos_operativos.get(
+        "dias_restantes_ajustado_map", dias_restantes_map
+    )
 
     if df_vta_op_bruto.empty:
         print(
@@ -614,18 +667,6 @@ def obtener_matriz_kilos_comercial(
         else:
             matriz_comercial[col_c] = 0.0
 
-    # Integración de Calendario y Rutas (CORE_OPERACIONES)
-    matriz_comercial["Días Pasados"] = (
-        matriz_comercial["CodVendedor"].map(dias_pasados_map).fillna(0).astype("Int64")
-    )
-    matriz_comercial["Rutas"] = (
-        matriz_comercial["CodVendedor"]
-        .map(dias_restantes_map)
-        .fillna(0)
-        .astype("Int64")
-    )
-    matriz_comercial["Días Restantes"] = matriz_comercial["Rutas"]
-
     # Cálculo del Neto Operativo
     matriz_comercial["OPERATIVO"] = (
         matriz_comercial["Arrastre"]
@@ -633,12 +674,17 @@ def obtener_matriz_kilos_comercial(
         + matriz_comercial["Ajuste_Por_Reemp"]
     )
 
-    # Incorporación de Parámetros Logísticos de Padrón (CORE) y Días Restantes Ajustados (BUSINESS RULES)
+    # Incorporación de Parámetros Logísticos y Calendario (utilizando mapas explícitos)
     matriz_comercial = _calcular_calendario_ajustado_comercial(
-        matriz_comercial, padron_vend
+        matriz_comercial,
+        padron_vend,
+        dias_pasados_map,
+        rutas_totales_map,
+        dias_restantes_todo_map,
+        dias_restantes_ajustado_map,
     )
 
-    # Incorporación de Métricas Analíticas de Proyección y Tendencia
+    # Incorporación de Métricas Analíticas de Proyección y Tendencia (Incluyendo variantes TODO y AJUSTADO)
     matriz_comercial = _calcular_proyecciones_y_tendencias(matriz_comercial)
 
     # Incorporación de Ventas Temporales de Soporte (Última y Penúltima semana)
@@ -676,14 +722,23 @@ def obtener_matriz_kilos_comercial(
         "Ajuste_Reemp_Actual",
         "Ajuste_Por_Reemp",
         "Tendencia_Total_Kg",
+        "Tendencia_Total_Kg_TODO",
+        "Tendencia_Total_Kg_AJUSTADO",
         "Cumplimiento_Proyectado_Pct",
+        "Cumplimiento_Proyectado_Pct_TODO",
+        "Cumplimiento_Proyectado_Pct_AJUSTADO",
         "Promedio_Diario",
+        "Promedio_Diario_TODO",
+        "Promedio_Diario_AJUSTADO",
         "Media_Necesaria_Diaria",
+        "Media_Necesaria_Diaria_TODO",
+        "Media_Necesaria_Diaria_AJUSTADO",
         "Días Pasados",
         "Rutas",
         "Ajuste_Entrega",
         "Rutas_Ajustadas",
         "Días Restantes",
+        "Días Restantes Todo",
         "Días Restantes Ajustado",
     ]
 

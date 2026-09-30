@@ -117,6 +117,11 @@ def main():
         f"[PERF_FORENSIC] === INICIO RERUN GLOBAL N° {st.session_state['_global_rerun_count']} === [Timestamp: {t_rerun_start:.4f}]"
     )
 
+    if "_cache_limpiado_inicio" not in st.session_state:
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.session_state["_cache_limpiado_inicio"] = True
+
     if not verificar_autenticacion():
         return
 
@@ -156,6 +161,8 @@ def main():
             time.sleep(0.1)
             prog_bar.progress(50, text="Procesando registros en SQLite...")
             st.session_state["bases"] = cargar_todas_las_bases(forzar=True)
+            st.cache_data.clear()
+            st.cache_resource.clear()
             prog_bar.progress(100, text="¡Sincronización completada!")
             t_fin = time.time()
             duracion = t_fin - t_inicio
