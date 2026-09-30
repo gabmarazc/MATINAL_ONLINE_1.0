@@ -1,3 +1,4 @@
+```python
 # modules/staging.py
 import time
 import streamlit as st
@@ -175,6 +176,46 @@ def obtener_staging_clientes():
     )
     if pos_v_u:
         df["CodVendedor"] = pd.to_numeric(df[pos_v_u], errors="coerce").astype("Int64")
+
+    col_dir = next(
+        (
+            c
+            for c in df.columns
+            if str(c).strip().lower()
+            in [
+                "direccioncliente",
+                "direccion_cliente",
+                "direccion",
+                "domicilio",
+                "calle",
+            ]
+        ),
+        None,
+    )
+    df["DireccionCliente"] = (
+        df[col_dir].fillna("").astype(str).str.strip() if col_dir else ""
+    )
+
+    col_ruta = next(
+        (
+            c
+            for c in df.columns
+            if str(c).strip().lower()
+            in [
+                "ruta",
+                "codruta",
+                "cod_ruta",
+                "dia_visita",
+                "diavisita",
+                "visita",
+                "dia",
+            ]
+        ),
+        None,
+    )
+    df["Ruta"] = (
+        df[col_ruta].fillna("").astype(str).str.strip() if col_ruta else "SIN RUTA"
+    )
 
     return df
 

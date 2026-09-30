@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from modules.staging import obtener_staging_clientes
+from modules.utils import extraer_dia_de_ruta
 
 
 @st.cache_data(show_spinner=False)
@@ -39,6 +40,16 @@ def obtener_core_clientes():
             != "empleados"
         ].copy()
 
+    col_subramo = next(
+        (c for c in df.columns if str(c).strip().lower() == "subramo"), None
+    )
+
+    if col_subramo:
+        df = df[
+            df[col_subramo].fillna("").astype(str).str.strip().str.casefold()
+            != "empleados"
+        ].copy()
+
     # -------------------------------------------------
     # TAXONOMÍAS VÁLIDAS
     # -------------------------------------------------
@@ -61,5 +72,10 @@ def obtener_core_clientes():
 
     if "CodVendedor" in df.columns:
         df = df[df["CodVendedor"].notna()].copy()
+
+    if "Ruta" in df.columns:
+        df["DiaVisita"] = df["Ruta"].apply(extraer_dia_de_ruta)
+    else:
+        df["DiaVisita"] = "SIN DÍA"
 
     return df
