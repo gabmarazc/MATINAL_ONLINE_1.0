@@ -816,3 +816,69 @@ REPORTES          ✅
 FASE 4.7 COMPLETADA ✅
 FASE 4.8 APROBADA ⏳
 ```
+## DT.42: Desacoplamiento de Reportes
+
+### Fecha
+
+29/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+Los reportes no podrán depender entre sí.
+
+### Permitido
+
+Reporte
+↓
+Business Rules
+↓
+Core
+
+### Prohibido
+
+Reporte
+↓
+Reporte
+
+### Motivación
+
+Reducir acoplamiento.
+Facilitar mantenimiento.
+Permitir reutilización de reglas comerciales.
+
+### Aplicación
+
+Toda nueva migración deberá seguir este criterio.
+## DT.43: Kilos como Patrón de Referencia
+
+### Fecha
+
+29/09/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+La migración de Kilos se considera el patrón oficial para futuras migraciones.
+
+### Patrón aprobado
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_*
+
+### Aplicación futura
+
+MiNegocio
+CCC
+Cobertura
+Gerencial
+Vespertina

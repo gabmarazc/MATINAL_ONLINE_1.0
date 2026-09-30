@@ -241,3 +241,79 @@ Salida garantizada:
 
 ## obtener_staging_rutas()
 
+## 6. Evolución de BUSINESS RULES
+
+### Estado
+
+ACTIVO
+
+### Objetivo
+
+Desacoplar progresivamente la lógica comercial de los reportes.
+
+### Estructura objetivo
+
+RAW
+↓
+SQLITE
+↓
+STAGING
+↓
+CORE
+↓
+BUSINESS RULES
+↓
+REPORTES
+
+### Capas implementadas
+
+STAGING
+
+- obtener_staging_vta()
+- obtener_staging_clientes()
+- obtener_staging_ausencias()
+- obtener_staging_rutas()
+
+CORE
+
+- obtener_core_ventas_base()
+- obtener_core_clientes()
+- obtener_core_vendedores()
+- obtener_core_operacion()
+
+BUSINESS RULES
+
+- business_rules_repository.py
+- business_rules_kilos.py
+
+BUSINESS RULES APROBADAS PARA PRÓXIMA IMPLEMENTACIÓN
+
+- business_rules_mn.py
+
+REPORTES CORE
+
+- rep_kilos_core.py
+
+REPORTES APROBADOS PARA MIGRACIÓN
+
+- rep_MN_core.py
+
+### Regla Arquitectónica
+
+Permitido:
+
+Reporte
+↓
+Business Rules
+↓
+Core
+
+Prohibido:
+
+Reporte
+↓
+Reporte
+
+Objetivo:
+
+Eliminar dependencias cruzadas entre reportes.

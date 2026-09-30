@@ -420,3 +420,25 @@ obtener_staging_ausencias()
 CORE:
 
 solo l
+## 12. Estado de BUSINESS RULES
+
+Estado:
+
+IMPLEMENTACIÓN INICIAL VALIDADA
+
+Componentes productivos:
+
+- business_rules_repository.py
+- business_rules_kilos.py
+
+Reporte migrado:
+
+- rep_kilos_core.py
+
+Resultado:
+
+✅ Kilos desacoplado del reporte histórico.
+
+✅ Arquitectura Business Rules validada en producción.
+
+✅ Patrón reutilizable para futuras migraciones.

@@ -572,3 +572,46 @@ Resultado General:
 ✅ BUSINESS RULES parcial
 ✅ Reportes operativos
 ```
+## INC-2026-09-29-001
+
+### Título
+
+Cierre formal de Migración Kilos hacia Business Rules
+
+### Fecha de Apertura
+
+29/09/2026
+
+### Fecha de Cierre
+
+29/09/2026
+
+### Contexto
+
+Se completó la migración del reporte histórico de Kilos hacia la arquitectura institucional por capas.
+
+### Implementación
+
+Se consolidó:
+
+rep_kilos_core.py
+
+consumiendo:
+
+business_rules_kilos.py
+
+y Core institucional.
+
+### Resultado
+
+✅ Migración validada.
+
+✅ Patrón arquitectónico aprobado.
+
+✅ Eliminación de archivos temporales de migración.
+
+✅ Base de referencia para futuras migraciones.
+
+### Estado
+
+CERRADO

@@ -505,3 +505,50 @@ CAMBIO
 PRUEBA
 
 Toda IA que participe en MATINAL debe respetar este principio.
+## POLÍTICA DE MIGRACIÓN ARQUITECTÓNICA
+
+### Principio
+
+Toda nueva migración debe respetar la arquitectura institucional:
+
+RAW
+↓
+SQLITE
+↓
+STAGING
+↓
+CORE
+↓
+BUSINESS RULES
+↓
+REPORTES
+
+### Regla Obligatoria
+
+Los reportes no podrán depender entre sí.
+
+Permitido:
+
+Reporte
+↓
+Business Rules
+↓
+Core
+
+Prohibido:
+
+Reporte
+↓
+Reporte
+
+### Patrón de Referencia Oficial
+
+Migración Kilos
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_*
+
+Toda nueva migración deberá evaluar primero este patrón antes de proponer nuevas estructuras.

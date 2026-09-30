@@ -386,3 +386,21 @@ Este documento describe una entidad objetivo de arquitectura.
 No necesariamente refleja una implementación completa existente en código al momento de su lectura.
 
 Su finalidad es preservar la definición institucional que deberá respetarse durante futuras refactorizaciones del núcleo comercial del sistema.
+### Actualización 29/09/2026
+
+Se inició la consolidación práctica de CORE_VENTAS_BASE mediante:
+
+core_ventas_base.py
+
+La entidad ya se encuentra siendo utilizada como base de futuras migraciones hacia Business Rules.
+
+Migraciones asociadas:
+
+✅ Kilos
+⏳ MiNegocio
+⏳ CCC
+⏳ Coberturas
+
+Estado:
+
+Implementación inicial en evolución.

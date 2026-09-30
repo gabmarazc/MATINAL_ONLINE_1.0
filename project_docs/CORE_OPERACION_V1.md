@@ -267,3 +267,19 @@ Actualmente aún existen componentes técnicos duplicados que ya fueron migrados
 obtener_staging_ausencias()
 
 La eliminación deberá realizarse únicamente luego de validaciones de producción.
+## Relación con BUSINESS RULES
+
+CORE_OPERACION no implementa reglas comerciales.
+
+Ejemplos prohibidos:
+
+- Objetivos
+- MiNegocio
+- CCC
+- Coberturas
+- Clasificaciones Digitales
+- Compensaciones
+
+CORE entrega estructuras operativas reutilizables.
+
+Las decisiones comerciales pertenecen exclusivamente a BUSINESS RULES.

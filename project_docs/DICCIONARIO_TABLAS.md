@@ -388,3 +388,31 @@ Reemplazo_clean
 ```
 
 ### 
+## Entidades BUSINESS RULES
+
+### business_rules_kilos.py
+
+Estado:
+Implementado
+
+Responsabilidad:
+
+Construcción de matriz comercial de Kilos.
+
+Consumidores:
+
+rep_kilos_core.py
+
+### business_rules_mn.py
+
+Estado:
+Aprobado para implementación
+
+Responsabilidad esperada:
+
+Construcción de matriz comercial de adopción digital.
+
+Consumidores previstos:
+
+rep_MN_core.py
+rep_gerencial.py

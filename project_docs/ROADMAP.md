@@ -186,3 +186,49 @@ CORE:
 La refactorización no podrá realizarse sin validación de producción posterior.
 
 La separación arquitectónica tiene prioridad por encima de la reducción de código.
+#### FASE 4.9
+
+Estado:
+
+APROBADA ⏳
+
+Nombre:
+
+Migración MiNegocio hacia Business Rules.
+
+Objetivo:
+
+Separar la lógica comercial de MiNegocio del reporte histórico.
+
+Implementación esperada:
+
+rep_MN.py
+↓
+business_rules_mn.py
+↓
+rep_MN_core.py
+
+Resultado esperado:
+
+- Eliminación de lógica comercial del reporte.
+- Reutilización de Core institucional.
+- Fuente única de reglas MiNegocio.
+- Preparación para desacoplar Gerencial.
+
+Restricción:
+
+No duplicar lógica existente en Core.
+FASE 4.9
+MiNegocio
+
+FASE 4.10
+CCC
+
+FASE 4.11
+Coberturas
+
+FASE 4.12
+Gerencial
+
+FASE 4.13
+Vespertina

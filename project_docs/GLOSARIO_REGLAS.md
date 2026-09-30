@@ -891,3 +891,76 @@ REPORTES
 ```
 
 Toda nueva regla deberá clasificarse explícitamente dentro de una de estas capas antes de incorporarse al sistema.
+#### BR-010 - Clasificación Digital MiNegocio
+
+##### Capa
+
+BUSINESS RULES
+
+##### Objetivo
+
+Clasificar clientes según el porcentaje de compra realizado mediante MiNegocio.
+
+##### Variables
+
+Ventas_Totales
+Ventas_MiNegocio
+
+##### Fórmula
+
+Pct_MiNegocio =
+Ventas_MiNegocio
+/
+Ventas_Totales
+* 100
+
+##### Categorías
+
+No Digital
+
+Pct_MiNegocio <= 0.01
+
+Híbrido
+
+Pct_MiNegocio > 0.01
+Pct_MiNegocio < 70
+
+Fully Digital
+
+Pct_MiNegocio >= 70
+#### BR-011 - Gap a 70% Digital
+
+##### Capa
+
+BUSINESS RULES
+
+##### Objetivo
+
+Determinar el monto adicional de facturación por MiNegocio requerido para alcanzar una adopción digital del 70%.
+
+##### Variable generada
+
+Minimo_Facturacion_70
+#### BR-013 - Reutilización de Core Institucional
+
+##### Capa
+
+BUSINESS RULES
+
+##### Objetivo
+
+Las reglas comerciales deben consumir exclusivamente entidades provenientes de Core o Business Rules Repository.
+
+##### Prohibiciones
+
+- Lectura directa de SQLite.
+- Lectura directa de Excel.
+- Consumo de otros reportes.
+
+##### Patrón aprobado
+
+Business Rules
+↓
+Core
+↓
+Staging
