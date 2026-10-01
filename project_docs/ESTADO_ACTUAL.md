@@ -1,27 +1,27 @@
 # Estado Actual del Proyecto - MATINAL
 
-Versión: 2.0
-Fecha de actualización: 27/09/2026
-Estado: Producción Operativa
+Versión: 3.0  
+Fecha de actualización: 30/09/2026  
+Estado: Producción Operativa  
 Estado de validación: Confirmado mediante ejecución real
 
 ---
 
 # 1. Identificación del Producto
 
-Nombre:
+## Nombre
 
 MATINAL
 
-Descripción:
+## Descripción
 
 Sistema institucional de análisis, monitoreo, control operativo y seguimiento comercial para la gestión integral de preventa.
 
-Estado:
+## Estado
 
 Producto productivo en operación diaria.
 
-Frecuencia de uso:
+## Frecuencia de uso
 
 Múltiples veces por día por usuarios operativos, supervisión y gerencia.
 
@@ -29,27 +29,27 @@ Múltiples veces por día por usuarios operativos, supervisión y gerencia.
 
 # 2. Estado General del Proyecto
 
-Estado global:
+## Estado global
 
 ESTABLE
 
-Estado productivo:
+## Estado productivo
 
 OPERATIVO
 
-Estado arquitectónico:
+## Estado arquitectónico
 
 EN TRANSICIÓN CONTROLADA HACIA ARQUITECTURA POR CAPAS
 
-Nivel de riesgo:
+## Nivel de riesgo
 
 BAJO
 
-Última validación integral:
+## Última validación integral
 
-27/09/2026
+30/09/2026
 
-Resultado:
+## Resultado
 
 EXITOSO
 
@@ -57,7 +57,7 @@ EXITOSO
 
 # 3. Arquitectura Vigente
 
-Arquitectura oficial:
+## Arquitectura oficial
 
 RAW
 ↓
@@ -71,7 +71,7 @@ BUSINESS RULES
 ↓
 REPORTES
 
-Estado de implementación:
+## Estado de implementación
 
 RAW
 ✅
@@ -86,141 +86,139 @@ CORE
 ✅
 
 BUSINESS RULES
-🟡 Parcialmente desacoplado
+✅
 
 REPORTES
 ✅
 
 ---
 
-# 4. Estado de la Fase Arquitectónica Actual
+# 4. Estado Arquitectónico Actual
 
-Fase institucional actual:
+## Capas validadas
 
-FASE 4
-
-Subfase actual:
-
-FASE 4.7 COMPLETADA
-
-Nombre:
-
-Migración de AUSENCIAS a STAGING
-
-Resultado:
-
-VALIDADA
+### RAW
 
 Estado:
+✅ Productivo
 
-CERRADA
+### SQLITE
 
----
+Estado:
+✅ Productivo
 
-# 5. Cambio Arquitectónico Más Importante Realizado
+### STAGING
 
-Se implementó:
+Estado:
+✅ Productivo
 
-obtener_staging_ausencias()
+### CORE
 
-como puerta de entrada especializada para el procesamiento técnico de ausencias.
+Estado:
+✅ Productivo
 
----
+### BUSINESS RULES
 
-## Situación anterior
+Estado:
+✅ Productivo
 
-Las ausencias se obtenían mediante:
+### REPORTES
 
-maestros["ausencias"]
-
-y el procesamiento técnico permanecía íntegramente dentro del CORE.
-
----
-
-## Situación actual
-
-El sistema utiliza:
-
-obtener_staging_ausencias()
-
-para:
-
-- lectura SQLite
-- detección de columnas
-- parseo de fechas
-- normalización
-- tipado
+Estado:
+✅ Productivo
 
 ---
 
-## Impacto
+# 5. Validaciones Productivas Confirmadas
 
-Separación efectiva entre:
+## CORE
 
-STAGING
-y
-CORE
+Validado mediante ejecución real.
 
-sin afectar producción.
+Verificaciones:
 
----
-
-# 6. Validación Real Ejecutada
-
-Fecha:
-
-27/09/2026
-
-Resultado:
-
-ÉXITO
-
-Log validado:
-
-obtener_staging_ausencias → 0.0087 s
-
-procesar_ausencias_y_reemplazos → 0.7176 s
-
-obtener_core_operacion → 13.4367 s
-
-obtener_matriz_kilos_comercial → 14.6438 s
-
----
-
-## Verificaciones realizadas
-
-✅ Arranque de Streamlit
-
-✅ Carga SQLite
-
-✅ Ejecución STAGING
-
-✅ Ejecución CORE
-
-✅ Renderizado reportes
-
-✅ Integración AUSENCIAS
-
-✅ Sin errores de importación
-
-✅ Sin NameError
-
-✅ Sin KeyError
-
+✅ Carga SQLite  
+✅ Ejecución STAGING  
+✅ Ejecución CORE  
+✅ Integración Ausencias  
+✅ Integración Reemplazos  
+✅ Sin errores de importación  
+✅ Sin NameError  
+✅ Sin KeyError  
 ✅ Sin tracebacks
 
 ---
 
-# 7. Módulos Operativos en Producción
+## BUSINESS RULES
 
-Todos los siguientes módulos se encuentran activos.
+Validado mediante ejecución real.
+
+Implementaciones productivas:
+
+### Kilos
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_*
+
+Estado:
+
+✅ Migrado  
+✅ Validado  
+✅ Productivo
+
+### MiNegocio
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
+
+Estado:
+
+✅ Migrado  
+✅ Validado  
+✅ Productivo
 
 ---
+
+## Validación MiNegocio
+
+Resultado final validado:
+
+```text
+TOTAL CARTERA = 5617
+```
+
+Validación de titularidad:
+
+```text
+CodVendedor -998 = 0
+```
+
+Estado:
+
+✅ Aprobado para producción
+
+Resultado:
+
+✅ Universo comercial consistente  
+✅ Titularidad preservada  
+✅ Sin contaminación por vendedor dummy  
+✅ Exportaciones validadas
+
+---
+
+# 6. Módulos Operativos en Producción
+
+Todos los siguientes módulos se encuentran activos.
 
 ## Dashboard Gerencial
 
 Estado:
-
 PRODUCTIVO
 
 Funciones:
@@ -229,12 +227,9 @@ Funciones:
 - consolidación comercial
 - proyecciones
 
----
-
 ## CCC
 
 Estado:
-
 PRODUCTIVO
 
 Funciones:
@@ -244,12 +239,9 @@ Funciones:
 - reactivaciones
 - batalla NC
 
----
-
 ## Mi Negocio
 
 Estado:
-
 PRODUCTIVO
 
 Funciones:
@@ -258,12 +250,21 @@ Funciones:
 - clasificación digital
 - gap a objetivo
 
----
+Arquitectura:
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
+
+Estado:
+
+✅ Validado
 
 ## Kilos
 
 Estado:
-
 PRODUCTIVO
 
 Funciones:
@@ -274,67 +275,107 @@ Funciones:
 - compensaciones
 - reemplazos
 
----
+Arquitectura:
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_*
+
+Estado:
+
+✅ Validado
 
 ## Cobertura Marca
 
 Estado:
-
 PRODUCTIVO
-
----
 
 ## Cobertura Innovación
 
 Estado:
-
 PRODUCTIVO
-
----
 
 ## Objetivos
 
 Estado:
-
 PRODUCTIVO
-
----
 
 ## Parámetros
 
 Estado:
-
 PRODUCTIVO
-
----
 
 ## Vespertina
 
 Estado:
-
 PRODUCTIVO
 
 ---
 
-# 8. Roles Activos
+# 7. Estado de las Migraciones
 
-Nivel 1
+## Migraciones completadas
+
+✅ Kilos
+
+✅ MiNegocio
+
+## Migraciones pendientes
+
+⏳ CCC
+
+⏳ Cobertura Marca
+
+⏳ Cobertura Innovación
+
+⏳ Gerencial
+
+⏳ Vespertina
+
+---
+
+# 8. Próxima Migración Aprobada
+
+## Módulo
+
+CCC
+
+## Arquitectura objetivo
+
+rep_ccc.py
+↓
+business_rules_ccc.py
+↓
+rep_ccc_core.py
+
+## Objetivo
+
+Replicar el patrón validado exitosamente en:
+
+- Kilos
+- MiNegocio
+
+preservando la lógica institucional actual y desacoplando completamente la capa de reporte.
+
+---
+
+# 9. Roles Activos
+
+## Nivel 1
 
 Administrador
 
 Acceso total.
 
----
-
-Nivel 2
+## Nivel 2
 
 Gerencia
 
 Acceso directivo.
 
----
-
-Nivel 3
+## Nivel 3
 
 Supervisión
 
@@ -342,30 +383,30 @@ Acceso operativo controlado.
 
 ---
 
-# 9. Stack Tecnológico Vigente
+# 10. Stack Tecnológico Vigente
 
-Backend:
+## Backend
 
 - Python
 
-Procesamiento:
+## Procesamiento
 
 - Pandas
 - NumPy
 - OpenPyXL
 
-Interfaz:
+## Interfaz
 
 - Streamlit
 - AgGrid
 
-Persistencia:
+## Persistencia
 
 - SQLite WAL
 
 ---
 
-# 10. Fuente de Verdad Institucional
+# 11. Fuente de Verdad Institucional
 
 Los siguientes conceptos poseen prioridad absoluta sobre cualquier decisión técnica:
 
@@ -382,63 +423,68 @@ Los siguientes conceptos poseen prioridad absoluta sobre cualquier decisión té
 
 Si alguna optimización contradice estos principios:
 
-debe rechazarse.
+DEBE RECHAZARSE.
 
 ---
 
-# 11. Próxima Fase
+# 12. Estado Técnico Consolidado
 
-FASE 4.8
-
-Nombre:
-
-Eliminación de ETL duplicado en CORE.
-
-Objetivo:
-
-Retirar de:
-
-procesar_ausencias_y_reemplazos()
-
-la lógica que ya existe en:
-
-obtener_staging_ausencias()
-
----
-
-## Elementos candidatos a eliminar
-
-- detección de columnas
-- parseo de fechas
-- CodVend_clean
-- Reemplazo_clean
-
----
-
-## Objetivo final
-
-CORE:
-
-solo l
-## 12. Estado de BUSINESS RULES
+## BUSINESS RULES
 
 Estado:
 
-IMPLEMENTACIÓN INICIAL VALIDADA
+✅ Consolidado
 
-Componentes productivos:
+## CORE
 
-- business_rules_repository.py
-- business_rules_kilos.py
+Estado:
 
-Reporte migrado:
+✅ Consolidado
 
-- rep_kilos_core.py
+## STAGING
+
+Estado:
+
+✅ Consolidado
+
+## Patrón Arquitectónico Validado
+
+Reporte
+↓
+Business Rules
+↓
+Core
 
 Resultado:
 
-✅ Kilos desacoplado del reporte histórico.
+✅ Validado mediante múltiples implementaciones productivas.
 
-✅ Arquitectura Business Rules validada en producción.
+---
 
-✅ Patrón reutilizable para futuras migraciones.
+# 13. Resumen Ejecutivo
+
+Estado general del sistema:
+
+✅ Producción operativa
+
+Arquitectura:
+
+✅ RAW → SQLITE → STAGING → CORE → BUSINESS RULES → REPORTES
+
+Migraciones validadas:
+
+✅ Kilos  
+✅ MiNegocio
+
+Validación MiNegocio:
+
+✅ TOTAL CARTERA = 5617  
+✅ CodVendedor -998 = 0
+
+Próximo objetivo aprobado:
+
+⏳ Migración CCC
+
+Nivel de riesgo actual:
+
+✅ Bajo

@@ -1,23 +1,32 @@
-# Arquitectura del Sistema MATINAL 2.0
-Versión: 2.0
-Fecha de actualización: 27/09/2026
-Estado: Vigente
-Estado de validación: Producción operativa
+# Arquitectura del Sistema MATINAL
+
+Versión: 3.0  
+Fecha de actualización: 30/09/2026  
+Estado: Vigente  
+Estado de validación: Producción Operativa
 
 ---
 
 # 1. Propósito del Documento
 
-Este documento constituye la definición oficial de la arquitectura del Sistema MATINAL 2.0.
+Este documento constituye la definición oficial de la arquitectura del sistema MATINAL.
 
-Su objetivo es preservar el conocimiento arquitectónico del proyecto y permitir la reconstrucción completa del contexto funcional, técnico y evolutivo aun cuando se pierda el historial de conversaciones o se inicie una nueva sesión de desarrollo.
+Su objetivo es:
 
-Ante cualquier discrepancia entre documentación y código:
+- Definir la arquitectura institucional vigente.
+- Delimitar responsabilidades por capa.
+- Establecer las reglas de interacción entre componentes.
+- Preservar el conocimiento arquitectónico del proyecto.
+- Permitir la continuidad del desarrollo independientemente de conversaciones previas.
 
-1. Revisar este documento.
-2. Revisar DECISIONES_ARQUITECTURALES.md.
-3. Revisar ESTADO_ACTUAL_PROYECTO.md.
-4. Recién después analizar el código fuente.
+Ante cualquier discrepancia entre documentación y código deberá revisarse primero:
+
+1. ESTADO_ACTUAL.md
+2. ARQUITECTURA.md
+3. DECISIONES_TECNICAS.md
+4. ROADMAP.md
+
+Recién después analizar el código fuente.
 
 ---
 
@@ -37,23 +46,45 @@ BUSINESS RULES
 ↓
 REPORTES
 
-Esta arquitectura reemplaza progresivamente el modelo histórico basado en pipelines descentralizados.
+Este modelo constituye la arquitectura oficial del proyecto.
 
 ---
 
-# 3. Arquitectura Física Actual
+# 3. Estado de Implementación
 
-## Punto de entrada
+RAW
+✅ Productivo
+
+SQLITE
+✅ Productivo
+
+STAGING
+✅ Productivo
+
+CORE
+✅ Productivo
+
+BUSINESS RULES
+✅ Validado en producción
+
+REPORTES
+✅ Productivo
+
+---
+
+# 4. Arquitectura Física
+
+## Punto de Entrada
 
 app.py
 
 Responsabilidades:
 
-- Inicio del sistema
-- Gestión de sesión
-- Gestión de autenticación
-- Renderizado de pestañas
-- Orquestación visual global
+- Inicio de la aplicación.
+- Gestión de sesión.
+- Gestión de autenticación.
+- Renderizado de pantallas.
+- Coordinación general de la interfaz.
 
 ---
 
@@ -63,7 +94,7 @@ Ubicación:
 
 data/matinal.db
 
-Tecnología:
+Motor:
 
 SQLite
 
@@ -73,56 +104,57 @@ WAL (Write Ahead Logging)
 
 Características:
 
-- Fuente única de verdad del sistema
-- Persistencia local
-- Carga desacoplada de Excel
-- Alto rendimiento de lectura
+- Fuente física única de datos.
+- Persistencia local.
+- Alto rendimiento de lectura.
+- Desacoplamiento respecto de Excel.
 
 ---
 
-## Directorio modules/
-
-Contiene:
+## Estructura Principal
 
 ### Persistencia
 
-database.py
+- database.py
+- logger.py
 
 ### Configuración
 
-parametros.py
+- parametros.py
 
 ### Utilidades
 
-utils.py
+- utils.py
+
+### Arquitectura Institucional
+
+- staging.py
+- core/*
+- business_rules/*
 
 ### Reportes
 
-rep_gerencial.py
-rep_kilos.py
-rep_ccc.py
-rep_MN.py
-rep_cob_marca.py
-rep_cob_innovacion.py
-rep_obj_kilos.py
-rep_vespertina.py
-
-### Arquitectura institucional
-
-staging.py
-core/
+- rep_kilos.py
+- rep_MN.py
+- rep_ccc.py
+- rep_cob_marca.py
+- rep_cob_innovacion.py
+- rep_gerencial.py
+- rep_vespertina.py
+- rep_tp.py
+- rep_obj_kilos.py
 
 ---
 
-# 4. Capas Arquitectónicas
+# 5. Capas Arquitectónicas
 
-## 4.1 RAW
+## RAW
 
 Responsabilidad:
 
-Recepción de información proveniente de archivos externos.
+Recepción de información externa.
 
-Fuentes principales:
+Ejemplos:
 
 - VTA.xlsx
 - UNIVERSO.xlsx
@@ -131,29 +163,17 @@ Fuentes principales:
 - AUSENCIAS
 - Maestros corporativos
 
-Características:
-
-- Datos sin normalizar
-- Pueden contener errores
-- No son consumidos directamente por reportes
-
-Regla:
+Restricción:
 
 No contiene lógica de negocio.
 
 ---
 
-## 4.2 SQLITE
+## SQLITE
 
 Responsabilidad:
 
-Persistir físicamente los datos del sistema.
-
-Objetivos:
-
-- Evitar múltiples lecturas de Excel
-- Mejorar rendimiento
-- Crear una fuente común de datos
+Persistencia institucional de datos.
 
 Tablas principales:
 
@@ -166,139 +186,202 @@ Tablas principales:
 - maestro_segmentos
 - maestro_marcas_cebe
 
-Regla:
+Restricción:
 
 No contiene lógica de negocio.
 
 ---
 
-## 4.3 STAGING
+## STAGING
 
 Estado:
 
-IMPLEMENTADO
+✅ Implementado
 
-Propósito:
+Objetivo:
 
-Normalizar datos provenientes de SQLite.
+Transformar datos persistidos en contratos técnicos consistentes.
 
 Responsabilidades permitidas:
 
 - Lectura SQLite
-- Detección de columnas
-- Parseo de fechas
 - Tipado
+- Parseo de fechas
+- Detección de columnas
 - Normalización
-- Estandarización de nombres
 - Limpieza técnica
+- Contratos de datos
 
 Responsabilidades prohibidas:
 
 - Objetivos
-- Compensaciones
-- Pace
+- Coberturas
 - CCC
-- MN+
+- MiNegocio
+- Pace
+- Compensaciones
 - KPIs
-- Negocio
+- Reglas comerciales
 
 ---
 
-# 5. Funciones STAGING Actuales
+## CORE
 
-## obtener_staging_vta()
+Estado:
 
-Responsabilidad:
+✅ Implementado
 
-Normalización de ventas.
+Objetivo:
 
-Salida garantizada:
+Interpretar la operación comercial utilizando contratos provenientes de STAGING.
 
-- FechaCarga_dt
-- FechaEntrega_dt
-- CodVendedor
-- Cliente
-- CantBase
-- ImporteNetoItem
-- Marca
+Responsabilidades:
 
----
+- Titularidad operativa
+- Reemplazos
+- Ausencias
+- Calendario
+- Clasificación temporal
+- Venta institucional
 
-## obtener_staging_clientes()
+Responsabilidades prohibidas:
 
-Responsabilidad:
-
-Normalización del universo de clientes.
-
-Salida garantizada:
-
-- Cliente
-- Taxonomia
-- NombreCliente
-- CodVendedor
+- KPIs
+- Objetivos
+- Coberturas
+- CCC
+- MiNegocio
+- Compensaciones
 
 ---
 
-## obtener_staging_rutas()
+## BUSINESS RULES
 
-## 6. Evolución de BUSINESS RULES
+Estado:
 
-### Estado
+✅ Validado en Producción
 
-ACTIVO
+Objetivo:
 
-### Objetivo
+Aplicar reglas comerciales reutilizables.
 
-Desacoplar progresivamente la lógica comercial de los reportes.
+Responsabilidades:
 
-### Estructura objetivo
+- CCC
+- MiNegocio
+- Coberturas
+- Objetivos
+- Problema de Cierre
+- Reglas comerciales institucionales
 
-RAW
-↓
-SQLITE
-↓
-STAGING
-↓
-CORE
-↓
-BUSINESS RULES
-↓
-REPORTES
+Responsabilidades prohibidas:
 
-### Capas implementadas
+- Lectura directa de SQLite
+- Lectura directa de Excel
+- Dependencias entre reportes
 
-STAGING
+---
+
+## REPORTES
+
+Estado:
+
+✅ Operativos
+
+Objetivo:
+
+Presentar información a usuarios.
+
+Responsabilidades:
+
+- KPIs
+- Visualizaciones
+- Indicadores
+- Proyecciones
+- Exportaciones
+
+Restricción:
+
+Los reportes no deben contener reglas comerciales institucionales.
+
+---
+
+# 6. Componentes Institucionales
+
+## STAGING
+
+Implementados:
 
 - obtener_staging_vta()
 - obtener_staging_clientes()
-- obtener_staging_ausencias()
 - obtener_staging_rutas()
+- obtener_staging_ausencias()
+- obtener_staging_maestros()
 
-CORE
+---
+
+## CORE
+
+Implementados:
 
 - obtener_core_ventas_base()
 - obtener_core_clientes()
 - obtener_core_vendedores()
 - obtener_core_operacion()
 
-BUSINESS RULES
+---
+
+## BUSINESS RULES
+
+Implementados:
 
 - business_rules_repository.py
 - business_rules_kilos.py
-
-BUSINESS RULES APROBADAS PARA PRÓXIMA IMPLEMENTACIÓN
-
 - business_rules_mn.py
 
-REPORTES CORE
+Planificados:
 
-- rep_kilos_core.py
+- business_rules_ccc.py
 
-REPORTES APROBADOS PARA MIGRACIÓN
+---
 
-- rep_MN_core.py
+# 7. Business Rules Validadas
 
-### Regla Arquitectónica
+## Kilos
+
+Arquitectura:
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_*
+
+Estado:
+
+✅ Productivo  
+✅ Validado
+
+---
+
+## MiNegocio
+
+Arquitectura:
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
+
+Estado:
+
+✅ Productivo  
+✅ Validado
+
+---
+
+# 8. Regla Arquitectónica Fundamental
 
 Permitido:
 
@@ -308,12 +391,79 @@ Business Rules
 ↓
 Core
 
+Core
+↓
+Staging
+
+Business Rules
+↓
+Core
+
+---
+
 Prohibido:
 
 Reporte
 ↓
 Reporte
 
+Business Rules
+↓
+Reporte
+
+Reporte
+↓
+SQLite
+
+Reporte
+↓
+Excel
+
+Business Rules
+↓
+SQLite
+
+Business Rules
+↓
+Excel
+
+---
+
+# 9. Próxima Migración Aprobada
+
+CCC
+
+Arquitectura objetivo:
+
+rep_ccc.py
+↓
+business_rules_ccc.py
+↓
+rep_ccc_core.py
+
 Objetivo:
 
-Eliminar dependencias cruzadas entre reportes.
+- Desacoplar CCC.
+- Crear fuente única de verdad para CCC.
+- Preparar desacoplamiento de Vespertina.
+- Preparar desacoplamiento de Gerencial.
+
+---
+
+# 10. Objetivo Arquitectónico Final
+
+Eliminar progresivamente todas las dependencias:
+
+Reporte
+↓
+Reporte
+
+y reemplazarlas por:
+
+Reporte
+↓
+Business Rules
+↓
+Core
+
+hasta alcanzar una arquitectura completamente desacoplada, reutilizable y gobernada mediante una única fuente institucional de reglas comerciales.

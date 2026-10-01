@@ -14,6 +14,7 @@ from modules.rep_kilos_core import render_rep_kilos_core
 from modules.rep_obj_kilos import render_rep_obj_kilos
 from modules.rep_ccc import render_rep_ccc
 from modules.rep_MN import render_rep_mn
+from modules.rep_MN_core import render_rep_mn_core
 from modules.rep_cob_marca import (
     generar_reporte_cobertura_marca,
     dibujar_pestana_cobertura_marca,
@@ -325,25 +326,49 @@ def main():
 
     if "Nivel 1" in nivel_actual or "Nivel 2" in nivel_actual:
         if es_local and "Nivel 1" in nivel_actual:
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab_core = (
-                st.tabs(
-                    [
-                        "📈 Tablero Gerencial",
-                        "📊 Avance Kilos",
-                        "📈 Avance CCC",
-                        "🎯 Cobertura Marca",
-                        "🚀 Cobertura Innovación",
-                        "📱 Adopción MiNegocio",
-                        "🌙 Vespertina",
-                        "⭐ Tienda Perfecta",
-                        "⚙️ Parámetros",
-                        "📦 Composición Obj Kilos",
-                        "🧪 Avance Kilos CORE",
-                    ]
-                )
+            (
+                tab1,
+                tab2,
+                tab3,
+                tab4,
+                tab5,
+                tab6,
+                tab7,
+                tab8,
+                tab9,
+                tab10,
+                tab_core,
+                tab_mn_core,
+            ) = st.tabs(
+                [
+                    "📈 Tablero Gerencial",
+                    "📊 Avance Kilos",
+                    "📈 Avance CCC",
+                    "🎯 Cobertura Marca",
+                    "🚀 Cobertura Innovación",
+                    "📱 Adopción MiNegocio",
+                    "🌙 Vespertina",
+                    "⭐ Tienda Perfecta",
+                    "⚙️ Parámetros",
+                    "📦 Composición Obj Kilos",
+                    "🧪 Avance Kilos CORE",
+                    "📱 Adopción MiNegocio CORE",
+                ]
             )
         else:
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab_core = st.tabs(
+            (
+                tab1,
+                tab2,
+                tab3,
+                tab4,
+                tab5,
+                tab6,
+                tab7,
+                tab8,
+                tab9,
+                tab_core,
+                tab_mn_core,
+            ) = st.tabs(
                 [
                     "📈 Tablero Gerencial",
                     "📊 Avance Kilos",
@@ -355,10 +380,11 @@ def main():
                     "⭐ Tienda Perfecta",
                     "📦 Composición Obj Kilos",
                     "🧪 Avance Kilos CORE",
+                    "📱 Adopción MiNegocio CORE",
                 ]
             )
     else:
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_core = st.tabs(
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_core, tab_mn_core = st.tabs(
             [
                 "📊 Avance Kilos",
                 "📈 Avance CCC",
@@ -368,6 +394,7 @@ def main():
                 "🌙 Vespertina",
                 "⭐ Tienda Perfecta",
                 "🧪 Avance Kilos CORE",
+                "📱 Adopción MiNegocio CORE",
             ]
         )
 
@@ -443,6 +470,10 @@ def main():
             t0_kc = time.perf_counter()
             render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
             print(f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s")
+        with tab_mn_core:
+            t0_mnc = time.perf_counter()
+            render_rep_mn_core(filtros_globales)
+            print(f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s")
     elif "Nivel 2" in nivel_actual:
         with tab1:
             t0_g = time.perf_counter()
@@ -488,6 +519,10 @@ def main():
             t0_kc = time.perf_counter()
             render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
             print(f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s")
+        with tab_mn_core:
+            t0_mnc = time.perf_counter()
+            render_rep_mn_core(filtros_globales)
+            print(f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s")
     else:
         # Nivel 3: Supervisión
         with tab1:
@@ -524,6 +559,10 @@ def main():
             t0_kc = time.perf_counter()
             render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
             print(f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s")
+        with tab_mn_core:
+            t0_mnc = time.perf_counter()
+            render_rep_mn_core(filtros_globales)
+            print(f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s")
 
     t_rerun_total = time.perf_counter() - t_rerun_start
     print(

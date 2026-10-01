@@ -1,8 +1,15 @@
-###### FASE 4: STAGING y CORE (Arquitectura por Capas)
+# ROADMAP - MATINAL
 
-### Objetivo
+Versión: 3.0  
+Fecha de actualización: 30/09/2026  
+Estado: Vigente  
+Estado de validación: Producción Operativa
 
-Implementar de forma gradual la arquitectura institucional:
+---
+
+# Objetivo Estratégico
+
+Consolidar la arquitectura institucional:
 
 RAW
 ↓
@@ -16,149 +23,194 @@ BUSINESS RULES
 ↓
 REPORTES
 
-sin afectar la operación productiva.
+mediante migraciones incrementales, controladas y validadas en producción.
 
 ---
 
-### Estado General
+# Estado Arquitectónico General
 
-EN EJECUCIÓN
+RAW
+✅
+
+SQLITE
+✅
+
+STAGING
+✅
+
+CORE
+✅
+
+BUSINESS RULES
+✅ Validada en producción
+
+REPORTES
+✅
 
 ---
 
-### FASE 4.1 a 4.6
+# Fases Completadas
+
+## FASE 4.1 a 4.6
 
 Estado:
+✅ COMPLETADAS
 
-COMPLETADAS ✅
-
-Resultado:
+Resultados alcanzados:
 
 - Definición formal de arquitectura por capas.
-- Creación de estrategias de migración incremental.
-- Separación conceptual entre STAGING y CORE.
-- Auditoría del circuito de ausencias.
-- Diseño de contratos técnicos para futuras entidades STAGING.
+- Incorporación de SQLite como fuente física única.
+- Definición de responsabilidades STAGING.
+- Definición de responsabilidades CORE.
+- Estrategia de migración incremental aprobada.
+- Contratos técnicos institucionales definidos.
 
 ---
 
-### FASE 4.7
+## FASE 4.7
 
 Nombre:
 
-Migración de AUSENCIAS hacia STAGING.
+Migración de AUSENCIAS hacia STAGING
 
 Estado:
 
-COMPLETADA ✅
+✅ COMPLETADA
 
 Fecha de cierre:
 
 27/09/2026
 
-Objetivo:
-
-Crear una puerta de entrada especializada para la entidad AUSENCIAS.
-
-Implementación:
-
-Se creó:
-
-obtener_staging_ausencias()
-
-Responsabilidades asignadas:
-
-- Lectura SQLite
-- Detección de columnas
-- Parseo robusto de fechas
-- Tipado
-- Normalización
-
----
-
-### Cambio de Orquestación
-
-Antes:
-
-df_ausencias = maestros["ausencias"]
-
-Después:
-
-df_ausencias = obtener_staging_ausencias()
-
----
-
-### Validación Ejecutada
-
 Resultado:
 
-APROBADA ✅
-
-Controles realizados:
-
-✅ Arranque Streamlit
-
-✅ Carga SQLite
-
-✅ Ejecución STAGING
-
-✅ Ejecución CORE
-
-✅ Renderizado completo
-
-✅ Integración Ausencias
-
-✅ Sin errores de importación
-
-✅ Sin errores de ejecución
+- Implementación de obtener_staging_ausencias().
+- Separación efectiva entre ETL y lógica operativa.
+- Contrato técnico validado.
+- Producción validada sin regresiones.
 
 ---
 
-### Evidencia de Producción
-
-Tiempos observados:
-
-obtener_staging_ausencias:
-0.0087 s
-
-procesar_ausencias_y_reemplazos:
-0.7176 s
-
-obtener_core_operacion:
-13.4367 s
-
-obtener_matriz_kilos_comercial:
-14.6438 s
-
-Conclusión:
-
-La migración de AUSENCIAS a STAGING no introdujo degradación visible de rendimiento.
-
----
-
-### FASE 4.8
-
-Estado:
-
-PRÓXIMA ITERACIÓN APROBADA ⏳
+## FASE 4.9
 
 Nombre:
 
-Eliminación de ETL duplicado en CORE.
+Migración MiNegocio hacia BUSINESS RULES
 
-Objetivo:
+Estado:
 
-Eliminar lógica técnica redundante de:
+✅ COMPLETADA
 
-procesar_ausencias_y_reemplazos()
+Fecha de cierre:
 
-que actualmente ya existe en:
+30/09/2026
 
-obtener_staging_ausencias()
+Arquitectura implementada:
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
+
+Resultado:
+
+✅ Eliminación de lógica comercial del reporte histórico.
+
+✅ Reutilización de Core institucional.
+
+✅ Clasificación Digital migrada.
+
+✅ Matriz comercial centralizada.
+
+✅ Segundo caso exitoso de adopción de BUSINESS RULES.
 
 ---
 
-### Elementos candidatos a eliminar
+# Validaciones Arquitectónicas Alcanzadas
+
+## Validación 1
+
+Kilos
+
+Arquitectura:
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_*
+
+Estado:
+
+✅ Productivo  
+✅ Validado
+
+---
+
+## Validación 2
+
+MiNegocio
+
+Arquitectura:
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
+
+Estado:
+
+✅ Productivo  
+✅ Validado
+
+Validaciones finales:
+
+✅ TOTAL CARTERA = 5617
+
+✅ CodVendedor -998 = 0
+
+---
+
+# Estado Actual de BUSINESS RULES
+
+La arquitectura:
+
+Reporte
+↓
+Business Rules
+↓
+Core
+
+se considera oficialmente validada en producción.
+
+A partir de esta fecha deja de considerarse una prueba de concepto y se transforma en la estrategia institucional oficial para nuevas migraciones.
+
+---
+
+# Fase Pendiente Inmediata
+
+## FASE 4.8
+
+Nombre:
+
+Eliminación de ETL duplicado en CORE
+
+Estado:
+
+⏳ Pendiente
+
+Objetivo:
+
+Eliminar lógica técnica redundante actualmente presente en:
+
+procesar_ausencias_y_reemplazos()
+
+y ya implementada en:
+
+obtener_staging_ausencias()
+
+Elementos identificados:
 
 - cols_vend_cand
 - cols_f_cand
@@ -167,68 +219,101 @@ obtener_staging_ausencias()
 - CodVend_clean
 - Reemplazo_clean
 
----
+Resultado esperado:
 
-### Resultado esperado
+STAGING = 100% ETL
 
-STAGING:
+CORE = 100% Operación
 
-100% ETL.
+Restricción obligatoria:
 
-CORE:
-
-100% lógica operativa.
+Toda eliminación deberá validarse nuevamente en producción.
 
 ---
 
-### Restricción obligatoria
+# Próxima Migración Aprobada
 
-La refactorización no podrá realizarse sin validación de producción posterior.
-
-La separación arquitectónica tiene prioridad por encima de la reducción de código.
-#### FASE 4.9
-
-Estado:
-
-APROBADA ⏳
+## FASE 4.10
 
 Nombre:
 
-Migración MiNegocio hacia Business Rules.
+Migración CCC hacia BUSINESS RULES
 
-Objetivo:
+Estado:
 
-Separar la lógica comercial de MiNegocio del reporte histórico.
+⏳ APROBADA
 
-Implementación esperada:
+Arquitectura objetivo:
 
-rep_MN.py
+rep_ccc.py
 ↓
-business_rules_mn.py
+business_rules_ccc.py
 ↓
-rep_MN_core.py
+rep_ccc_core.py
 
-Resultado esperado:
+Objetivos:
 
-- Eliminación de lógica comercial del reporte.
-- Reutilización de Core institucional.
-- Fuente única de reglas MiNegocio.
-- Preparación para desacoplar Gerencial.
+- Eliminar lógica comercial embebida en rep_ccc.py.
+- Crear una fuente única de verdad para CCC.
+- Reutilizar Core institucional.
+- Preparar el desacoplamiento de Vespertina.
+- Preparar el desacoplamiento de Gerencial.
+- Eliminar dependencias futuras entre reportes.
 
 Restricción:
 
-No duplicar lógica existente en Core.
-FASE 4.9
-MiNegocio
+No duplicar lógica ya existente en CORE o BUSINESS RULES.
 
-FASE 4.10
-CCC
+---
 
-FASE 4.11
-Coberturas
+# Roadmap de Migraciones
 
-FASE 4.12
-Gerencial
+## Completadas
 
-FASE 4.13
-Vespertina
+✅ Kilos
+
+✅ MiNegocio
+
+---
+
+## Pendientes
+
+⏳ CCC
+
+⏳ Cobertura Marca
+
+⏳ Cobertura Innovación
+
+⏳ Gerencial
+
+⏳ Vespertina
+
+---
+
+# Orden Estratégico Vigente
+
+1. CCC
+2. Cobertura Marca
+3. Cobertura Innovación
+4. Gerencial
+5. Vespertina
+
+---
+
+# Objetivo Final
+
+Eliminar progresivamente todas las dependencias:
+
+Reporte
+↓
+Reporte
+
+y reemplazarlas por:
+
+Reporte
+↓
+Business Rules
+↓
+Core
+
+hasta alcanzar una arquitectura completamente desacoplada, reutilizable y gobernada por una única fuente institucional de reglas comerciales.

@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 
 # REGLA DE ORO: Consumo exclusivo de la Capa CORE (Cero acceso a RAW, STAGING, SQLite o base de datos)
-from modules.core.core_ventas_base import obtener_core_ventas_base
+from modules.core.core_operaciones import obtener_core_operacion
 from modules.core.core_clientes import obtener_core_clientes
 from modules.core.core_vendedores import obtener_core_vendedores
 from modules.utils import parsear_fecha_robusta
@@ -15,20 +15,21 @@ def _filtrar_ventas_mn_comercial(
     df_vta_core: pd.DataFrame, anio_op: int, mes_op: int, dia_matinal: str
 ) -> pd.DataFrame:
     """
-    BUSINESS_RULES: Aplica las reglas institucionales de exclusión y clasificación temporal para MiNegocio.
+    BUSINESS_RULES: Aplica las reglas institucionales de exclusión, clasificación temporal y
+    asignación de titularidad operativa (reemplazos) para MiNegocio.
     - Exclusión de comodatos y préstamos logísticos.
     - Restricción exclusiva al portafolio PEPSICO.
     - Exclusión del preventista 20 (Depósito).
     - Filtro de fecha matinal (excluye cargas >= dia_matinal en el mes en curso).
     - Clasificación en períodos comerciales (Arrastre, Actual, Futuro).
-    - Detección de canal digital MiNegocio.
+    - Detección de canal digital MiNegocio y resolución del operador efectivo.
     """
     if df_vta_core is None or df_vta_core.empty:
         return pd.DataFrame()
 
     df = df_vta_core.copy()
 
-    # Normalización del importe neto (tolerancia de nombres entre core_ventas_base y staging)
+    # Normalización del importe neto (tolerancia de nombres entre core_operaciones y staging)
     col_imp = next(
         (
             c
@@ -110,41 +111,43 @@ def _filtrar_ventas_mn_comercial(
     )
     df = df[df["CodVendedor"] != 20]
 
-    # Filtro N2: Clasificación de períodos comerciales
-    df["MesCarga"] = df["FechaCarga_dt"].dt.month
-    df["AñoCarga"] = df["FechaCarga_dt"].dt.year
-    df["MesEntrega"] = df["FechaEntrega_dt"].dt.month
-    df["AñoEntrega"] = df["FechaEntrega_dt"].dt.year
+    # Resolución de titularidad operativa y reemplazos (Filosofía idéntica a Kilos CORE)
+    padron_vend = obtener_core_vendedores()
+    codigos_validos = (
+        set(padron_vend["CodVendedor"].dropna().tolist())
+        if not padron_vend.empty
+        else set()
+    )
 
-    mes_ant = 12 if mes_op == 1 else mes_op - 1
-    anio_ant = anio_op - 1 if mes_op == 1 else anio_op
+    if "CodVendedorOperativo" not in df.columns:
+        df["CodVendedorOperativo"] = df["CodVendedor"]
 
-    mes_sig = 1 if mes_op == 12 else mes_op + 1
-    anio_sig = anio_op + 1 if mes_op == 12 else anio_op
+    cod_op = df["CodVendedorOperativo"]
+    cod_tit = df["CodVendedor"]
+    reemp = df.get("Reemplazo", pd.Series(pd.NA, index=df.index))
 
-    conditions = [
-        (df["AñoCarga"] == anio_ant)
-        & (df["MesCarga"] == mes_ant)
-        & (df["AñoEntrega"] == anio_op)
-        & (df["MesEntrega"] == mes_op),
-        (df["AñoCarga"] == anio_op)
-        & (df["MesCarga"] == mes_op)
-        & (df["AñoEntrega"] == anio_op)
-        & (df["MesEntrega"] == mes_op),
-        (df["AñoCarga"] == anio_op)
-        & (df["MesCarga"] == mes_op)
-        & (df["AñoEntrega"] == anio_sig)
-        & (df["MesEntrega"] == mes_sig),
-    ]
-    choices = ["Arrastre", "Actual", "Futuro"]
-    df["Periodo"] = np.select(conditions, choices, default="Fuera de Periodo")
+    is_special = ((reemp == 99) | (cod_op == 99) | (cod_tit == 99)).fillna(False)
+    valid_op_mask = cod_op.isin(codigos_validos).fillna(False)
+    valid_tit_mask = cod_tit.isin(codigos_validos).fillna(False)
+
+    df["CodVendedor_Efectivo"] = np.select(
+        [is_special, valid_op_mask, valid_tit_mask],
+        [-998, cod_op.fillna(-999).astype(int), cod_tit.fillna(-999).astype(int)],
+        default=cod_tit.fillna(-999).astype(int),
+    )
+    df["CodVendedor_Efectivo"] = (
+        pd.Series(df["CodVendedor_Efectivo"]).replace(-999, pd.NA).astype("Int64")
+    )
+
+    # Se preserva estrictamente el CodVendedor titular del Universo; CodVendedor_Efectivo se reserva para operaciones
+    df["CodVendedor"] = cod_tit
 
     return df
 
 
 def _consolidar_ventas_cliente_mn(df_vta_mn: pd.DataFrame) -> pd.DataFrame:
     """
-    BUSINESS_RULES: Agrupa las transacciones de Arrastre y Actual por cliente,
+    BUSINESS_RULES: Agrupa las transacciones de Arrastre y Actual por cliente y preventista efectivo,
     totalizando ventas brutas y digitales, aplicando las reglas de saneamiento comercial.
     """
     ventas_periodo = (
@@ -155,7 +158,13 @@ def _consolidar_ventas_cliente_mn(df_vta_mn: pd.DataFrame) -> pd.DataFrame:
 
     if ventas_periodo.empty:
         return pd.DataFrame(
-            columns=["Cliente", "Ventas_Totales", "Ventas_MiNegocio", "Pct_MiNegocio"]
+            columns=[
+                "Cliente",
+                "CodVendedor",
+                "Ventas_Totales",
+                "Ventas_MiNegocio",
+                "Pct_MiNegocio",
+            ]
         )
 
     col_cli = next(
@@ -169,12 +178,15 @@ def _consolidar_ventas_cliente_mn(df_vta_mn: pd.DataFrame) -> pd.DataFrame:
     ventas_periodo["Cliente"] = pd.to_numeric(
         ventas_periodo[col_cli], errors="coerce"
     ).astype("Int64")
+    ventas_periodo["CodVendedor"] = pd.to_numeric(
+        ventas_periodo["CodVendedor"], errors="coerce"
+    ).astype("Int64")
 
     ventas_periodo["_mn_val"] = np.where(
         ventas_periodo["Es_MiNegocio"], ventas_periodo["ImporteNetoItem"], 0.0
     )
 
-    clientes_g = ventas_periodo.groupby("Cliente", as_index=False).agg(
+    clientes_g = ventas_periodo.groupby(["Cliente", "CodVendedor"], as_index=False).agg(
         Ventas_Totales=("ImporteNetoItem", "sum"),
         Ventas_MiNegocio=("_mn_val", "sum"),
     )
@@ -203,9 +215,8 @@ def _integrar_universo_y_fuera_de_padron(
     df_vta_mn: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    BUSINESS_RULES: Fusiona la cartera oficial de clientes con las ventas del período.
-    Incorpora registros sintéticos para transacciones de clientes fuera de padrón ('SIN CLASIFICAR')
-    preservando la masa total de ventas y de cartera.
+    BUSINESS_RULES: Fusiona la cartera oficial de clientes con las ventas del período,
+    manteniendo el Universo como tabla maestra inalterable y agregando las ventas por cliente mediante sum().
     """
     universo = (
         df_clientes_core.copy() if df_clientes_core is not None else pd.DataFrame()
@@ -250,16 +261,27 @@ def _integrar_universo_y_fuera_de_padron(
                 universo = pd.concat([universo, df_fuera], ignore_index=True)
 
     if not universo.empty and not df_ventas_cliente.empty:
-        df_detalle = universo.merge(df_ventas_cliente, on="Cliente", how="left")
+        df_ventas_cliente_agg = df_ventas_cliente.groupby("Cliente", as_index=False)[
+            ["Ventas_Totales", "Ventas_MiNegocio"]
+        ].sum()
+        df_detalle = universo.merge(
+            df_ventas_cliente_agg,
+            on="Cliente",
+            how="left",
+        )
     else:
         df_detalle = universo.copy()
         df_detalle["Ventas_Totales"] = 0.0
         df_detalle["Ventas_MiNegocio"] = 0.0
-        df_detalle["Pct_MiNegocio"] = 0.0
 
     df_detalle["Ventas_Totales"] = df_detalle["Ventas_Totales"].fillna(0.0)
     df_detalle["Ventas_MiNegocio"] = df_detalle["Ventas_MiNegocio"].fillna(0.0)
-    df_detalle["Pct_MiNegocio"] = df_detalle["Pct_MiNegocio"].fillna(0.0)
+    pct_raw = (
+        df_detalle["Ventas_MiNegocio"] / df_detalle["Ventas_Totales"].replace(0, pd.NA)
+    ).mul(100.0)
+    df_detalle["Pct_MiNegocio"] = (
+        pct_raw.clip(lower=0.0, upper=100.0).fillna(0.0).round(2)
+    )
 
     return df_detalle
 
@@ -358,17 +380,17 @@ def obtener_matriz_mn_comercial(
 ) -> pd.DataFrame:
     """
     BUSINESS_RULES (Función Orquestadora Pública de MiNegocio):
-    Consume exclusivamente la Capa CORE (ventas, clientes y vendedores),
+    Consume exclusivamente la Capa CORE (ventas operativas con ausencias/reemplazos, clientes y vendedores),
     calcula la adopción digital por cliente, clasifica la taxonomía digital,
     determina el gap de facturación al 70% e incorpora los datos estructurales.
-    Retorna la matriz comercial granular a nivel cliente.
+    Retorna la matriz comercial granular a nivel cliente reflejando la titularidad operativa.
     """
     t0 = time.perf_counter()
 
     # Validación defensiva estricta de parámetros institucionales obligatorios
     if not filtros_globales or not isinstance(filtros_globales, dict):
         raise ValueError(
-            "No se recibieron filtros_globales en obtener_matriz_mn_comercial()."
+            "No se recibieron filtros_globales in obtener_matriz_mn_comercial()."
         )
 
     dia_matinal = filtros_globales.get("dia_matinal")
@@ -376,9 +398,13 @@ def obtener_matriz_mn_comercial(
         raise ValueError("No se encontró 'dia_matinal' dentro de filtros_globales.")
 
     dia_matinal = str(dia_matinal).strip()
+    dia_venta = filtros_globales.get("dia_venta", "01/09/2026")
 
-    # 1. Consumo estricto de CORE
-    df_vta_core = obtener_core_ventas_base()
+    # 1. Consumo estricto de CORE (operaciones con soporte de reemplazos)
+    datos_operativos = obtener_core_operacion(
+        anio, mes, dia_matinal, dia_venta, modo_ajuste="AJUSTADO"
+    )
+    df_vta_core = datos_operativos["df_vta_operativa"]
     df_clientes_core = obtener_core_clientes()
     padron_vendedores = obtener_core_vendedores()
 

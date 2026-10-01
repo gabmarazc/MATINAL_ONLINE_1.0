@@ -1,9 +1,20 @@
-# BITACORA - MATINAL
+# BITÁCORA - MATINAL
 
-Estado General del Proyecto: Producción Operativa  
-Arquitectura Oficial:
+Versión: 3.0  
+Fecha de actualización: 30/09/2026  
+Estado: Vigente  
+Naturaleza: Registro histórico institucional
 
-```text
+---
+
+# ESTADO GENERAL DEL PROYECTO
+
+## Estado Productivo
+
+✅ Producción Operativa
+
+## Arquitectura Oficial
+
 RAW
 ↓
 SQLITE
@@ -15,25 +26,30 @@ CORE
 BUSINESS RULES
 ↓
 REPORTES
-```
 
-Estado Arquitectónico:
+## Estado Arquitectónico
 
-```text
 RAW               ✅
+
 SQLITE            ✅
+
 STAGING           ✅
+
 CORE              ✅
-BUSINESS RULES    🟡 Parcial
+
+BUSINESS RULES    ✅
+
 REPORTES          ✅
-```
 
-Fase Actual:
+## Fase Actual
 
-```text
-FASE 4.7 COMPLETADA ✅
 FASE 4.8 APROBADA ⏳
-```
+
+Eliminación de ETL duplicado en CORE
+
+## Próxima Migración
+
+CCC
 
 ---
 
@@ -41,7 +57,7 @@ FASE 4.8 APROBADA ⏳
 
 ## Título
 
-Eliminación de referencia obsoleta a la tabla `parametros_marcas`
+Eliminación de referencia obsoleta a la tabla parametros_marcas
 
 ## Fecha de Apertura
 
@@ -53,47 +69,35 @@ Eliminación de referencia obsoleta a la tabla `parametros_marcas`
 
 ## Origen
 
-Durante la validación operativa de la Fase 2A (Logging Estructurado) se detectaron advertencias recurrentes en los registros del sistema relacionadas con consultas a una tabla inexistente.
+Durante la validación operativa de la Fase 2A (Logging Estructurado) se detectaron advertencias recurrentes asociadas a consultas sobre una tabla inexistente.
 
 ## Evidencia
 
 ```text
 WARNING | matinal.database |
 La tabla consultada no existe en el catálogo de SQLite.
-
 SELECT * FROM parametros_marcas
 ```
 
 ## Acción Realizada
 
-Se eliminaron las referencias remanentes a:
+Eliminación de referencias remanentes a:
 
-```text
 parametros_marcas
-```
 
 ## Validación Final
 
-### Prueba 1 - Reinicio Completo
+✅ Reinicio completo
 
-- Cierre total de la aplicación.
-- Reinicio de Streamlit.
-- Recarga completa de módulos.
-- Verificación de reportes principales.
+✅ Recarga total de módulos
 
-### Resultado
+✅ Reportes operativos
 
-```text
-✅ Aplicación operativa
-✅ Sin errores observados
-✅ Sin referencias nuevas a parametros_marcas
-```
+✅ Sin nuevas referencias detectadas
 
 ## Estado
 
-```text
 CERRADO
-```
 
 ---
 
@@ -113,51 +117,27 @@ Unificación de padrón de vendedores y supervisor en Tienda Perfecta
 
 ## Cambio
 
-Se integró:
+Integración de:
 
-```text
-modules/rep_tp.py
-```
+rep_tp.py
 
 con:
 
-```text
 maestro_vendedores
-```
-
-adoptando el mismo criterio institucional utilizado por CCC.
-
-## Implementación
-
-- Cruce por código de vendedor.
-- Visualización de nombres corporativos.
-- Incorporación de Supervisor.
-- Compatibilidad con filtros globales.
-- Regeneración dinámica de catálogos.
-- Conservación de compatibilidad histórica.
-
-## Validación
-
-```text
-✅ Supervisor específico
-✅ Retorno a TODOS
-✅ Catálogos regenerados
-✅ Rankings operativos
-✅ Exportaciones operativas
-```
 
 ## Resultado
 
-```text
-✅ TP alineado arquitectónicamente con CCC
-✅ Sin degradación observable de performance
-```
+✅ Supervisor operativo
+
+✅ Catálogos actualizados
+
+✅ Exportaciones funcionales
+
+✅ Sin degradación observable
 
 ## Estado
 
-```text
 CERRADO
-```
 
 ---
 
@@ -177,80 +157,41 @@ Auditoría forense de paridad en STAGING_CLIENTES
 
 ## Contexto
 
-Durante la validación de la arquitectura por capas se detectó una diferencia entre:
+Se detectó una diferencia entre:
 
-```text
-RAW_UNIVERSO = 5719 registros
-STAGING_CLIENTES = 5615 registros
-```
+RAW_UNIVERSO = 5719
 
-## Investigación Realizada
-
-Se auditó:
-
-- UNIVERSO.xlsx
-- SQLite
-- database.py
-- staging.py
-- data_loader.py
-- cache de Streamlit
-- tipado
-- duplicados
-- valores nulos
+STAGING_CLIENTES = 5615
 
 ## Hallazgos
 
-```text
-Diferencia total: 104 registros
-```
+Diferencia total:
 
-Los registros faltantes corresponden exactamente a:
+104 registros
 
-```text
+Los registros faltantes corresponden exclusivamente a:
+
 SubSegmento = Empleados
-```
 
-Además:
+## Verificaciones
 
-```text
 ✅ SQLite contiene 5719 registros
-✅ No existen pérdidas por tipado
-✅ No existen pérdidas por duplicados
-✅ No existen pérdidas por valores nulos
-```
 
-## Impacto
+✅ Sin pérdidas por tipado
 
-```text
-Nulo
-```
+✅ Sin pérdidas por duplicados
 
-## Decisión Arquitectónica
-
-Se ratifica el modelo:
-
-```text
-RAW
-↓
-STAGING
-↓
-CORE
-↓
-REPORTES
-```
+✅ Sin pérdidas por nulos
 
 ## Resultado
 
-```text
 ✅ FASE 4.1 cerrada
+
 ✅ Inicio autorizado de CORE
-```
 
 ## Estado
 
-```text
 CERRADO
-```
 
 ---
 
@@ -258,7 +199,7 @@ CERRADO
 
 ## Título
 
-Migración de AUSENCIAS a STAGING
+Migración de AUSENCIAS hacia STAGING
 
 ## Fecha de Apertura
 
@@ -268,86 +209,33 @@ Migración de AUSENCIAS a STAGING
 
 27/09/2026
 
-## Contexto
-
-La entidad AUSENCIAS era consumida mediante:
-
-```python
-maestros["ausencias"]
-```
-
-y gran parte del procesamiento técnico permanecía mezclado con lógica operativa.
-
-La arquitectura institucional exigía separar:
-
-```text
-ETL
-↓
-Operación
-```
-
-mediante la incorporación formal de STAGING.
-
 ## Objetivo
 
-Crear una puerta de entrada especializada para AUSENCIAS dentro de la capa STAGING.
+Separar responsabilidades ETL y operativas mediante la formalización de STAGING.
 
 ## Implementación
 
-Se incorporó:
+Creación de:
 
-```python
 obtener_staging_ausencias()
-```
-
-## Responsabilidades Asignadas
-
-```text
-Lectura SQLite
-Detección de columnas
-Parseo robusto de fechas
-Tipado
-Conversión a Int64
-Normalización
-Generación de contratos técnicos
-```
 
 ## Contrato Aprobado
 
-```text
-Fecha_dt
-CodVend_clean
-Reemplazo_clean
-```
+- Fecha_dt
+- CodVend_clean
+- Reemplazo_clean
 
-## Cambio de Orquestación
+## Resultado
 
-### Antes
+✅ Menor acoplamiento
 
-```python
-df_ausencias = maestros["ausencias"]
-```
+✅ Contrato explícito
 
-### Después
-
-```python
-df_ausencias = obtener_staging_ausencias()
-```
-
-## Beneficios
-
-```text
-Menor acoplamiento
-Contratos explícitos
-Preparación para futuras entidades STAGING
-Separación efectiva entre STAGING y CORE
-```
+✅ Preparación para futuras migraciones
 
 ## Estado
 
-```text
 CERRADO
-```
 
 ---
 
@@ -355,7 +243,7 @@ CERRADO
 
 ## Título
 
-Validación productiva de la Migración AUSENCIAS → STAGING
+Validación productiva de Migración AUSENCIAS → STAGING
 
 ## Fecha de Apertura
 
@@ -365,47 +253,40 @@ Validación productiva de la Migración AUSENCIAS → STAGING
 
 27/09/2026
 
-## Objetivo
+## Validaciones
 
-Verificar comportamiento funcional luego del cambio arquitectónico.
-
-## Validaciones Ejecutadas
-
-```text
 ✅ Arranque Streamlit
+
 ✅ Carga SQLite
+
 ✅ Ejecución STAGING
+
 ✅ Ejecución CORE
-✅ Renderizado de reportes
+
 ✅ Integración AUSENCIAS
-✅ Sin errores de importación
-✅ Sin NameError
-✅ Sin KeyError
-✅ Sin tracebacks
-```
+
+✅ Sin errores de ejecución
 
 ## Evidencia Operativa
 
 ```text
-obtener_staging_ausencias       → 0.0087 s
-procesar_ausencias_y_reemplazos → 0.7176 s
-obtener_core_operacion          → 13.4367 s
-obtener_matriz_kilos_comercial  → 14.6438 s
+obtener_staging_ausencias        0.0087 s
+procesar_ausencias_y_reemplazos  0.7176 s
+obtener_core_operacion          13.4367 s
+obtener_matriz_kilos_comercial  14.6438 s
 ```
 
 ## Resultado
 
-```text
 ✅ Integración aprobada
-✅ Sin regresiones observadas
-✅ Sin degradación perceptible de performance
-```
+
+✅ Sin regresiones funcionales
+
+✅ Sin impacto perceptible de performance
 
 ## Estado
 
-```text
 CERRADO
-```
 
 ---
 
@@ -423,48 +304,21 @@ Cierre formal de FASE 4.7
 
 27/09/2026
 
-## Nombre de Fase
+## Nombre
 
-```text
-Migración de AUSENCIAS a STAGING
-```
-
-## Alcance Completado
-
-### STAGING
-
-Implementado:
-
-```python
-obtener_staging_ausencias()
-```
-
-### CORE
-
-Consumidor actualizado:
-
-```python
-procesar_ausencias_y_reemplazos()
-```
-
-### Producción
-
-Validada mediante ejecución real.
+Migración de AUSENCIAS hacia STAGING
 
 ## Resultado Institucional
 
-```text
-✅ FASE 4.7 COMPLETADA
-✅ STAGING implementado
+✅ STAGING consolidado
+
 ✅ CORE operativo
+
 ✅ Arquitectura por capas consolidada
-```
 
 ## Estado
 
-```text
 CERRADO
-```
 
 ---
 
@@ -480,138 +334,246 @@ Aprobación formal de FASE 4.8
 
 ## Estado
 
-APROBADA
+PENDIENTE
 
 ## Nombre
 
-```text
 Eliminación de ETL duplicado en CORE
-```
 
 ## Objetivo
 
-Eliminar lógica técnica actualmente duplicada dentro de:
+Eliminar lógica técnica heredada ya migrada a:
 
-```python
-procesar_ausencias_y_reemplazos()
-```
-
-una vez validado el funcionamiento de:
-
-```python
 obtener_staging_ausencias()
-```
-
-## Elementos Identificados
-
-```text
-cols_vend_cand
-cols_f_cand
-cols_reemp_cand
-parsear_fecha_robusta()
-CodVend_clean
-Reemplazo_clean
-```
 
 ## Resultado Esperado
 
-```text
 STAGING = 100% ETL
+
 CORE = 100% Operación
-```
+
+---
+
+# INC-2026-09-29-001
+
+## Título
+
+Cierre formal de Migración Kilos hacia Business Rules
+
+## Fecha de Apertura
+
+29/09/2026
+
+## Fecha de Cierre
+
+29/09/2026
+
+## Implementación
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_*
+
+## Resultado
+
+✅ Migración validada
+
+✅ Patrón arquitectónico aprobado
+
+✅ Referencia institucional para futuras migraciones
 
 ## Estado
 
-```text
-PENDIENTE
-```
+CERRADO
+
+---
+
+# INC-2026-09-30-001
+
+## Título
+
+Cierre formal de Migración MiNegocio hacia Business Rules
+
+## Fecha de Apertura
+
+30/09/2026
+
+## Fecha de Cierre
+
+30/09/2026
+
+## Implementación
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
+
+## Reglas Migradas
+
+- Clasificación Digital
+- No Digital
+- Híbrido
+- Fully Digital
+- Pct_MiNegocio
+- Minimo_Facturacion_70
+- Matriz comercial por cliente
+- Adopción por vendedor
+- Adopción por taxonomía
+
+## Resultado
+
+✅ Migración validada
+
+✅ Reporte productivo
+
+✅ Reutilización de Core institucional
+
+✅ Eliminación de lógica comercial del reporte
+
+✅ Segundo caso exitoso de adopción de Business Rules
+
+## Estado
+
+CERRADO
+
+---
+
+# INC-2026-09-30-002
+
+## Título
+
+Validación funcional final de MiNegocio
+
+## Fecha de Apertura
+
+30/09/2026
+
+## Fecha de Cierre
+
+30/09/2026
+
+## Contexto
+
+Durante la estabilización final de la migración MiNegocio se realizó una auditoría completa de universo comercial, titularidad y métricas consolidadas.
+
+## Hallazgos
+
+TOTAL CARTERA = 5617
+
+CodVendedor -998 = 0
+
+## Verificaciones
+
+✅ Universo consistente
+
+✅ Titularidad preservada
+
+✅ Sin contaminación por vendedor dummy
+
+✅ Exportaciones validadas
+
+✅ Resultados compatibles con producción
+
+## Resultado
+
+Validación final aprobada para producción.
+
+## Estado
+
+CERRADO
+
+---
+
+# EVENTO-2026-09-30-001
+
+## Título
+
+Validación institucional de BUSINESS RULES
+
+## Fecha
+
+30/09/2026
+
+## Estado
+
+COMPLETADO
+
+## Contexto
+
+La arquitectura:
+
+Reporte
+↓
+Business Rules
+↓
+Core
+
+fue sometida a validación mediante implementaciones productivas independientes.
+
+## Implementaciones Utilizadas
+
+### Kilos
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_*
+
+### MiNegocio
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
+
+## Resultado Institucional
+
+✅ BUSINESS RULES validada
+
+✅ Estrategia oficial aprobada
+
+✅ Fin de etapa experimental
+
+✅ Patrón obligatorio para nuevas migraciones
 
 ---
 
 # RESUMEN INSTITUCIONAL
 
-Estado Productivo:
+Estado General:
 
-```text
-OPERATIVO
-```
-
-Estado Arquitectónico:
-
-```text
-EN TRANSICIÓN CONTROLADA HACIA ARQUITECTURA POR CAPAS
-```
-
-Última Fase Cerrada:
-
-```text
-FASE 4.7
-Migración de AUSENCIAS a STAGING
-```
-
-Próxima Fase:
-
-```text
-FASE 4.8
-Eliminación de ETL duplicado en CORE
-```
-
-Nivel de Riesgo:
-
-```text
-BAJO
-```
-
-Resultado General:
-
-```text
-✅ Sistema estable
 ✅ Producción operativa
-✅ STAGING implementado
-✅ CORE implementado
-✅ BUSINESS RULES parcial
-✅ Reportes operativos
-```
-## INC-2026-09-29-001
 
-### Título
+Arquitectura:
 
-Cierre formal de Migración Kilos hacia Business Rules
+✅ RAW → SQLITE → STAGING → CORE → BUSINESS RULES → REPORTES
 
-### Fecha de Apertura
+Migraciones completadas:
 
-29/09/2026
+✅ Kilos
 
-### Fecha de Cierre
+✅ MiNegocio
 
-29/09/2026
+Validaciones institucionales:
 
-### Contexto
+✅ BUSINESS RULES
 
-Se completó la migración del reporte histórico de Kilos hacia la arquitectura institucional por capas.
+✅ MiNegocio
 
-### Implementación
+✅ CORE
 
-Se consolidó:
+✅ STAGING
 
-rep_kilos_core.py
+Próxima migración aprobada:
 
-consumiendo:
+⏳ CCC
 
-business_rules_kilos.py
+Nivel de riesgo:
 
-y Core institucional.
-
-### Resultado
-
-✅ Migración validada.
-
-✅ Patrón arquitectónico aprobado.
-
-✅ Eliminación de archivos temporales de migración.
-
-✅ Base de referencia para futuras migraciones.
-
-### Estado
-
-CERRADO
+✅ Bajo

@@ -1,31 +1,27 @@
-# CORE_OPERACION V1
+# CORE_OPERACION_V1
 
-Versión: 2.0
-
-Fecha última actualización:
-27/09/2026
-
-Estado:
-IMPLEMENTADO Y VALIDADO
-
-Estado de Producción:
-OPERATIVO
+Versión: 3.0  
+Fecha de actualización: 30/09/2026  
+Estado: Vigente  
+Estado de Producción: Operativo
 
 ---
 
-# Objetivo
+# 1. PROPÓSITO
 
 CORE_OPERACION constituye el núcleo operativo institucional del sistema MATINAL.
 
-Su responsabilidad es transformar entidades previamente normalizadas por STAGING en estructuras operativas listas para ser consumidas por BUSINESS RULES y REPORTES.
+Su responsabilidad es transformar contratos técnicos provenientes de STAGING en estructuras operativas reutilizables por cualquier dominio comercial.
 
 CORE_OPERACION no realiza ETL.
 
-CORE_OPERACION asume que STAGING entrega datos consistentes.
+CORE_OPERACION no aplica reglas comerciales.
+
+CORE_OPERACION interpreta la operación.
 
 ---
 
-# Posición Arquitectónica
+# 2. POSICIÓN ARQUITECTÓNICA
 
 RAW
 ↓
@@ -41,23 +37,37 @@ REPORTES
 
 ---
 
-# Responsabilidad Principal
+# 3. RESPONSABILIDAD INSTITUCIONAL
 
-Determinar:
+CORE_OPERACION es responsable de determinar:
 
-- quién figura como titular de una venta
-- quién ejecutó realmente esa venta
-- qué reemplazos deben aplicarse
-- cómo clasificar temporalmente cada transacción
-- qué calendario operativo corresponde
+- titularidad operativa
+- vendedor operativo
+- reemplazos
+- ausencias
+- clasificación temporal
+- calendario operativo
+- ritmo operativo
+
+No es responsable de:
+
+- CCC
+- MiNegocio
+- Coberturas
+- Objetivos
+- Pace
+- Efectividad
+- Compensaciones
+- KPIs
+- Clasificaciones comerciales
 
 ---
 
-# Entradas Oficiales
+# 4. ENTRADAS OFICIALES
 
 ## obtener_staging_vta()
 
-Entrega:
+Contrato esperado:
 
 - FechaCarga_dt
 - FechaEntrega_dt
@@ -65,32 +75,38 @@ Entrega:
 - Cliente
 - CantBase
 - ImporteNetoItem
+- PesoKg
+- Marca
 
 ---
 
 ## obtener_staging_rutas()
 
-Entrega:
+Contrato esperado:
 
-calendario de visitas.
+Calendario operativo normalizado.
 
 ---
 
 ## obtener_staging_ausencias()
 
-Implementado en FASE 4.7.
-
-Entrega:
+Contrato esperado:
 
 - Fecha_dt
 - CodVend_clean
 - Reemplazo_clean
 
+Estado:
+
+✅ Implementado
+
+✅ Validado
+
 ---
 
 ## obtener_staging_maestros()
 
-Entrega:
+Contrato esperado:
 
 - maestro_vendedores
 - maestro_ccc
@@ -99,7 +115,7 @@ Entrega:
 
 ---
 
-# Flujo Oficial
+# 5. FLUJO OFICIAL
 
 obtener_staging_vta()
 ↓
@@ -119,49 +135,41 @@ obtener_core_operacion()
 
 ---
 
-# Procesar Ausencias y Reemplazos
+# 6. PROCESAR AUSENCIAS Y REEMPLAZOS
 
-Función:
+## Función
 
 procesar_ausencias_y_reemplazos()
 
-Responsabilidad:
+## Objetivo
 
-Determinar:
+Determinar quién ejecutó efectivamente una operación.
+
+## Resultado Principal
 
 CodVendedorOperativo
 
 ---
 
-# Claves Generadas
+## Claves Generadas
 
-## ClaveAUS_Carga
-
-Formato:
+### ClaveAUS_Carga
 
 CodVendedor + FechaCarga
 
----
-
-## ClaveAUS_Entrega
-
-Formato:
+### ClaveAUS_Entrega
 
 CodVendedor + FechaEntrega
 
----
-
-## ClaveAUS
-
-Formato:
+### ClaveAUS
 
 CodVend_clean + Fecha_dt
 
 ---
 
-# Lógica de Reemplazo
+## Regla Operativa
 
-## Sin reemplazo
+### Sin Reemplazo
 
 Condición:
 
@@ -173,11 +181,11 @@ CodVendedorOperativo = CodVendedor
 
 ---
 
-## Con reemplazo
+### Con Reemplazo
 
 Condición:
 
-Existe coincidencia por clave.
+Existe coincidencia en AUSENCIAS.
 
 Resultado:
 
@@ -185,43 +193,51 @@ CodVendedorOperativo = Reemplazo
 
 ---
 
-# Salidas Operativas
+# 7. CLASIFICACIÓN TEMPORAL
 
-Columnas generadas:
-
-- Reemplazo
-- CodVendedorOperativo
-
-Columnas utilizadas:
-
-- FechaCarga_dt
-- FechaEntrega_dt
-- CodVendedor
-
----
-
-# Clasificación Temporal
-
-Función:
+## Función
 
 calcular_ritmo_operativo()
 
-Clasificaciones:
+## Categorías Institucionales
 
-- Arrastre
-- Actual
-- Futuro
-- Fuera de Periodo
+### Arrastre
+
+Carga mes anterior
+
+Entrega mes actual
 
 ---
 
-# Calendario Operativo
+### Actual
 
-Función:
+Carga mes actual
+
+Entrega mes actual
+
+---
+
+### Futuro
+
+Carga mes actual
+
+Entrega mes siguiente
+
+---
+
+### Fuera de Periodo
+
+No cumple criterios institucionales.
+
+---
+
+# 8. CALENDARIO OPERATIVO
+
+## Función
 
 calcular_calendario_y_rutas()
 
-Produce:
+## Resultados
 
 - dias_pasados_map
 - dias_restantes_map
@@ -230,13 +246,26 @@ Produce:
 
 ---
 
-# Contrato de Salida
+## Propósito
+
+Entregar una interpretación oficial del avance operativo de cada vendedor.
+
+---
+
+# 9. CONTRATO DE SALIDA
+
+## Función
 
 obtener_core_operacion()
 
-retorna:
+## Retorno
 
-- df_vta_operativa
+### df_vta_operativa
+
+Estructura operativa consolidada.
+
+### Métricas de Calendario
+
 - dias_pasados_map
 - dias_restantes_map
 - total_dias_pasados
@@ -244,42 +273,149 @@ retorna:
 
 ---
 
-# Estado Actual
+# 10. PRINCIPIOS INSTITUCIONALES
 
-FASE 4.7
+## PI-001
 
-Completada.
-
-Validada en producción.
+CORE_OPERACION no contiene reglas comerciales.
 
 ---
 
-# Pendiente
+## PI-002
 
-FASE 4.8
+CORE_OPERACION sólo consume contratos provenientes de STAGING.
 
-Eliminar ETL redundante heredado dentro de:
+---
+
+## PI-003
+
+Toda lógica comercial debe residir en BUSINESS RULES.
+
+---
+
+## PI-004
+
+Toda entidad comercial debe consumir CORE y no replicar lógica operativa.
+
+---
+
+# 11. CONSUMIDORES PRODUCTIVOS CONFIRMADOS
+
+## Kilos
+
+Arquitectura:
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+obtener_core_operacion()
+
+Resultado:
+
+✅ Productivo
+
+✅ Validado
+
+---
+
+## MiNegocio
+
+Arquitectura:
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+obtener_core_operacion()
+
+Resultado:
+
+✅ Productivo
+
+✅ Validado
+
+---
+
+# 12. VALIDACIÓN INSTITUCIONAL
+
+CORE_OPERACION ha sido validado mediante múltiples dominios comerciales independientes.
+
+Dominios validados:
+
+✅ Kilos
+
+✅ MiNegocio
+
+Resultado:
+
+✅ Componente transversal
+
+✅ Reutilizable
+
+✅ Estable
+
+✅ Sin conocimiento comercial embebido
+
+---
+
+# 13. PRÓXIMO CONSUMIDOR APROBADO
+
+CCC
+
+Arquitectura objetivo:
+
+rep_ccc_core.py
+↓
+business_rules_ccc.py
+↓
+obtener_core_operacion()
+
+---
+
+# 14. EVOLUCIÓN APROBADA
+
+## FASE 4.8
+
+Estado:
+
+⏳ Pendiente
+
+Nombre:
+
+Eliminación de ETL duplicado en CORE
+
+Objetivo:
+
+Eliminar lógica técnica heredada actualmente presente en:
 
 procesar_ausencias_y_reemplazos()
 
-Actualmente aún existen componentes técnicos duplicados que ya fueron migrados a:
+que ya existe en:
 
 obtener_staging_ausencias()
 
-La eliminación deberá realizarse únicamente luego de validaciones de producción.
-## Relación con BUSINESS RULES
+Resultado esperado:
 
-CORE_OPERACION no implementa reglas comerciales.
+STAGING = 100% ETL
 
-Ejemplos prohibidos:
+CORE = 100% Operación
 
-- Objetivos
-- MiNegocio
-- CCC
-- Coberturas
-- Clasificaciones Digitales
-- Compensaciones
+---
 
-CORE entrega estructuras operativas reutilizables.
+# 15. ESTADO ACTUAL
 
-Las decisiones comerciales pertenecen exclusivamente a BUSINESS RULES.
+CORE_OPERACION
+
+✅ Implementado
+
+✅ Validado
+
+✅ Productivo
+
+✅ Reutilizable
+
+✅ Consumido por múltiples dominios
+
+✅ Componente institucional consolidado
+`

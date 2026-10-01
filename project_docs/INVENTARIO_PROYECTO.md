@@ -1,15 +1,15 @@
-## INVENTARIO DEL PROYECTO MATINAL
+# INVENTARIO DEL PROYECTO MATINAL
 
-Versión: 2.1
-Fecha de actualización: 29/09/2026
-Estado: Vigente
+Versión: 3.0  
+Fecha de actualización: 30/09/2026  
+Estado: Vigente  
 Estado de validación: Producción Operativa
 
 ---
 
 # ESTADO ARQUITECTÓNICO
 
-Arquitectura institucional vigente:
+## Arquitectura institucional vigente
 
 RAW
 ↓
@@ -23,24 +23,24 @@ BUSINESS RULES
 ↓
 REPORTES
 
-Estado actual:
+## Estado actual
 
-RAW               ✅
-SQLITE            ✅
-STAGING           ✅
-CORE              ✅
-BUSINESS RULES    🟡 En consolidación
+RAW               ✅  
+SQLITE            ✅  
+STAGING           ✅  
+CORE              ✅  
+BUSINESS RULES    ✅  
 REPORTES          ✅
 
 ---
 
-# SITUACIÓN DE LA ARQUITECTURA
+# ESTADO DE LAS MIGRACIONES
 
-## Migración validada
+## Migraciones completadas
 
-Kilos constituye el primer caso completamente migrado hacia la arquitectura institucional mediante la capa BUSINESS RULES.
+### Kilos
 
-Patrón aprobado:
+Arquitectura:
 
 rep_kilos_core.py
 ↓
@@ -50,39 +50,63 @@ core_*
 
 Estado:
 
-✅ Validado
-✅ Operativo
-✅ Commiteado
-✅ Referencia oficial para futuras migraciones
+✅ Validado  
+✅ Productivo  
+✅ Patrón institucional aprobado
 
 ---
 
-# ROADMAP DE MIGRACIÓN DE REPORTES
+### MiNegocio
 
-Estado actual:
+Arquitectura:
 
-✅ Kilos
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
 
-Próximas migraciones aprobadas:
+Estado:
 
-⏳ MiNegocio
+✅ Validado  
+✅ Productivo  
+✅ Segundo patrón institucional aprobado
+
+---
+
+## Migraciones pendientes
+
 ⏳ CCC
+
 ⏳ Cobertura Marca
+
 ⏳ Cobertura Innovación
+
 ⏳ Gerencial
+
 ⏳ Vespertina
 
-Objetivo:
+---
 
-Eliminar dependencias entre reportes y migrar progresivamente toda la lógica comercial hacia BUSINESS RULES.
+## Próxima migración aprobada
+
+CCC
+
+Arquitectura objetivo:
+
+rep_ccc.py
+↓
+business_rules_ccc.py
+↓
+rep_ccc_core.py
 
 ---
 
 # ARCHIVOS RAÍZ
 
 - .gitignore
-- app copy.py
 - app.py
+- app copy.py
 - config.py
 - contexto.py
 - data_loader.py
@@ -99,90 +123,108 @@ Eliminar dependencias entre reportes y migrar progresivamente toda la lógica co
 
 ## Persistencia
 
-- modules\database.py
-- modules\logger.py
+- modules/database.py
+- modules/logger.py
 
 ## Configuración
 
-- modules\parametros.py
+- modules/parametros.py
 
 ## Utilidades
 
-- modules\utils.py
+- modules/utils.py
 
-## Arquitectura Institucional
+---
 
-### STAGING
+# ARQUITECTURA INSTITUCIONAL
 
-- modules\staging.py
+## STAGING
 
-### CORE
+- modules/staging.py
 
-- modules\core\core_clientes.py
-- modules\core\core_operaciones.py
-- modules\core\core_vendedores.py
-- modules\core\core_ventas_base.py
+## CORE
 
-### BUSINESS RULES
+- modules/core/core_clientes.py
+- modules/core/core_operaciones.py
+- modules/core/core_vendedores.py
+- modules/core/core_ventas_base.py
 
-#### Implementadas
+---
 
-- modules\business_rules\business_rules_kilos.py
-- modules\business_rules\business_rules_repository.py
+# BUSINESS RULES
 
-#### Aprobadas para implementación
+## Implementadas y productivas
 
-- modules\business_rules\business_rules_mn.py
+- modules/business_rules/business_rules_repository.py
+- modules/business_rules/business_rules_kilos.py
+- modules/business_rules/business_rules_mn.py
+
+## Planificadas
+
+- modules/business_rules/business_rules_ccc.py
 
 ---
 
 # REPORTES
 
-## Reportes históricos
+## Históricos
 
-- modules\rep_kilos.py
-- modules\rep_MN.py
-- modules\rep_ccc.py
-- modules\rep_cob_marca.py
-- modules\rep_cob_innovacion.py
-- modules\rep_gerencial.py
-- modules\rep_vespertina.py
-- modules\rep_tp.py
-- modules\rep_obj_kilos.py
+- modules/rep_kilos.py
+- modules/rep_MN.py
+- modules/rep_ccc.py
+- modules/rep_cob_marca.py
+- modules/rep_cob_innovacion.py
+- modules/rep_gerencial.py
+- modules/rep_vespertina.py
+- modules/rep_tp.py
+- modules/rep_obj_kilos.py
 
-## Reportes desacoplados
+## Desacoplados y productivos
 
-- modules\rep_kilos_core.py
+- modules/rep_kilos_core.py
+- modules/rep_MN_core.py
 
-## Reportes aprobados para migración
+## Próximo reporte a migrar
 
-- modules\rep_MN_core.py
+- modules/rep_ccc_core.py
 
 ---
 
-# DEPENDENCIAS ARQUITECTÓNICAS IDENTIFICADAS
+# DEPENDENCIAS ARQUITECTÓNICAS CONOCIDAS
 
-## Dependencias entre reportes detectadas
+## Dependencias entre reportes
+
+### Gerencial
 
 rep_gerencial.py
+↓
+rep_MN.py
 
-→ rep_MN.py
-→ rep_ccc.py
-→ rep_cob_marca.py
+rep_gerencial.py
+↓
+rep_ccc.py
+
+rep_gerencial.py
+↓
+rep_cob_marca.py
+
+### Vespertina
 
 rep_vespertina.py
+↓
+rep_ccc.py
 
-→ rep_ccc.py
+---
 
-## Objetivo institucional
+# OBJETIVO DE DESACOPLAMIENTO
 
-Eliminar completamente las dependencias:
+Eliminar progresivamente:
 
 Reporte
 ↓
 Reporte
 
-y reemplazarlas por:
+y reemplazar por:
 
 Reporte
 ↓
@@ -194,7 +236,7 @@ Core
 
 # PATRÓN OFICIAL DE DESARROLLO
 
-Todo nuevo desarrollo deberá seguir la siguiente estructura:
+Toda nueva funcionalidad deberá respetar:
 
 RAW
 ↓
@@ -208,7 +250,9 @@ BUSINESS RULES
 ↓
 REPORTES
 
-### Permitido
+---
+
+## Permitido
 
 Reporte
 ↓
@@ -216,7 +260,17 @@ Business Rules
 ↓
 Core
 
-### Prohibido
+Business Rules
+↓
+Core
+
+Core
+↓
+Staging
+
+---
+
+## Prohibido
 
 Reporte
 ↓
@@ -228,43 +282,87 @@ Reporte
 
 Acceso directo desde Reportes a SQLite
 
+Acceso directo desde Reportes a Excel
+
 ---
 
-# PROJECT_DOCS
+# DOCUMENTACIÓN DEL PROYECTO
+
+## Documentos rectores
 
 - ARQUITECTURA.md
-- BITACORA.md
-- CODIGO_CONSOLIDADO.md
-- CONTEXTO_GLOBAL.md
-- CONTEXTO_IA.md
+- ESTADO_ACTUAL.md
+- DECISIONES_TECNICAS.md
+- ROADMAP.md
+
+## Documentos funcionales
+
+- DICCIONARIO_TABLAS.md
+- GLOSARIO_REGLAS.md
 - CORE_OPERACION_V1.md
 - CORE_VENTAS_BASE_V1.md
-- DECISIONES_TECNICAS.md
-- DICCIONARIO_TABLAS.md
-- ESTADO_ACTUAL.md
-- GLOSARIO_REGLAS.md
+
+## Documentos de contexto
+
+- CONTEXTO_GLOBAL.md
+- CONTEXTO_IA.md
 - GOBIERNO_IA.md
+
+## Documentos históricos
+
+- BITACORA.md
+
+## Inventario
+
 - INVENTARIO_PROYECTO.md
-- ROADMAP.md
+
+## Referencia de código
+
+- CODIGO_CONSOLIDADO.md
 
 ---
 
 # RESUMEN EJECUTIVO
 
-Estado del sistema:
+Estado general:
 
-✅ Producción estable
+✅ Producción operativa
 
-✅ STAGING implementado
+Arquitectura:
 
-✅ CORE implementado
+✅ RAW → SQLITE → STAGING → CORE → BUSINESS RULES → REPORTES
 
-✅ Primera migración BUSINESS RULES validada
+Migraciones completadas:
 
-✅ rep_kilos_core operativo
+✅ Kilos  
+✅ MiNegocio
 
-⏳ Próxima migración: MiNegocio
+Business Rules:
 
-Objetivo estratégico:
+✅ Validada en producción
 
-Consolidar la arquitectura institucional mediante la eliminación progresiva de lógica comercial embebida en reportes y su migración hacia BUSINESS RULES reutilizables.
+Implementaciones productivas:
+
+✅ business_rules_kilos.py  
+✅ business_rules_mn.py
+
+Reportes desacoplados:
+
+✅ rep_kilos_core.py  
+✅ rep_MN_core.py
+
+Próximo objetivo institucional:
+
+⏳ CCC
+
+Arquitectura objetivo:
+
+rep_ccc.py
+↓
+business_rules_ccc.py
+↓
+rep_ccc_core.py
+
+Objetivo estratégico final:
+
+Eliminar completamente las dependencias entre reportes y consolidar BUSINESS RULES como única capa institucional de reglas comerciales reutilizables.

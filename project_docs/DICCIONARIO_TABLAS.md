@@ -1,24 +1,37 @@
-## Diccionario de Tablas - MATINAL (Versión 2.0)
+# DICCIONARIO DE TABLAS - MATINAL
 
-### 1. Identificación y Propósito
-
-El presente documento constituye la Fuente de Verdad Institucional para la estructura de datos de MATINAL.
-
-Su objetivo es documentar las tablas físicas alojadas en SQLite, las entidades utilizadas por la capa STAGING, las estructuras consumidas por CORE y las entidades actualmente disponibles dentro de BUSINESS RULES.
-
-Ante cualquier discrepancia entre documentación y código:
-
-1. Revisar ARQUITECTURA.md
-2. Revisar ESTADO_ACTUAL.md
-3. Revisar DECISIONES_TECNICAS.md
-4. Revisar este documento
-5. Recién después analizar el código fuente
+Versión: 3.0  
+Fecha de actualización: 30/09/2026  
+Estado: Vigente  
+Estado de validación: Producción Operativa
 
 ---
 
-## 2. Arquitectura de Datos Oficial
+# 1. PROPÓSITO DEL DOCUMENTO
 
-```text
+El presente documento constituye la fuente de verdad institucional para la estructura de datos de MATINAL.
+
+Su objetivo es documentar:
+
+- Tablas físicas persistidas en SQLite.
+- Entidades expuestas por STAGING.
+- Entidades consumidas por CORE.
+- Entidades disponibles en BUSINESS RULES.
+- Contratos de datos institucionales.
+
+Ante cualquier discrepancia:
+
+1. ESTADO_ACTUAL.md
+2. ARQUITECTURA.md
+3. DECISIONES_TECNICAS.md
+4. DICCIONARIO_TABLAS.md
+
+Recién después revisar el código fuente.
+
+---
+
+# 2. ARQUITECTURA DE DATOS OFICIAL
+
 RAW
 ↓
 SQLITE
@@ -30,221 +43,231 @@ CORE
 BUSINESS RULES
 ↓
 REPORTES
-```
-
-Principios institucionales:
-
-- RAW recibe información externa.
-- SQLITE persiste información.
-- STAGING normaliza y tipa.
-- CORE interpreta operación.
-- BUSINESS RULES aplica reglas de negocio.
-- REPORTES consumen resultados finales.
 
 ---
 
-## 3. Persistencia Oficial
+## Principios Institucionales
 
-Ubicación:
+### RAW
 
-```text
+Recibe información externa.
+
+### SQLITE
+
+Persiste información.
+
+### STAGING
+
+Normaliza y tipa.
+
+### CORE
+
+Interpreta la operación.
+
+### BUSINESS RULES
+
+Aplica reglas comerciales.
+
+### REPORTES
+
+Presentan resultados.
+
+---
+
+# 3. PERSISTENCIA OFICIAL
+
+## Ubicación
+
 data/matinal.db
-```
 
-Motor:
+## Motor
 
-```text
 SQLite
-```
 
-Modo:
+## Modo
 
-```text
 WAL (Write Ahead Logging)
-```
 
-Características:
+## Características
 
-- Fuente única de verdad.
-- Persistencia local.
+- Fuente física única de datos.
+- Persistencia institucional.
 - Lectura desacoplada de Excel.
-- Alto rendimiento de lectura.
-- Índices optimizados para tablas críticas.
+- Alto rendimiento.
+- Base oficial de la arquitectura.
 
 ---
 
 # A. TABLAS TRANSACCIONALES
 
-## 1. vta
+## VTA
 
 ### Nombre Técnico
 
-```text
 vta
-```
 
 ### Clasificación
 
-```text
 Transaccional
-```
 
 ### Descripción
 
-Contiene el registro completo de transacciones comerciales consumidas por los distintos procesos analíticos del sistema.
-
-Es la principal fuente de datos operativos de MATINAL.
+Registro completo de transacciones comerciales utilizadas por los procesos operativos y analíticos del sistema.
 
 ### Origen
 
-```text
 VTA.xlsx
-```
 
 ### Campos Relevantes
 
-```text
-CodVendedor
-Cliente
-FechaCarga
-FechaEntrega
-FechaLiquidacion
-PesoKg
-CantBase
-ImporteNetoItem
-Marca
-Proveedor
-Articulo
-Subramo
-TipoDeVenta
-```
+- CodVendedor
+- Cliente
+- FechaCarga
+- FechaEntrega
+- FechaLiquidacion
+- PesoKg
+- CantBase
+- ImporteNetoItem
+- Marca
+- Proveedor
+- Articulo
+- Subramo
+- TipoDeVenta
 
 ### Índices Institucionales
 
-```text
-idx_vta_vendedor
-idx_vta_cliente
-idx_vta_fechacarga
-idx_vta_fechaentrega
-idx_vta_marca
-```
+- idx_vta_vendedor
+- idx_vta_cliente
+- idx_vta_fechacarga
+- idx_vta_fechaentrega
+- idx_vta_marca
 
 ### Consumidores
 
-```text
-staging.py
-core_operaciones.py
-core_ventas_base.py
-reportes comerciales
-```
+#### STAGING
 
-### Entidad STAGING Asociada
-
-```python
 obtener_staging_vta()
-```
+
+#### CORE
+
+obtener_core_operacion()
+
+obtener_core_ventas_base()
+
+#### BUSINESS RULES
+
+business_rules_kilos.py
+
+business_rules_mn.py
+
+#### REPORTES
+
+Todos los reportes comerciales a través de capas intermedias.
+
+---
 
 ### Contrato STAGING Garantizado
 
-```text
-FechaCarga_dt
-FechaEntrega_dt
-CodVendedor
-Cliente
-PesoKg
-CantBase
-ImporteNetoItem
-Marca
-```
+- FechaCarga_dt
+- FechaEntrega_dt
+- CodVendedor
+- Cliente
+- PesoKg
+- CantBase
+- ImporteNetoItem
+- Marca
 
 ---
 
 # B. TABLAS MAESTRAS
 
-## 2. universo
+## UNIVERSO
 
 ### Nombre Técnico
 
-```text
 universo
-```
 
 ### Clasificación
 
-```text
 Maestra
-```
 
 ### Descripción
 
 Padrón institucional de clientes.
 
-Constituye la base para los análisis de cartera, taxonomías y segmentación comercial.
+Constituye la fuente oficial de:
+
+- cartera
+- taxonomías
+- segmentación
+- titularidad comercial
 
 ### Origen
 
-```text
 UNIVERSO.xlsx
-```
 
 ### Campos Relevantes
 
-```text
-Codigo
-Cliente
-SegmentoClienteCodigo
-CodVen
-Razon_Social
-Subramo
-Direccion
-```
+- Codigo
+- Cliente
+- SegmentoClienteCodigo
+- CodVen
+- Razon_Social
+- Subramo
+- Direccion
 
 ### Consumidores
 
-```text
-staging.py
-CCC
-Mi Negocio
-Gerencial
-Vespertina
-```
+#### STAGING
 
-### Entidad STAGING Asociada
-
-```python
 obtener_staging_clientes()
-```
 
-### Contrato STAGING Garantizado
+#### CORE
 
-```text
-Cliente
-Taxonomia
-NombreCliente
-CodVendedor
-```
+obtener_core_clientes()
+
+#### BUSINESS RULES
+
+business_rules_mn.py
+
+business_rules_ccc.py (planificada)
+
+#### REPORTES
+
+CCC
+
+MiNegocio
+
+Gerencial
+
+Vespertina
 
 ---
 
-## 3. rutas
+### Contrato STAGING Garantizado
+
+- Cliente
+- Taxonomia
+- NombreCliente
+- CodVendedor
+
+---
+
+## RUTAS
 
 ### Nombre Técnico
 
-```text
 rutas
-```
 
 ### Clasificación
 
-```text
 Maestra Operativa
-```
 
 ### Descripción
 
-Calendario operativo de visitas comerciales.
+Calendario operativo institucional.
 
-Es la fuente oficial para el cálculo de:
+Fuente oficial para:
 
 - días pasados
 - días restantes
@@ -253,166 +276,334 @@ Es la fuente oficial para el cálculo de:
 
 ### Origen
 
-```text
 RUTAS.xlsx
-```
 
 ### Campos Relevantes
 
-```text
-Fecha
-CodVen
-CodVendedor
-Vendedor
-```
+- Fecha
+- CodVen
+- CodVendedor
+- Vendedor
 
 ### Consumidores
 
-```text
-staging.py
-core_operaciones.py
-rep_kilos.py
-rep_gerencial.py
-```
+#### STAGING
 
-### Entidad STAGING Asociada
-
-```python
 obtener_staging_rutas()
-```
+
+#### CORE
+
+calcular_calendario_y_rutas()
+
+obtener_core_operacion()
 
 ---
 
-## 4. altas
+## ALTAS
 
 ### Nombre Técnico
 
-```text
 altas
-```
 
 ### Clasificación
 
-```text
 Maestra Operativa
-```
 
 ### Descripción
 
 Registro consolidado de movimientos de cartera.
 
-Durante la carga se generan tablas auxiliares por hoja y un consolidado institucional.
-
 ### Origen
 
-```text
 ALTAS.xlsx
-```
 
 ### Campos Relevantes
 
-```text
-Fecha
-Codigo
-Estado
-Origen_Hoja
-```
+- Fecha
+- Codigo
+- Estado
+- Origen_Hoja
 
-### Tablas Auxiliares Asociadas
+### Tablas Auxiliares
 
-```text
-altas_creacion
-altas_activacion
-altas_inactivacion
-altas_modificacion
-```
+- altas_creacion
+- altas_activacion
+- altas_inactivacion
+- altas_modificacion
 
 ### Consumidores
 
-```text
 CCC
+
 Gerencial
-```
 
 ---
 
-## 5. ausencias
+## AUSENCIAS
 
 ### Nombre Técnico
 
-```text
 ausencias
-```
 
 ### Clasificación
 
-```text
 Operativa
-```
 
 ### Estado
 
-```text
-Implementada en SQLite
-```
+✅ Implementada
 
 ### Descripción
 
-Contiene registros de ausencias y reemplazos de vendedores.
+Fuente oficial de ausencias y reemplazos de vendedores.
 
-Es la fuente oficial utilizada para determinar:
+### Propósito Institucional
 
-```text
-CodVendedorOperativo
-```
+Determinar:
+
+- CodVendedorOperativo
+- reemplazos
+- titularidad temporal
 
 ### Consumidores
 
-```text
+#### STAGING
+
 obtener_staging_ausencias()
+
+#### CORE
+
 procesar_ausencias_y_reemplazos()
-```
 
-### Entidad STAGING Asociada
+obtener_core_operacion()
 
-```python
-obtener_staging_ausencias()
-```
+---
 
 ### Contrato STAGING Garantizado
 
-```text
-Fecha_dt
-CodVend_clean
-Reemplazo_clean
-```
+- Fecha_dt
+- CodVend_clean
+- Reemplazo_clean
 
-### 
-## Entidades BUSINESS RULES
+---
 
-### business_rules_kilos.py
+# C. ENTIDADES STAGING
 
-Estado:
-Implementado
+## Activas
+
+### obtener_staging_vta()
+
+Dominio:
+
+Ventas
+
+### obtener_staging_clientes()
+
+Dominio:
+
+Clientes
+
+### obtener_staging_rutas()
+
+Dominio:
+
+Calendario operativo
+
+### obtener_staging_ausencias()
+
+Dominio:
+
+Ausencias y reemplazos
+
+### obtener_staging_maestros()
+
+Dominio:
+
+Catálogos institucionales
+
+---
+
+# D. ENTIDADES CORE
+
+## obtener_core_ventas_base()
 
 Responsabilidad:
 
-Construcción de matriz comercial de Kilos.
+Ventas institucionales base.
 
-Consumidores:
+---
+
+## obtener_core_clientes()
+
+Responsabilidad:
+
+Clientes institucionales.
+
+---
+
+## obtener_core_vendedores()
+
+Responsabilidad:
+
+Padrón institucional de vendedores.
+
+---
+
+## obtener_core_operacion()
+
+Responsabilidad:
+
+Interpretación operativa consolidada.
+
+Incluye:
+
+- reemplazos
+- ausencias
+- calendario
+- clasificación temporal
+- vendedor operativo
+
+---
+
+# E. ENTIDADES BUSINESS RULES
+
+## business_rules_repository.py
+
+### Estado
+
+✅ Implementado
+
+### Responsabilidad
+
+Servicios compartidos reutilizables.
+
+---
+
+## business_rules_kilos.py
+
+### Estado
+
+✅ Implementado  
+✅ Validado  
+✅ Productivo
+
+### Dominio Funcional
+
+Kilos
+
+### Responsabilidades
+
+- Matriz comercial de Kilos
+- Objetivos
+- Clasificación operativa
+- Integración con CORE
+- Consumo de reemplazos
+
+### Consumidores
 
 rep_kilos_core.py
 
-### business_rules_mn.py
+---
 
-Estado:
-Aprobado para implementación
+## business_rules_mn.py
 
-Responsabilidad esperada:
+### Estado
 
-Construcción de matriz comercial de adopción digital.
+✅ Implementado  
+✅ Validado  
+✅ Productivo
 
-Consumidores previstos:
+### Dominio Funcional
+
+MiNegocio
+
+### Responsabilidades
+
+- Ventas Totales
+- Ventas MiNegocio
+- Pct_MiNegocio
+- Clasificación Digital
+- No Digital
+- Híbrido
+- Fully Digital
+- Minimo_Facturacion_70
+- Adopción Digital
+- Matriz Comercial de Cliente
+
+### Validación Institucional
+
+✅ TOTAL CARTERA = 5617
+
+✅ CodVendedor -998 = 0
+
+### Consumidores
 
 rep_MN_core.py
+
+### Consumidores Futuros Aprobados
+
 rep_gerencial.py
+
+---
+
+## business_rules_ccc.py
+
+### Estado
+
+⏳ Planificada
+
+### Próxima Prioridad Institucional
+
+CCC
+
+### Arquitectura Objetivo
+
+rep_ccc_core.py
+↓
+business_rules_ccc.py
+↓
+core_*
+
+### Objetivo
+
+Desacoplar completamente las reglas comerciales de CCC del reporte histórico.
+
+---
+
+# RESUMEN EJECUTIVO
+
+Persistencia Oficial:
+
+✅ SQLite
+
+Capas Implementadas:
+
+✅ STAGING
+
+✅ CORE
+
+✅ BUSINESS RULES
+
+Entidades Business Rules Productivas:
+
+✅ business_rules_kilos.py
+
+✅ business_rules_mn.py
+
+Próxima Entidad Aprobada:
+
+⏳ business_rules_ccc.py
+
+Patrón Institucional Vigente:
+
+RAW
+↓
+SQLITE
+↓
+STAGING
+↓
+CORE
+↓
+BUSINESS RULES
+↓
+REPORTES
