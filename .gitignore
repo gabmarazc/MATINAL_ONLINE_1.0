@@ -6,4 +6,4 @@ data/*.xlsx
 data/*.parquet
 .DS_Store
 Backup/
-logs/
+logs/*.log
