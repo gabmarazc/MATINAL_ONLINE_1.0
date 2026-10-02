@@ -373,3 +373,22 @@
 2026-10-02 12:37:08 | WARNING  | matinal.database | CARGANDO TABLA: universo
 2026-10-02 12:37:10 | WARNING  | matinal.database | CARGANDO TABLA: vta
 2026-10-02 12:41:54 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-02 14:19:02 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-02 14:19:22 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-02 16:51:35 | WARNING  | matinal.database | CARGANDO TABLA: altas[cite: 20]
+2026-10-02 16:51:36 | WARNING  | matinal.database | CARGANDO TABLA: rutas[cite: 20]
+2026-10-02 16:51:54 | WARNING  | matinal.database | CARGANDO TABLA: tp[cite: 20]
+2026-10-02 16:51:54 | WARNING  | matinal.database | DETECTADA CARGA ESPECIAL TP: tp[cite: 20]
+2026-10-02 16:51:57 | WARNING  | matinal.database | CARGANDO TABLA: universo[cite: 20]
+2026-10-02 16:51:58 | INFO     | matinal.database | Nuevo snapshot histórico del universo guardado en 'universo_hist' (detectados cambios en el contenido)[cite: 20].
+2026-10-02 16:51:58 | WARNING  | matinal.database | CARGANDO TABLA: vta[cite: 20]
+2026-10-02 16:57:31 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace)[cite: 20].
+2026-10-02 17:19:55 | WARNING  | matinal.database | CARGANDO TABLA: altas[cite: 20]
+2026-10-02 17:19:56 | WARNING  | matinal.database | CARGANDO TABLA: rutas[cite: 20]
+2026-10-02 17:20:04 | WARNING  | matinal.database | CARGANDO TABLA: tp[cite: 20]
+2026-10-02 17:20:04 | WARNING  | matinal.database | DETECTADA CARGA ESPECIAL TP: tp[cite: 20]
+2026-10-02 17:20:05 | WARNING  | matinal.database | CARGANDO TABLA: universo[cite: 20]
+2026-10-02 17:20:07 | INFO     | matinal.database | Nuevo snapshot histórico del universo guardado en 'universo_hist' (detectados cambios en el contenido)[cite: 20].
+2026-10-02 17:20:07 | INFO     | matinal.database | UNIVERSO_VERSIONES: versión registrada correctamente
+2026-10-02 17:20:07 | WARNING  | matinal.database | CARGANDO TABLA: vta[cite: 20]
+2026-10-02 17:24:25 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace)[cite: 20].

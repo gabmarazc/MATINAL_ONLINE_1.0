@@ -9,7 +9,6 @@ from modules.staging import (
     obtener_staging_rutas,
     obtener_staging_ausencias,
     obtener_staging_maestros,
-    obtener_staging_clientes,
 )
 from modules.utils import parsear_fecha_robusta
 
@@ -353,7 +352,6 @@ def obtener_core_operacion(
     df_rutas = obtener_staging_rutas()
     df_ausencias = obtener_staging_ausencias()
     maestros = obtener_staging_maestros()
-    df_clientes = obtener_staging_clientes()
 
     df_vendedores = (
         maestros.get("maestro_vendedores", pd.DataFrame())
@@ -365,58 +363,6 @@ def obtener_core_operacion(
     df_vta_temporal = calcular_ritmo_operativo(
         df_vta_procesada, anio_op, mes_op, dia_matinal
     )
-
-    # POC: Enriquecimiento con CodVendedorVigente desde UNIVERSO (staging_clientes)
-    if df_clientes is not None and not df_clientes.empty and not df_vta_temporal.empty:
-        col_c_vta = next(
-            (
-                c
-                for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"]
-                if c in df_vta_temporal.columns
-            ),
-            "Cliente",
-        )
-        col_c_cli = next(
-            (
-                c
-                for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente", "Codigo"]
-                if c in df_clientes.columns
-            ),
-            "Cliente",
-        )
-        col_v_cli = next(
-            (
-                c
-                for c in ["CodVendedor", "Cod_Vendedor", "CodVen", "Vendedor"]
-                if c in df_clientes.columns
-            ),
-            "CodVendedor",
-        )
-
-        df_vta_temporal["_cli_join"] = pd.to_numeric(
-            df_vta_temporal[col_c_vta], errors="coerce"
-        ).astype("Int64")
-        tmp_cli = df_clientes[[col_c_cli, col_v_cli]].copy()
-        tmp_cli["_cli_join"] = pd.to_numeric(
-            tmp_cli[col_c_cli], errors="coerce"
-        ).astype("Int64")
-        tmp_cli["CodVendedorVigente"] = pd.to_numeric(
-            tmp_cli[col_v_cli], errors="coerce"
-        ).astype("Int64")
-
-        vigente_map = (
-            tmp_cli.dropna(subset=["_cli_join"])
-            .drop_duplicates("_cli_join")
-            .set_index("_cli_join")["CodVendedorVigente"]
-        )
-        df_vta_temporal["CodVendedorVigente"] = (
-            df_vta_temporal["_cli_join"].map(vigente_map).astype("Int64")
-        )
-        df_vta_temporal = df_vta_temporal.drop(columns=["_cli_join"])
-    else:
-        if not df_vta_temporal.empty:
-            df_vta_temporal["CodVendedorVigente"] = pd.Series(pd.NA, dtype="Int64")
-
     (
         dias_pasados,
         dias_restantes,
