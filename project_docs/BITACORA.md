@@ -577,3 +577,284 @@ Próxima migración aprobada:
 Nivel de riesgo:
 
 ✅ Bajo
+## INC-2026-10-02-001
+
+### Título
+
+Cierre formal de estabilización CORE Comercial
+
+### Fecha de Apertura
+
+30/09/2026
+
+### Fecha de Cierre
+
+02/10/2026
+
+### Contexto
+
+Durante la migración completa hacia arquitectura CORE + BUSINESS RULES se detectaron múltiples incidencias asociadas a escenarios borde, validaciones incompletas y dependencias heredadas.
+
+La estabilización incluyó validación productiva sobre múltiples reconstrucciones de SQLite, reinicios completos de Streamlit y cambios de período operativo.
+
+### Alcance
+
+#### CORE KILOS
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_operaciones.py
+↓
+core_vendedores.py
+
+#### CORE CCC
+
+rep_ccc_core.py
+↓
+business_rules_ccc.py
+↓
+core_*
+
+#### CORE MiNegocio
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
+
+### Correcciones Realizadas
+
+#### KILOS
+
+✅ Corrección de columnas opcionales de objetivos
+
+✅ Corrección de escenarios con objetivos vacíos
+
+✅ Corrección de cálculos de tendencias
+
+✅ Corrección de cálculos de promedio diario
+
+✅ Corrección de escenarios con reemplazos inexistentes
+
+✅ Corrección de escenarios con compensaciones vacías
+
+✅ Eliminación de AttributeError por fillna() sobre float
+
+✅ Eliminación de AttributeError por copy() sobre float
+
+✅ Fortalecimiento defensivo sobre DataFrames vacíos
+
+#### CCC
+
+✅ Corrección de referencias inconsistentes de columnas auxiliares
+
+✅ Validación de generación de matriz comercial
+
+✅ Validación de detalle comercial
+
+✅ Validación de ejecución completa sin errores
+
+#### MiNegocio
+
+✅ Validación definitiva de clasificación digital
+
+✅ Validación de objetivos
+
+✅ Validación de métricas comerciales
+
+✅ Validación de adopción por vendedor
+
+✅ Validación de adopción por taxonomía
+
+### Validaciones Ejecutadas
+
+✅ Reinicio completo de Streamlit
+
+✅ Recarga completa de SQLite
+
+✅ Recarga completa de bases operativas
+
+✅ Reconstrucción total de caché
+
+✅ Cambio de período operativo
+
+✅ Período sin objetivos cargados
+
+✅ Escenarios sin reemplazos
+
+✅ Escenarios con objetivos vacíos
+
+✅ Escenarios con compensaciones vacías
+
+✅ Navegación completa de reportes
+
+### Resultados Funcionales
+
+#### CORE KILOS
+
+✅ Render correcto
+
+✅ Sin Traceback
+
+✅ Sin AttributeError
+
+✅ Sin KeyError
+
+✅ Aprobado para producción
+
+#### CORE CCC
+
+✅ Render correcto
+
+✅ Sin Traceback
+
+✅ Sin KeyError
+
+✅ Aprobado para producción
+
+#### CORE MiNegocio
+
+✅ Render correcto
+
+✅ Sin Traceback
+
+✅ Sin errores funcionales observados
+
+✅ Aprobado para producción
+
+### Evidencia Operativa Final
+
+render_rep_kilos_core ≈ 24 s
+
+render_rep_ccc_core ≈ 8 s
+
+render_rep_mn_core ≈ 6 s
+
+Sin errores de ejecución observados.
+
+### Resultado Institucional
+
+✅ CORE KILOS estabilizado
+
+✅ CORE CCC estabilizado
+
+✅ CORE MiNegocio estabilizado
+
+✅ Arquitectura CORE validada en producción
+
+✅ BUSINESS RULES consolidado como capa oficial de lógica comercial
+
+### Estado
+
+CERRADO
+
+
+## EVENTO-2026-10-02-001
+
+### Título
+
+Fin de la Fase de Migración Comercial a CORE
+
+### Fecha
+
+02/10/2026
+
+### Estado
+
+COMPLETADO
+
+### Resultado
+
+La arquitectura comercial basada en:
+
+RAW
+↓
+SQLITE
+↓
+STAGING
+↓
+CORE
+↓
+BUSINESS RULES
+↓
+REPORTES
+
+queda formalmente validada para:
+
+✅ KILOS
+
+✅ CCC
+
+✅ MiNegocio
+
+### Próxima Fase Aprobada
+
+FASE 5.0
+
+Control de Integridad del Período Operativo
+
+Objetivos:
+
+- Validación automática de bases mensuales
+- Semáforo de integridad del período
+- Diagnóstico operativo
+- Migración futura de Gerencial a CORE
+- Migración futura de Vespertina a CORE
+
+
+## RESUMEN EJECUTIVO ACTUALIZADO
+
+Estado General:
+
+✅ Producción operativa
+
+Arquitectura:
+
+✅ RAW → SQLITE → STAGING → CORE → BUSINESS RULES → REPORTES
+
+Migraciones completadas:
+
+✅ Kilos
+
+✅ MiNegocio
+
+✅ CCC
+
+Estabilizaciones completadas:
+
+✅ CORE KILOS
+
+✅ CORE CCC
+
+✅ CORE MiNegocio
+
+Validaciones institucionales:
+
+✅ BUSINESS RULES
+
+✅ CORE
+
+✅ STAGING
+
+✅ Kilos
+
+✅ CCC
+
+✅ MiNegocio
+
+Próxima fase:
+
+⏳ Validación de Integridad de Período Operativo
+
+Migraciones futuras:
+
+⏳ CORE GERENCIAL
+
+⏳ CORE VESPERTINA
+
+Nivel de riesgo:
+
+✅ Bajo

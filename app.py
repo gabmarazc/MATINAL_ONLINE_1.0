@@ -28,6 +28,7 @@ from modules.rep_gerencial import render_rep_gerencial
 from modules.rep_vespertina import render_rep_vespertina
 from modules.rep_tp import render_rep_tp
 from modules import database as db
+from modules.core.core_validacion_periodo import validar_integridad_periodo_operativo
 
 st.set_page_config(
     page_title="Sistema de Gestión de Ventas - MABELHERDI S.A",
@@ -233,7 +234,7 @@ def main():
             st.rerun()
         elif not st.session_state.get("bd_inicializada", False):
             st.info(
-                "ℹ️ Sube los tres archivos requeridos (VTA, Universo y Rutas) para habilitar el sistema."
+                "ℹ️️ Sube los tres archivos requeridos (VTA, Universo y Rutas) para habilitar el sistema."
             )
             return
 
@@ -316,6 +317,33 @@ def main():
         "dia_venta": sel_dia_venta.strftime("%d/%m/%Y"),
         "dia_anterior": sel_dia_anterior.strftime("%d/%m/%Y"),
     }
+
+    # Integración de la validación de integridad del período operativo
+    estado_periodo = validar_integridad_periodo_operativo(
+        filtros_globales["anio"], filtros_globales["mes"]
+    )
+
+    # Renderizado del semáforo visual en el sidebar usando st.sidebar.success o st.sidebar.error
+    st.sidebar.markdown("---")
+    if estado_periodo["completo"]:
+        st.sidebar.success(
+            f"✅ Período {estado_periodo['mes']}/{estado_periodo['anio']} completo"
+        )
+    else:
+        st.sidebar.error(
+            f"⚠️ Período {estado_periodo['mes']}/{estado_periodo['anio']} incompleto\n\n"
+            f"{estado_periodo['bases_ok']} / {estado_periodo['bases_total']} bases cargadas"
+        )
+
+    # Renderizado del banner superior global cuando existan faltantes
+    if not estado_periodo["completo"]:
+        faltantes_str = "\n".join([f"• {b}" for b in estado_periodo["faltantes"]])
+        st.warning(
+            f"⚠️ **PERÍODO OPERATIVO INCOMPLETO**\n\n"
+            f"**Período:** {estado_periodo['mes']}/{estado_periodo['anio']}\n\n"
+            f"**Faltan cargar:**\n{faltantes_str}\n\n"
+            f"Diríjase a Parámetros para completar la carga."
+        )
 
     sup_sel_efectivo = (
         supervisores_disponibles[1:]
