@@ -533,6 +533,8 @@ def _procesar_atribucion_clientes_completo(
             "DiaVisita",
             "Taxonomia",
             "Ruta",
+            "Es_Alta_Periodo",
+            "Es_Reactivacion",
         ]
         if c in universo.columns
     ]

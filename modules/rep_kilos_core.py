@@ -7,52 +7,22 @@ import numpy as np
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules.utils import tarjeta_metrica_html
 
-# REGLA FUNDAMENTAL: Consumo exclusivo de BUSINESS_RULES (Cero acceso a DB, SQLite, RAW o STAGING)
+# REGLA FUNDAMENTAL: Consumo exclusivo de BUSINESS_RULES (Cero acceso a DB, SQLite, RAW o STAGING)[cite: 16]
 from modules.business_rules.business_rules_kilos import obtener_matriz_kilos_comercial
 
 
-def render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales=None):
+@st.fragment
+def render_fragmento_interactivo_kilos_core(
+    matriz_comercial: pd.DataFrame,
+    sup_filtro: str,
+    anio_op: int,
+    mes_op: int,
+):
     """
-    Reporte de Kilos bajo Arquitectura Objetivo Oficial (CORE -> BUSINESS_RULES -> REPORTES).
-    Consumo puramente analítico y de renderizado visual, sin recálculos ni lógica ETL propia.
+    Fragmento interactivo de presentación para Kilos.
+    Aplica filtros locales (Vendedor, Segmento, Modo Ajuste) sin recalcular la matriz comercial base.
+    Renderiza KPIs, grilla, exportación a Excel y sección de auditoría CORE.
     """
-    t_total = time.perf_counter()
-
-    st.subheader("📊 Avance de Kilos por Segmento")
-
-    if filtros_globales is None:
-        anio_op = 2026
-        mes_op = 9
-        sup_filtro = "TODOS"
-        filtros_base = {
-            "anio": anio_op,
-            "mes": mes_op,
-            "supervisor": sup_filtro,
-            "dia_matinal": "02/09/2026",
-            "dia_venta": "01/09/2026",
-        }
-    else:
-        anio_op = int(filtros_globales.get("anio", 2026))
-        mes_op = int(filtros_globales.get("mes", 9))
-        sup_filtro = str(filtros_globales.get("supervisor", "TODOS")).strip()
-        filtros_base = filtros_globales
-
-    # CONSUMO EXCLUSIVO DE BUSINESS_RULES (obtener_matriz_kilos_comercial) -> [PERF_CORE] 11
-    t11 = time.perf_counter()
-    matriz_comercial = obtener_matriz_kilos_comercial(anio_op, mes_op, filtros_base)
-    print(
-        f"[PERF_CORE] 11) construcción y obtención de matriz comercial -> {time.perf_counter() - t11:.4f} s"
-    )
-
-    if matriz_comercial.empty:
-        st.info(
-            "No se encontraron registros comerciales para los parámetros seleccionados."
-        )
-        print(
-            f"[PERF_CORE] 13) tiempo total render_rep_kilos_core (vacío) -> {time.perf_counter() - t_total:.4f} s"
-        )
-        return
-
     # SEPARACIÓN EXPLÍCITA: Matriz Técnica (matriz_comercial) vs Vista Comercial (matriz_comercial_comercial)
     matriz_comercial_comercial = matriz_comercial[
         matriz_comercial["CodVendedor"].ne(-998)
@@ -117,9 +87,6 @@ def render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales=None)
 
     if rep_filtrado.empty:
         st.info("No hay registros disponibles para los filtros aplicados.")
-        print(
-            f"[PERF_CORE] 13) tiempo total render_rep_kilos_core (filtrado vacío) -> {time.perf_counter() - t_total:.4f} s"
-        )
         return
 
     # ENRUTAMIENTO DINÁMICO SEGÚN EL SELECTOR (TODO / AJUSTADO) - SIN RECALCULAR NEGOCIO EN REPORTES
@@ -398,6 +365,55 @@ def render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales=None)
     print(
         f"[PERF_CORE] 12) renderizado visual y armado de UI -> {time.perf_counter() - t12:.4f} s"
     )
+
+
+def render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales=None):
+    """
+    Reporte de Kilos bajo Arquitectura Objetivo Oficial (CORE -> BUSINESS_RULES -> REPORTES).
+    Consumo puramente analítico y de renderizado visual, sin recálculos ni lógica ETL propia.
+    """
+    t_total = time.perf_counter()
+
+    st.subheader("📊 Avance de Kilos por Segmento")
+
+    if filtros_globales is None:
+        anio_op = 2026
+        mes_op = 9
+        sup_filtro = "TODOS"
+        filtros_base = {
+            "anio": anio_op,
+            "mes": mes_op,
+            "supervisor": sup_filtro,
+            "dia_matinal": "02/09/2026",
+            "dia_venta": "01/09/2026",
+        }
+    else:
+        anio_op = int(filtros_globales.get("anio", 2026))
+        mes_op = int(filtros_globales.get("mes", 9))
+        sup_filtro = str(filtros_globales.get("supervisor", "TODOS")).strip()
+        filtros_base = filtros_globales
+
+    # CONSUMO EXCLUSIVO DE BUSINESS_RULES (obtener_matriz_kilos_comercial) -> [PERF_CORE] 11
+    t11 = time.perf_counter()
+    matriz_comercial = obtener_matriz_kilos_comercial(anio_op, mes_op, filtros_base)
+    print(
+        f"[PERF_CORE] 11) construcción y obtención de matriz comercial -> {time.perf_counter() - t11:.4f} s"
+    )
+
+    if matriz_comercial.empty:
+        st.info(
+            "No se encontraron registros comerciales para los parámetros seleccionados."
+        )
+        print(
+            f"[PERF_CORE] 13) tiempo total render_rep_kilos_core (vacío) -> {time.perf_counter() - t_total:.4f} s"
+        )
+        return
+
+    # Invocación del fragmento interactivo manteniendo la matriz ya construida
+    render_fragmento_interactivo_kilos_core(
+        matriz_comercial, sup_filtro, anio_op, mes_op
+    )
+
     print(
         f"[PERF_CORE] 13) tiempo total render_rep_kilos_core -> {time.perf_counter() - t_total:.4f} s"
     )

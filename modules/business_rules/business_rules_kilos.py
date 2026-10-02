@@ -360,20 +360,38 @@ def _calcular_proyecciones_y_tendencias(matriz_comercial: pd.DataFrame) -> pd.Da
         return df
 
     dp_s = (
-        df.get("Días Pasados", pd.Series(0, index=df.index))
-        .astype(float)
-        .replace(0, 1.0)
+        df["Días Pasados"]
+        if "Días Pasados" in df.columns
+        else pd.Series(0, index=df.index)
     )
+    dp_s = dp_s.astype(float).replace(0, 1.0)
 
-    actual_val = df.get("Actual", 0.0)
-    ajuste_act_val = df.get("Ajuste_Reemp_Actual", 0.0)
-    operativo_val = df.get("OPERATIVO", 0.0)
-    objetivo_val = df.get("Objetivo Mes Corriente", 0.0)
+    actual_val = (
+        df["Actual"] if "Actual" in df.columns else pd.Series(0.0, index=df.index)
+    )
+    ajuste_act_val = (
+        df["Ajuste_Reemp_Actual"]
+        if "Ajuste_Reemp_Actual" in df.columns
+        else pd.Series(0.0, index=df.index)
+    )
+    operativo_val = (
+        df["OPERATIVO"] if "OPERATIVO" in df.columns else pd.Series(0.0, index=df.index)
+    )
+    objetivo_val = (
+        df["Objetivo Mes Corriente"]
+        if "Objetivo Mes Corriente" in df.columns
+        else pd.Series(0.0, index=df.index)
+    )
 
     p_diario = (actual_val + ajuste_act_val) / dp_s
 
     # Escenario TODO (Usa Días Restantes Todo)
-    dr_todo = df.get("Días Restantes Todo", pd.Series(0, index=df.index)).astype(float)
+    dr_todo = (
+        df["Días Restantes Todo"]
+        if "Días Restantes Todo" in df.columns
+        else pd.Series(0, index=df.index)
+    )
+    dr_todo = dr_todo.astype(float)
     tend_todo = operativo_val.copy()
     mask_todo = dr_todo > 0
     if mask_todo.any():
@@ -396,7 +414,12 @@ def _calcular_proyecciones_y_tendencias(matriz_comercial: pd.DataFrame) -> pd.Da
     df["Media_Necesaria_Diaria_TODO"] = media_nec_todo
 
     # Escenario AJUSTADO (Usa Días Restantes Ajustado)
-    dr_ajust = df.get("Días Restantes Ajustado", dr_todo).astype(float)
+    dr_ajust = (
+        df["Días Restantes Ajustado"]
+        if "Días Restantes Ajustado" in df.columns
+        else dr_todo
+    )
+    dr_ajust = dr_ajust.astype(float)
     tend_ajust = operativo_val.copy()
     mask_ajust = dr_ajust > 0
     if mask_ajust.any():
@@ -481,8 +504,15 @@ def _incorporar_ventas_temporales_soporte(
     else:
         df["Penultima_Vta"] = 0.0
 
-    df["Ultima_Vta"] = df.get("Ultima_Vta", 0.0).fillna(0.0)
-    df["Penultima_Vta"] = df.get("Penultima_Vta", 0.0).fillna(0.0)
+    if "Ultima_Vta" in df.columns:
+        df["Ultima_Vta"] = df["Ultima_Vta"].fillna(0.0)
+    else:
+        df["Ultima_Vta"] = 0.0
+
+    if "Penultima_Vta" in df.columns:
+        df["Penultima_Vta"] = df["Penultima_Vta"].fillna(0.0)
+    else:
+        df["Penultima_Vta"] = 0.0
 
     return df
 
@@ -649,9 +679,12 @@ def obtener_matriz_kilos_comercial(
         matriz_comercial = matriz_comercial.merge(
             df_objetivos, on=["CodVendedor", "SEGMENTO"], how="left"
         )
-    matriz_comercial["Objetivo Mes Corriente"] = matriz_comercial.get(
-        "Objetivo Mes Corriente", 0.0
-    ).fillna(0.0)
+    if "Objetivo Mes Corriente" in matriz_comercial.columns:
+        matriz_comercial["Objetivo Mes Corriente"] = matriz_comercial[
+            "Objetivo Mes Corriente"
+        ].fillna(0.0)
+    else:
+        matriz_comercial["Objetivo Mes Corriente"] = 0.0
 
     # Integración de Compensaciones por Reemplazo
     df_compensaciones = calcular_compensaciones_reemplazos(df_vta_op)
