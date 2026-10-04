@@ -462,3 +462,13 @@ pandas.errors.DatabaseError: Execution failed on sql 'SELECT Codigo, SegmentoCli
 2026-10-04 10:03:13 | WARNING  | matinal.database | CARGANDO TABLA: tp[cite: 20]
 2026-10-04 10:03:13 | WARNING  | matinal.database | DETECTADA CARGA ESPECIAL TP: tp[cite: 20]
 2026-10-04 10:03:19 | WARNING  | matinal.database | CARGANDO TABLA: universo[cite: 20]
+2026-10-04 10:42:02 | WARNING  | matinal.database | CARGANDO TABLA: altas
+2026-10-04 10:42:03 | WARNING  | matinal.database | CARGANDO TABLA: rutas
+2026-10-04 10:42:09 | WARNING  | matinal.database | CARGANDO TABLA: tp
+2026-10-04 10:42:09 | WARNING  | matinal.database | DETECTADA CARGA ESPECIAL TP: tp
+2026-10-04 10:42:11 | WARNING  | matinal.database | CARGANDO TABLA: universo
+2026-10-04 10:42:12 | WARNING  | matinal.database | Incompatibilidad de esquema detectada en 'universo_hist'. Recreando tabla histórica.
+2026-10-04 10:42:12 | INFO     | matinal.database | Nuevo snapshot histórico del universo guardado en 'universo_hist' (detectados cambios en el contenido).
+2026-10-04 10:42:12 | INFO     | matinal.database | UNIVERSO_VERSIONES: versión registrada correctamente
+2026-10-04 10:42:12 | WARNING  | matinal.database | CARGANDO TABLA: vta
+2026-10-04 10:45:42 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
