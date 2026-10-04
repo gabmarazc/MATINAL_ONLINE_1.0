@@ -1,7 +1,7 @@
 # ROADMAP - MATINAL
 
 Versión: 3.0  
-Fecha de actualización: 30/09/2026  
+Fecha de actualización: 02/10/2026  
 Estado: Vigente  
 Estado de validación: Producción Operativa
 
@@ -147,7 +147,7 @@ Estado:
 
 ---
 
-## Validación 2
+## Validation 2
 
 MiNegocio
 
@@ -297,6 +297,30 @@ No duplicar lógica ya existente en CORE o BUSINESS RULES.
 3. Cobertura Innovación
 4. Gerencial
 5. Vespertina
+
+---
+
+# Iniciativa Estratégica Futura
+
+## Historización Institucional de Maestros
+
+Estado:
+
+⏳ Líneas futuras de investigación y evolución
+
+Líneas de trabajo identificadas tras la implementación validada de `universo_hist`, `universo_versiones`, `HashSnapshot` y snapshots automáticos:
+
+- Auditoría histórica de cartera.
+- Comparación entre versiones de Universo.
+- Herramientas de administración SQL.
+- Reconstrucción temporal de estados históricos.
+- Análisis de transferencias comerciales.
+- Apropiación histórica (pendiente de validación).
+- Evoluciones futuras de CORE_OPERACION.
+
+Restricción:
+
+No constituyen fases activas aprobadas ni alteran las prioridades del roadmap operativo vigente.
 
 ---
 

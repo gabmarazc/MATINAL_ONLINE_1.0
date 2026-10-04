@@ -253,6 +253,102 @@ Vespertina
 
 ---
 
+## UNIVERSO_HIST
+
+### Nombre Técnico
+
+universo_hist
+
+### Clasificación
+
+Maestra Histórica
+
+### Estado
+
+✅ Implementada
+
+### Descripción
+
+Histórico completo de snapshots del universo comercial. Permite preservar la evolución temporal de la cartera y registrar los cambios de titularidad.
+
+### Origen
+
+Proceso automático de versionado de Universo
+
+### Campos Relevantes
+
+- FechaSnapshot
+- FechaCargaSistema
+- HashSnapshot
+
+### Modelo
+
+Una fila por cliente por versión.
+
+### Consumidores
+
+#### Consumidores Actuales
+
+Ninguno.
+
+#### Consumidores Futuros
+
+- Administración SQL
+- Auditorías
+- Comparación histórica
+- Reconstrucción temporal de cartera
+
+---
+
+## UNIVERSO_VERSIONES
+
+### Nombre Técnico
+
+universo_versiones
+
+### Clasificación
+
+Maestra de Control de Versiones
+
+### Estado
+
+✅ Implementada
+
+### Descripción
+
+Catálogo de versiones del universo comercial, encargado de registrar los metadatos y resúmenes de cada snapshot generado.
+
+### Origen
+
+Proceso automático de control de cambios de Universo
+
+### Campos Relevantes
+
+- VersionID
+- FechaSnapshot
+- FechaCargaSistema
+- HashSnapshot
+- CantClientes
+
+### Modelo
+
+Una fila por snapshot.
+
+### Consumidores
+
+#### Consumidores Actuales
+
+Ninguno.
+
+#### Consumidores Futuros
+
+- Administración SQL
+- Auditorías
+- Comparación histórica
+- Reconstrucción temporal de cartera
+
+---
+
 ## RUTAS
 
 ### Nombre Técnico
@@ -567,43 +663,3 @@ core_*
 ### Objetivo
 
 Desacoplar completamente las reglas comerciales de CCC del reporte histórico.
-
----
-
-# RESUMEN EJECUTIVO
-
-Persistencia Oficial:
-
-✅ SQLite
-
-Capas Implementadas:
-
-✅ STAGING
-
-✅ CORE
-
-✅ BUSINESS RULES
-
-Entidades Business Rules Productivas:
-
-✅ business_rules_kilos.py
-
-✅ business_rules_mn.py
-
-Próxima Entidad Aprobada:
-
-⏳ business_rules_ccc.py
-
-Patrón Institucional Vigente:
-
-RAW
-↓
-SQLITE
-↓
-STAGING
-↓
-CORE
-↓
-BUSINESS RULES
-↓
-REPORTES

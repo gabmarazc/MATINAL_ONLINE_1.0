@@ -320,7 +320,7 @@ Vigente ✅
 
 ### Decisión
 
-CORE es responsable de interpretar entidades provenientes de STAGING.
+CORE is responsable de interpretar entidades provenientes de STAGING.
 
 ### Responsabilidades
 
@@ -830,6 +830,136 @@ Código fuente
 6. GLOSARIO_REGLAS.md
 7. CORE_OPERACION_V1.md
 8. CORE_VENTAS_BASE_V1.md
+
+---
+
+# I. HISTORIZACIÓN Y TRAZABILIDAD TEMPORAL
+
+## DT.72: Historización Institucional de Universo
+
+### Fecha
+
+02/10/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+Se aprueba la historización institucional del Universo Comercial mediante versionado automático de snapshots almacenados en SQLite.
+
+### Contexto
+
+Se identificó la necesidad de preservar la evolución temporal de la cartera comercial para soportar futuras auditorías, reconstrucciones históricas y análisis de cambios de titularidad.
+
+El detonante funcional fue el análisis del caso ID2, donde se observó que un cambio futuro en la asignación de cartera podría eliminar evidencia necesaria para reconstruir apropiaciones históricas.
+
+### Implementación
+
+Se incorporan las siguientes entidades persistidas:
+
+- universo_hist
+- universo_versiones
+
+#### universo
+
+Continúa siendo la fuente oficial vigente de cartera.
+
+Contiene exclusivamente la versión actual del Universo.
+
+#### universo_hist
+
+Almacena snapshots históricos completos.
+
+Cada registro conserva:
+
+- información original del cliente
+- FechaSnapshot
+- FechaCargaSistema
+- HashSnapshot
+
+Modelo:
+
+Una fila por cliente por versión.
+
+#### universo_versiones
+
+Almacena catálogo de versiones.
+
+Cada registro conserva:
+
+- VersionID
+- FechaSnapshot
+- FechaCargaSistema
+- HashSnapshot
+- CantClientes
+
+Modelo:
+
+Una fila por snapshot.
+
+### Regla de Generación
+
+Si el hash del Universo difiere del último snapshot registrado:
+
+- generar snapshot histórico
+- registrar versión
+
+Si el hash coincide:
+
+- no generar snapshot
+- no registrar versión
+
+### Compatibilidad
+
+La incorporación de la historización no modifica el comportamiento de:
+
+- STAGING
+- CORE
+- BUSINESS RULES
+- REPORTES
+
+Los componentes productivos continúan consumiendo:
+
+universo
+
+como fuente vigente.
+
+### Alcance Futuro
+
+Esta decisión habilita capacidades futuras de:
+
+- auditoría histórica
+- reconstrucción de cartera
+- análisis de transferencias
+- versionado de maestros
+- trazabilidad temporal
+- apropiación histórica de clientes
+
+### Principio Institucional Derivado
+
+La determinación futura de titularidad podrá considerar simultáneamente:
+
+Cliente
++
+Momento Temporal
++
+Versión de Universo
+
+en lugar de depender exclusivamente del vendedor actualmente asignado.
+
+### Estado de Validación
+
+✅ universo_hist implementado
+
+✅ universo_versiones implementado
+
+✅ validado mediante SQLite
+
+✅ validado mediante logs productivos
+
+✅ aprobado para futuras evoluciones de CORE_OPERACION
 
 ---
 

@@ -1,8 +1,11 @@
 # Arquitectura del Sistema MATINAL
 
-Versión: 3.0  
-Fecha de actualización: 30/09/2026  
-Estado: Vigente  
+Versión: 3.0
+
+Fecha de actualización: 02/10/2026
+
+Estado: Vigente
+
 Estado de validación: Producción Operativa
 
 ---
@@ -13,18 +16,36 @@ Este documento constituye la definición oficial de la arquitectura del sistema 
 
 Su objetivo es:
 
-- Definir la arquitectura institucional vigente.
-- Delimitar responsabilidades por capa.
-- Establecer las reglas de interacción entre componentes.
-- Preservar el conocimiento arquitectónico del proyecto.
-- Permitir la continuidad del desarrollo independientemente de conversaciones previas.
+* Definir la arquitectura institucional vigente.
+
+
+* Delimitar responsabilidades por capa.
+
+
+* Establecer las reglas de interacción entre componentes.
+
+
+* Preservar el conocimiento arquitectónico del proyecto.
+
+
+* Permitir la continuidad del desarrollo independientemente de conversaciones previas.
+
+
 
 Ante cualquier discrepancia entre documentación y código deberá revisarse primero:
 
 1. ESTADO_ACTUAL.md
+
+
 2. ARQUITECTURA.md
+
+
 3. DECISIONES_TECNICAS.md
+
+
 4. ROADMAP.md
+
+
 
 Recién después analizar el código fuente.
 
@@ -80,11 +101,21 @@ app.py
 
 Responsabilidades:
 
-- Inicio de la aplicación.
-- Gestión de sesión.
-- Gestión de autenticación.
-- Renderizado de pantallas.
-- Coordinación general de la interfaz.
+* Inicio de la aplicación.
+
+
+* Gestión de sesión.
+
+
+* Gestión de autenticación.
+
+
+* Renderizado de pantallas.
+
+
+* Coordinación general de la interfaz.
+
+
 
 ---
 
@@ -104,10 +135,19 @@ WAL (Write Ahead Logging)
 
 Características:
 
-- Fuente física única de datos.
-- Persistencia local.
-- Alto rendimiento de lectura.
-- Desacoplamiento respecto de Excel.
+* Fuente física única de datos.
+
+
+* Persistencia local.
+
+
+* Alto rendimiento de lectura.
+
+
+* Desacoplamiento respecto de Excel.
+
+
+* Soporte para persistencia vigente, historización (`universo_hist`) y control de versiones (`universo_versiones`).
 
 ---
 
@@ -115,34 +155,66 @@ Características:
 
 ### Persistencia
 
-- database.py
-- logger.py
+* database.py
+
+
+* logger.py
+
+
 
 ### Configuración
 
-- parametros.py
+* parametros.py
+
+
 
 ### Utilidades
 
-- utils.py
+* utils.py
+
+
 
 ### Arquitectura Institucional
 
-- staging.py
-- core/*
-- business_rules/*
+* staging.py
+
+
+* core/*
+
+
+* business_rules/*
+
+
 
 ### Reportes
 
-- rep_kilos.py
-- rep_MN.py
-- rep_ccc.py
-- rep_cob_marca.py
-- rep_cob_innovacion.py
-- rep_gerencial.py
-- rep_vespertina.py
-- rep_tp.py
-- rep_obj_kilos.py
+* rep_kilos.py
+
+
+* rep_MN.py
+
+
+* rep_ccc.py
+
+
+* rep_cob_marca.py
+
+
+* rep_cob_innovacion.py
+
+
+* rep_gerencial.py
+
+
+* rep_vespertina.py
+
+
+* rep_tp.py
+
+
+* rep_obj_kilos.py
+
+
 
 ---
 
@@ -156,12 +228,24 @@ Recepción de información externa.
 
 Ejemplos:
 
-- VTA.xlsx
-- UNIVERSO.xlsx
-- RUTAS.xlsx
-- ALTAS.xlsx
-- AUSENCIAS
-- Maestros corporativos
+* VTA.xlsx
+
+
+* UNIVERSO.xlsx
+
+
+* RUTAS.xlsx
+
+
+* ALTAS.xlsx
+
+
+* AUSENCIAS
+
+
+* Maestros corporativos
+
+
 
 Restricción:
 
@@ -173,18 +257,36 @@ No contiene lógica de negocio.
 
 Responsabilidad:
 
-Persistencia institucional de datos.
+Persistencia institucional de datos y gestión de versiones.
 
 Tablas principales:
 
-- vta
-- universo
-- rutas
-- ausencias
-- maestro_vendedores
-- maestro_ccc
-- maestro_segmentos
-- maestro_marcas_cebe
+* vta
+
+
+* universo
+
+
+* universo_hist
+* universo_versiones
+* rutas
+
+
+* ausencias
+
+
+* maestro_vendedores
+
+
+* maestro_ccc
+
+
+* maestro_segmentos
+
+
+* maestro_marcas_cebe
+
+
 
 Restricción:
 
@@ -204,24 +306,54 @@ Transformar datos persistidos en contratos técnicos consistentes.
 
 Responsabilidades permitidas:
 
-- Lectura SQLite
-- Tipado
-- Parseo de fechas
-- Detección de columnas
-- Normalización
-- Limpieza técnica
-- Contratos de datos
+* Lectura SQLite
+
+
+* Tipado
+
+
+* Parseo de fechas
+
+
+* Detección de columnas
+
+
+* Normalización
+
+
+* Limpieza técnica
+
+
+* Contratos de datos
+
+
 
 Responsabilidades prohibidas:
 
-- Objetivos
-- Coberturas
-- CCC
-- MiNegocio
-- Pace
-- Compensaciones
-- KPIs
-- Reglas comerciales
+* Objetivos
+
+
+* Coberturas
+
+
+* CCC
+
+
+* MiNegocio
+
+
+* Pace
+
+
+* Compensaciones
+
+
+* KPIs
+
+
+* Reglas comerciales
+
+
 
 ---
 
@@ -237,21 +369,45 @@ Interpretar la operación comercial utilizando contratos provenientes de STAGING
 
 Responsabilidades:
 
-- Titularidad operativa
-- Reemplazos
-- Ausencias
-- Calendario
-- Clasificación temporal
-- Venta institucional
+* Titularidad operativa
+
+
+* Reemplazos
+
+
+* Ausencias
+
+
+* Calendario
+
+
+* Clasificación temporal
+
+
+* Venta institucional
+
+
 
 Responsabilidades prohibidas:
 
-- KPIs
-- Objetivos
-- Coberturas
-- CCC
-- MiNegocio
-- Compensaciones
+* KPIs
+
+
+* Objetivos
+
+
+* Coberturas
+
+
+* CCC
+
+
+* MiNegocio
+
+
+* Compensaciones
+
+
 
 ---
 
@@ -267,18 +423,36 @@ Aplicar reglas comerciales reutilizables.
 
 Responsabilidades:
 
-- CCC
-- MiNegocio
-- Coberturas
-- Objetivos
-- Problema de Cierre
-- Reglas comerciales institucionales
+* CCC
+
+
+* MiNegocio
+
+
+* Coberturas
+
+
+* Objetivos
+
+
+* Problema de Cierre
+
+
+* Reglas comerciales institucionales
+
+
 
 Responsabilidades prohibidas:
 
-- Lectura directa de SQLite
-- Lectura directa de Excel
-- Dependencias entre reportes
+* Lectura directa de SQLite
+
+
+* Lectura directa de Excel
+
+
+* Dependencias entre reportes
+
+
 
 ---
 
@@ -294,11 +468,21 @@ Presentar información a usuarios.
 
 Responsabilidades:
 
-- KPIs
-- Visualizaciones
-- Indicadores
-- Proyecciones
-- Exportaciones
+* KPIs
+
+
+* Visualizaciones
+
+
+* Indicadores
+
+
+* Proyecciones
+
+
+* Exportaciones
+
+
 
 Restricción:
 
@@ -312,11 +496,21 @@ Los reportes no deben contener reglas comerciales institucionales.
 
 Implementados:
 
-- obtener_staging_vta()
-- obtener_staging_clientes()
-- obtener_staging_rutas()
-- obtener_staging_ausencias()
-- obtener_staging_maestros()
+* obtener_staging_vta()
+
+
+* obtener_staging_clientes()
+
+
+* obtener_staging_rutas()
+
+
+* obtener_staging_ausencias()
+
+
+* obtener_staging_maestros()
+
+
 
 ---
 
@@ -324,10 +518,18 @@ Implementados:
 
 Implementados:
 
-- obtener_core_ventas_base()
-- obtener_core_clientes()
-- obtener_core_vendedores()
-- obtener_core_operacion()
+* obtener_core_ventas_base()
+
+
+* obtener_core_clientes()
+
+
+* obtener_core_vendedores()
+
+
+* obtener_core_operacion()
+
+
 
 ---
 
@@ -335,13 +537,21 @@ Implementados:
 
 Implementados:
 
-- business_rules_repository.py
-- business_rules_kilos.py
-- business_rules_mn.py
+* business_rules_repository.py
+
+
+* business_rules_kilos.py
+
+
+* business_rules_mn.py
+
+
 
 Planificados:
 
-- business_rules_ccc.py
+* business_rules_ccc.py
+
+
 
 ---
 
@@ -359,7 +569,8 @@ core_*
 
 Estado:
 
-✅ Productivo  
+✅ Productivo
+
 ✅ Validado
 
 ---
@@ -376,7 +587,8 @@ core_*
 
 Estado:
 
-✅ Productivo  
+✅ Productivo
+
 ✅ Validado
 
 ---
@@ -443,10 +655,18 @@ rep_ccc_core.py
 
 Objetivo:
 
-- Desacoplar CCC.
-- Crear fuente única de verdad para CCC.
-- Preparar desacoplamiento de Vespertina.
-- Preparar desacoplamiento de Gerencial.
+* Desacoplar CCC.
+
+
+* Crear fuente única de verdad para CCC.
+
+
+* Preparar desacoplamiento de Vespertina.
+
+
+* Preparar desacoplamiento de Gerencial.
+
+
 
 ---
 

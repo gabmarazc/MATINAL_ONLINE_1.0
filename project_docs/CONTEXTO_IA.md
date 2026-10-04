@@ -1,7 +1,7 @@
 # CONTEXTO_IA
 
 Versión: 3.0
-Fecha de actualización: 30/09/2026
+Fecha de actualización: 02/10/2026
 Estado: Vigente
 Naturaleza: Documento de Onboarding Institucional para IA
 
@@ -15,12 +15,24 @@ No constituye una copia de la documentación.
 
 Constituye una guía de orientación para entender:
 
-- qué es MATINAL
-- cómo funciona
-- cómo está construido
-- qué decisiones ya fueron tomadas
-- qué decisiones no deben volver a discutirse
-- cuál es el siguiente objetivo institucional
+* qué es MATINAL
+
+
+* cómo funciona
+
+
+* cómo está construido
+
+
+* qué decisiones ya fueron tomadas
+
+
+* qué decisiones no deben volver a discutirse
+
+
+* cuál es el siguiente objetivo institucional
+
+
 
 ---
 
@@ -32,20 +44,42 @@ El sistema se encuentra en producción operativa.
 
 Es utilizado por:
 
-- administración
-- supervisión
-- gerencia
+* administración
+
+
+* supervisión
+
+
+* gerencia
+
+
 
 El sistema procesa:
 
-- ventas
-- clientes
-- cartera
-- objetivos
-- cobertura
-- adopción digital
-- indicadores gerenciales
-- seguimiento comercial
+* ventas
+
+
+* clientes
+
+
+* cartera
+
+
+* objetivos
+
+
+* cobertura
+
+
+* adopción digital
+
+
+* indicadores gerenciales
+
+
+* seguimiento comercial
+
+
 
 ---
 
@@ -111,10 +145,18 @@ Recepción de datos externos.
 
 Ejemplos:
 
-- VTA.xlsx
-- UNIVERSO.xlsx
-- RUTAS.xlsx
-- ALTAS.xlsx
+* VTA.xlsx
+
+
+* UNIVERSO.xlsx
+
+
+* RUTAS.xlsx
+
+
+* ALTAS.xlsx
+
+
 
 ---
 
@@ -128,7 +170,7 @@ data/matinal.db
 
 Responsabilidad:
 
-Persistencia institucional.
+Persistencia institucional, incluyendo soporte para la historización y control de versiones del universo comercial (`universo_hist`, `universo_versiones`).
 
 ---
 
@@ -140,18 +182,36 @@ Normalización técnica.
 
 Incluye:
 
-- tipado
-- parseo de fechas
-- normalización
-- contratos de datos
+* tipado
+
+
+* parseo de fechas
+
+
+* normalización
+
+
+* contratos de datos
+
+
 
 No contiene:
 
-- objetivos
-- CCC
-- MiNegocio
-- coberturas
-- reglas comerciales
+* objetivos
+
+
+* CCC
+
+
+* MiNegocio
+
+
+* coberturas
+
+
+* reglas comerciales
+
+
 
 ---
 
@@ -163,18 +223,36 @@ Interpretación operativa.
 
 Incluye:
 
-- reemplazos
-- ausencias
-- calendario
-- titularidad operativa
-- clasificación temporal
+* reemplazos
+
+
+* ausencias
+
+
+* calendario
+
+
+* titularidad operativa
+
+
+* clasificación temporal
+
+
 
 No contiene:
 
-- decisiones comerciales
-- KPIs
-- objetivos
-- compensaciones
+* decisiones comerciales
+
+
+* KPIs
+
+
+* objetivos
+
+
+* compensaciones
+
+
 
 ---
 
@@ -186,10 +264,18 @@ Aplicar reglas comerciales.
 
 Incluye:
 
-- CCC
-- MiNegocio
-- Coberturas
-- Objetivos
+* CCC
+
+
+* MiNegocio
+
+
+* Coberturas
+
+
+* Objetivos
+
+
 
 ---
 
@@ -201,10 +287,18 @@ Visualización.
 
 Incluye:
 
-- dashboards
-- KPIs
-- proyecciones
-- exportaciones
+* dashboards
+
+
+* KPIs
+
+
+* proyecciones
+
+
+* exportaciones
+
+
 
 ---
 
@@ -228,7 +322,7 @@ SQLite es la fuente física única de datos.
 
 ## DA-003
 
-STAGING es responsable exclusivo del ETL.
+STAGING is responsable exclusivo del ETL.
 
 ---
 
@@ -316,19 +410,71 @@ Estado:
 
 ---
 
-# 9. MIGRACIONES PENDIENTES
+# 9. HISTORIZACIÓN DEL UNIVERSO (IMPLEMENTACIÓN 02/10/2026)
+
+## Contexto e Implementación Validada
+
+Durante la sesión del 02/10/2026 se implementó y validó formalmente el sistema de historización del universo comercial:
+
+* ✅ `universo_hist` (histórico completo de snapshots).
+* ✅ `universo_versiones` (catálogo oficial de versiones de snapshots).
+* ✅ `HashSnapshot` (cálculo para control de cambios).
+* ✅ Generación automática de snapshots.
+* ✅ Persistencia SQLite validada mediante logs y consultas SQL.
+
+## Origen
+
+La implementación surge del análisis del Caso ID2, donde se identificó la limitación de que el sistema conservaba únicamente la última versión del Universo Comercial, lo que provocaba que los cambios de cartera eliminasen evidencia histórica necesaria para auditorías futuras.
+
+## Modelo Actual
+
+* `universo`: Versión vigente del universo comercial.
+* `universo_hist`: Histórico completo de snapshots (una fila por cliente por versión).
+* `universo_versiones`: Catálogo de versiones (una fila por snapshot).
+
+## Reglas de Consumo Actuales
+
+Los procesos productivos continúan consumiendo exclusivamente la tabla `universo`.
+
+`universo_hist` y `universo_versiones` **no** son consumidas actualmente por `CORE`.
+
+## Capacidades No Implementadas (Hipótesis Futuras)
+
+Actualmente **no** existen:
+
+* ❌ Apropiación histórica automática.
+* ❌ Reconstrucción automática de titularidad.
+* ❌ Consultas temporales institucionales.
+* ❌ Consumo de `universo_hist` por `CORE`.
+* ❌ Resolución funcional cerrada del Caso ID2.
+
+Estas capacidades quedan como líneas futuras de investigación y evolución que podrían habilitar auditoría histórica, comparación de versiones, herramientas SQL, reconstrucción temporal y análisis de transferencias comerciales.
+
+---
+
+# 10. MIGRACIONES PENDIENTES
 
 Orden aprobado:
 
 1. CCC
+
+
 2. Cobertura Marca
+
+
 3. Cobertura Innovación
+
+
 4. Gerencial
+
+
 5. Vespertina
+
+
 
 ---
 
-# 10. SIGUIENTE OBJETIVO INSTITUCIONAL
+# 11. SIGUIENTE OBJETIVO INSTITUCIONAL
 
 ## CCC
 
@@ -344,14 +490,22 @@ core_*
 
 Objetivos:
 
-- desacoplar lógica comercial
-- reutilizar CORE
-- consolidar fuente única CCC
-- eliminar dependencias futuras
+* desacoplar lógica comercial
+
+
+* reutilizar CORE
+
+
+* consolidar fuente única CCC
+
+
+* eliminar dependencias futuras
+
+
 
 ---
 
-# 11. DEPENDENCIAS PENDIENTES
+# 12. DEPENDENCIAS PENDIENTES
 
 Actualmente existen dependencias históricas que deberán eliminarse.
 
@@ -359,8 +513,12 @@ Actualmente existen dependencias históricas que deberán eliminarse.
 
 Depende parcialmente de:
 
-- CCC
-- Cobertura Marca
+* CCC
+
+
+* Cobertura Marca
+
+
 
 ---
 
@@ -368,7 +526,9 @@ Depende parcialmente de:
 
 Depende parcialmente de:
 
-- CCC
+* CCC
+
+
 
 ---
 
@@ -382,7 +542,7 @@ Reporte
 
 ---
 
-# 12. REGLAS FUNCIONALES CRÍTICAS
+# 13. REGLAS FUNCIONALES CRÍTICAS
 
 Toda IA debe asumir como prioritarias las reglas documentadas en:
 
@@ -390,18 +550,30 @@ MANUAL_FUNCIONAL.md
 
 Especialmente:
 
-- Problema de Cierre
-- Filtro Empleados
-- Filtro PepsiCo
-- Exclusión Vendedor 20
-- Titularidad Operativa
-- Clasificación Temporal
+* Problema de Cierre
+
+
+* Filtro Empleados
+
+
+* Filtro PepsiCo
+
+
+* Exclusión Vendedor 20
+
+
+* Titularidad Operativa
+
+
+* Clasificación Temporal
+
+
 
 Ninguna optimización técnica puede contradecir estas reglas.
 
 ---
 
-# 13. DOCUMENTOS OFICIALES DEL PROYECTO
+# 14. DOCUMENTOS OFICIALES DEL PROYECTO
 
 ## Gobierno
 
@@ -453,22 +625,42 @@ BITACORA.md
 
 ---
 
-# 14. ORDEN DE LECTURA PARA UNA NUEVA IA
+# 15. ORDEN DE LECTURA PARA UNA NUEVA IA
 
 1. GOBIERNO_IA.md
+
+
 2. CONTEXTO_IA.md
+
+
 3. ESTADO_ACTUAL.md
+
+
 4. ARQUITECTURA.md
+
+
 5. DECISIONES_TECNICAS.md
+
+
 6. MANUAL_FUNCIONAL.md
+
+
 7. DICCIONARIO_TABLAS.md
+
+
 8. CORE_OPERACION_V1.md
+
+
 9. CORE_VENTAS_BASE_V1.md
+
+
 10. BITACORA.md
+
+
 
 ---
 
-# 15. METODOLOGÍA OBLIGATORIA
+# 16. METODOLOGÍA OBLIGATORIA
 
 Toda IA debe trabajar siguiendo:
 
@@ -494,7 +686,7 @@ PRUEBA
 
 ---
 
-# 16. REGLAS ESPECÍFICAS DEL USUARIO
+# 17. REGLAS ESPECÍFICAS DEL USUARIO
 
 El proyecto adopta las siguientes preferencias obligatorias:
 
@@ -548,7 +740,13 @@ No reemplazar código productivo sin auditoría previa.
 
 ---
 
-# 17. ESTADO DE ONBOARDING
+# 18. PRÓXIMO EVENTO ESPERADO Y ATENCIÓN ESPECIAL
+
+Se espera un cambio real de cartera en `UNIVERSO.xlsx`, prestando especial atención al seguimiento del **Caso ID2**.
+
+---
+
+# 19. ESTADO DE ONBOARDING
 
 Si una nueva IA está leyendo este documento debe asumir que:
 
@@ -562,7 +760,9 @@ Si una nueva IA está leyendo este documento debe asumir que:
 
 ✅ Business Rules fue validada.
 
-✅ CCC es el siguiente objetivo institucional.
+✅ Se implementó y validó la historización del Universo (`universo_hist`, `universo_versiones`, `HashSnapshot`) el 02/10/2026.
+
+✅ CCC es el siguiente objetivo institucional de migración de reportes.
 
 ✅ No deben proponerse arquitecturas alternativas sin evidencia objetiva.
 

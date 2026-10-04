@@ -858,3 +858,116 @@ Migraciones futuras:
 Nivel de riesgo:
 
 ✅ Bajo
+### INC-2026-10-02-002
+
+#### Título
+
+Implementación de Historización de Universo
+
+#### Fecha de Apertura
+
+02/10/2026
+
+#### Fecha de Cierre
+
+02/10/2026
+
+#### Contexto
+
+Durante el análisis del Caso ID2 se identificó la necesidad de preservar la evolución histórica de la cartera comercial.
+
+La estructura existente conservaba únicamente el estado vigente del Universo.
+
+#### Objetivo
+
+Incorporar capacidades de auditoría y reconstrucción histórica sin modificar el funcionamiento operativo actual.
+
+#### Implementación
+
+Creación de:
+
+- universo_hist
+- universo_versiones
+
+Implementación de snapshot automático basado en HashSnapshot.
+
+#### Validaciones Ejecutadas
+
+✅ creación de tablas
+
+✅ validación de estructura
+
+✅ validación de persistencia
+
+✅ validación mediante logs
+
+✅ validación mediante consultas SQLite
+
+#### Evidencia
+
+Se verificó:
+
+- universo_versiones creada correctamente
+- snapshot registrado correctamente
+- hash registrado correctamente
+- CantClientes registrado correctamente
+
+#### Resultado Institucional
+
+✅ historización operativa
+
+✅ catálogo de versiones operativo
+
+✅ trazabilidad temporal disponible
+
+✅ preparado para futuras auditorías de cartera
+
+✅ preparado para análisis futuro del Caso ID2
+
+#### Estado
+
+CERRADO
+
+---
+
+### EVENTO-2026-10-02-002
+
+#### Título
+
+Aprobación de Historización Institucional de Universo
+
+#### Fecha
+
+02/10/2026
+
+#### Estado
+
+COMPLETADO
+
+#### Resultado
+
+La plataforma incorpora formalmente persistencia histórica del Universo Comercial mediante:
+
+- universo
+- universo_hist
+- universo_versiones
+
+#### Alcance Futuro Aprobado
+
+- reconstrucción histórica
+- auditoría temporal
+- administración SQL
+- análisis retrospectivo de cartera
+- futuras evoluciones de CORE_OPERACION
+
+#### Observación
+
+La iniciativa surge del análisis del Caso ID2 y constituye la primera implementación institucional de versionado de entidades maestras.
+CORRECCION_UNIVERSO_SQLITE_2026
+
+- universo SQLite sincronizado 1:1 con UNIVERSO.xlsx
+- eliminación de esquema heredado incorrecto
+- corrección automática de schema drift en universo_hist
+- carga validada exitosamente
+- versión estable de database.py aprobada
+``

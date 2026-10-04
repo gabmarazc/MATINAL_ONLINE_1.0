@@ -392,3 +392,73 @@
 2026-10-02 17:20:07 | INFO     | matinal.database | UNIVERSO_VERSIONES: versión registrada correctamente
 2026-10-02 17:20:07 | WARNING  | matinal.database | CARGANDO TABLA: vta[cite: 20]
 2026-10-02 17:24:25 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace)[cite: 20].
+2026-10-03 16:08:30 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:09:38 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:28:50 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:29:00 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:29:29 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:29:39 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:30:25 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:31:08 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:31:33 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:32:16 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:38:09 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:39:27 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 16:40:16 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:01:47 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:01:59 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:02:25 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:02:50 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:03:18 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:03:47 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:05:00 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:07:12 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:08:55 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:09:21 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:13:33 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:14:50 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:15:17 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:19:16 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:19:46 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:19:46 | ERROR    | matinal.database | Error al ejecutar la consulta SQL: SELECT Codigo, SegmentoClienteCodigo, codven FROM universo LIMIT 50. Retornando DataFrame vacío por seguridad[cite: 20].
+Traceback (most recent call last):
+  File "C:\Python314\Lib\site-packages\pandas\io\sql.py", line 2745, in execute
+    cur.execute(sql, *args)
+    ~~~~~~~~~~~^^^^^^^^^^^^
+sqlite3.OperationalError: no such column: SegmentoClienteCodigo
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Proyectos\MATINAL ONLINE\modules\database.py", line 68, in cargar_tabla_sql
+    df = pd.read_sql(query, conn)
+  File "C:\Python314\Lib\site-packages\pandas\io\sql.py", line 702, in read_sql
+    return pandas_sql.read_query(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        sql,
+        ^^^^
+    ...<6 lines>...
+        dtype=dtype,
+        ^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Python314\Lib\site-packages\pandas\io\sql.py", line 2809, in read_query
+    cursor = self.execute(sql, params)
+  File "C:\Python314\Lib\site-packages\pandas\io\sql.py", line 2757, in execute
+    raise ex from exc
+pandas.errors.DatabaseError: Execution failed on sql 'SELECT Codigo, SegmentoClienteCodigo, codven FROM universo LIMIT 50': no such column: SegmentoClienteCodigo
+2026-10-03 17:33:59 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:40:30 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:40:39 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:41:01 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:41:26 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 17:41:51 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 19:54:25 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-03 19:54:56 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-04 08:55:59 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-04 08:56:21 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace)[cite: 20].
+2026-10-04 10:02:50 | WARNING  | matinal.database | CARGANDO TABLA: altas[cite: 20]
+2026-10-04 10:02:51 | WARNING  | matinal.database | CARGANDO TABLA: rutas[cite: 20]
+2026-10-04 10:03:13 | WARNING  | matinal.database | CARGANDO TABLA: tp[cite: 20]
+2026-10-04 10:03:13 | WARNING  | matinal.database | DETECTADA CARGA ESPECIAL TP: tp[cite: 20]
+2026-10-04 10:03:19 | WARNING  | matinal.database | CARGANDO TABLA: universo[cite: 20]

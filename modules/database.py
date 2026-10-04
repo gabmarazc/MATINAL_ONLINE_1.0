@@ -6,14 +6,14 @@ import hashlib
 from datetime import datetime
 from modules.logger import get_logger
 
-# Inicialización del logger institucional para la capa de acceso a datos[cite: 20]
+# Inicialización del logger institucional para la capa de acceso a datos
 logger = get_logger("database")
 
 DB_PATH = "data/matinal.db"
 
 
 def obtener_conexion():
-    """Crea una conexión a SQLite con timeout y modo WAL activado para concurrencia segura[cite: 20]."""
+    """Crea una conexión a SQLite con timeout y modo WAL activado para concurrencia segura."""
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -21,7 +21,7 @@ def obtener_conexion():
 
 
 def init_db():
-    """Inicializa la estructura básica y asegura índices de rendimiento[cite: 20]."""
+    """Inicializa la estructura básica y asegura índices de rendimiento."""
     conn = obtener_conexion()
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_vendedor ON vta(CodVendedor);")
@@ -35,18 +35,18 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_marca ON vta(Marca);")
         conn.commit()
         logger.info(
-            "Índices de rendimiento de la tabla vta verificados/creados correctamente en SQLite[cite: 20]."
+            "Índices de rendimiento de la tabla vta verificados/creados correctamente en SQLite."
         )
     except Exception:
         logger.exception(
-            "Error crítico al intentar crear los índices de rendimiento para la tabla vta[cite: 20]."
+            "Error crítico al intentar crear los índices de rendimiento para la tabla vta."
         )
     finally:
         conn.close()
 
 
 def cargar_tabla_sql(query: str) -> pd.DataFrame:
-    """Ejecuta una consulta SQL de forma segura. Si la tabla no existe, retorna un DataFrame vacío[cite: 20]."""
+    """Ejecuta una consulta SQL de forma segura. Si la tabla no existe, retorna un DataFrame vacío."""
     conn = obtener_conexion()
     try:
         q_lower = query.lower()
@@ -61,14 +61,14 @@ def cargar_tabla_sql(query: str) -> pd.DataFrame:
                 )
                 if not cursor.fetchone():
                     logger.warning(
-                        f"La tabla consultada no existe en el catálogo de SQLite. Retornando DataFrame vacío para: {query}[cite: 20]"
+                        f"La tabla consultada no existe en el catálogo de SQLite. Retornando DataFrame vacío para: {query}"
                     )
                     return pd.DataFrame()
 
         df = pd.read_sql(query, conn)
     except Exception:
         logger.exception(
-            f"Error al ejecutar la consulta SQL: {query}. Retornando DataFrame vacío por seguridad[cite: 20]."
+            f"Error al ejecutar la consulta SQL: {query}. Retornando DataFrame vacío por seguridad."
         )
         df = pd.DataFrame()
     finally:
@@ -77,19 +77,19 @@ def cargar_tabla_sql(query: str) -> pd.DataFrame:
 
 
 def guardar_dataframe_sql(df: pd.DataFrame, nombre_tabla: str, if_exists="replace"):
-    """Guarda un DataFrame en la base de datos SQLite[cite: 20]."""
+    """Guarda un DataFrame en la base de datos SQLite."""
     conn = obtener_conexion()
     try:
         df.to_sql(nombre_tabla, conn, if_exists=if_exists, index=False, chunksize=10000)
         logger.info(
-            f"DataFrame persistido con éxito en la tabla '{nombre_tabla}' (modo: {if_exists})[cite: 20]."
+            f"DataFrame persistido con éxito en la tabla '{nombre_tabla}' (modo: {if_exists})."
         )
     finally:
         conn.close()
 
 
 def tablas_existen() -> bool:
-    """Verifica de forma robusta si las tablas operativas existen y contienen registros[cite: 20]."""
+    """Verifica de forma robusta si las tablas operativas existen y contienen registros."""
     conn = obtener_conexion()
     try:
         cursor = conn.cursor()
@@ -100,7 +100,7 @@ def tablas_existen() -> bool:
 
         if len(set(tablas)) < 3:
             logger.warning(
-                "Validación estructural: Faltan tablas operativas esenciales en SQLite[cite: 20]."
+                "Validación estructural: Faltan tablas operativas esenciales en SQLite."
             )
             return False
 
@@ -109,14 +109,14 @@ def tablas_existen() -> bool:
             count = cursor.fetchone()[0]
             if count == 0:
                 logger.warning(
-                    f"Validación estructural: La tabla operativa '{tabla}' se encuentra vacía[cite: 20]."
+                    f"Validación estructural: La tabla operativa '{tabla}' se encuentra vacía."
                 )
                 return False
 
         return True
     except Exception:
         logger.exception(
-            "Error crítico al verificar la existencia y conteo de registros en las tablas operativas de SQLite[cite: 20]."
+            "Error crítico al verificar la existencia y conteo de registros en las tablas operativas de SQLite."
         )
         return False
     finally:
@@ -125,10 +125,10 @@ def tablas_existen() -> bool:
 
 def obtener_df_maestro_corporativo() -> pd.DataFrame:
     """
-    DataFrame Maestro de Nivel 1 (Filtro N1: EMPLEADOS)[cite: 20].
+    DataFrame Maestro de Nivel 1 (Filtro N1: EMPLEADOS).
     - Carga la tabla 'vta' de SQLite.
     - Aplica de forma universal el filtro N1 EMPLEADOS (elimina subramos 'EMPLOYEES' / 'EMPLEADOS').
-    - Opera como la Única Fuente de Verdad (SSOT) para la derivación de DataFrames hijos en los reportes[cite: 20].
+    - Opera como la Única Fuente de Verdad (SSOT) para la derivación de DataFrames hijos en los reportes.
     """
     df = cargar_tabla_sql("SELECT * FROM vta")
     if df.empty:
@@ -155,7 +155,7 @@ def obtener_df_maestro_corporativo() -> pd.DataFrame:
 
 
 def obtener_hash_dataframe(df: pd.DataFrame) -> str:
-    """Calcula un hash SHA-256 estable del contenido del DataFrame, normalizando nulos/espacios y orden superficial[cite: 20]."""
+    """Calcula un hash SHA-256 estable del contenido del DataFrame, normalizando nulos/espacios y orden superficial."""
     if df is None or df.empty:
         return hashlib.sha256(b"empty").hexdigest()
 
@@ -176,7 +176,7 @@ def obtener_hash_dataframe(df: pd.DataFrame) -> str:
 
 
 def guardar_snapshot_universo_si_cambio(conn, df_universo: pd.DataFrame):
-    """Compara el hash del universo actual con el último snapshot histórico, guarda en universo_hist y cataloga en universo_versiones si cambió[cite: 20]."""
+    """Compara el hash del universo actual con el último snapshot histórico, guarda en universo_hist y cataloga en universo_versiones si cambió."""
     if df_universo is None or df_universo.empty:
         return
 
@@ -220,11 +220,23 @@ def guardar_snapshot_universo_si_cambio(conn, df_universo: pd.DataFrame):
         df_hist["FechaCargaSistema"] = fecha_carga_sistema
         df_hist["HashSnapshot"] = hash_actual
 
-        df_hist.to_sql(
-            "universo_hist", conn, if_exists="append", index=False, chunksize=10000
-        )
+        try:
+            df_hist.to_sql(
+                "universo_hist", conn, if_exists="append", index=False, chunksize=10000
+            )
+        except Exception:
+            # Detección de incompatibilidad de esquema (schema drift): recrear universo_hist con el nuevo esquema
+            logger.warning(
+                "Incompatibilidad de esquema detectada en 'universo_hist'. Recreando tabla histórica."
+            )
+            conn.execute("DROP TABLE IF EXISTS universo_hist;")
+            conn.commit()
+            df_hist.to_sql(
+                "universo_hist", conn, if_exists="replace", index=False, chunksize=10000
+            )
+
         logger.info(
-            "Nuevo snapshot histórico del universo guardado en 'universo_hist' (detectados cambios en el contenido)[cite: 20]."
+            "Nuevo snapshot histórico del universo guardado en 'universo_hist' (detectados cambios en el contenido)."
         )
 
         try:
@@ -244,16 +256,16 @@ def guardar_snapshot_universo_si_cambio(conn, df_universo: pd.DataFrame):
             logger.exception("Error al registrar versión en universo_versiones.")
     else:
         logger.info(
-            "El contenido de la tabla 'universo' no ha cambiado. No se genera nuevo snapshot en 'universo_hist'[cite: 20]."
+            "El contenido de la tabla 'universo' no ha cambiado. No se genera nuevo snapshot en 'universo_hist'."
         )
 
 
 def inicializar_bd_desde_excel(archivos_dict):
-    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte multi-solapa para Altas[cite: 20]."""
+    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte multi-solapa para Altas."""
     conn = obtener_conexion()
     try:
         for nombre_tabla, archivo in archivos_dict.items():
-            logger.warning(f"CARGANDO TABLA: {nombre_tabla}[cite: 20]")
+            logger.warning(f"CARGANDO TABLA: {nombre_tabla}")
             if "altas" in nombre_tabla.lower():
                 xls_altas = pd.ExcelFile(archivo)
                 dfs_all = []
@@ -306,7 +318,7 @@ def inicializar_bd_desde_excel(archivos_dict):
                         "altas", conn, if_exists="replace", index=False, chunksize=10000
                     )
             elif nombre_tabla.lower() == "tp":
-                logger.warning(f"DETECTADA CARGA ESPECIAL TP: {nombre_tabla}[cite: 20]")
+                logger.warning(f"DETECTADA CARGA ESPECIAL TP: {nombre_tabla}")
                 df_raw = pd.read_excel(archivo, header=None)
                 header_row = None
                 for i, row in df_raw.iterrows():
@@ -314,7 +326,7 @@ def inicializar_bd_desde_excel(archivos_dict):
                         header_row = i
                         break
                 if header_row is None:
-                    raise ValueError("No se encontró Cliente_id en TP.xlsx[cite: 20]")
+                    raise ValueError("No se encontró Cliente_id en TP.xlsx")
                 df = pd.read_excel(archivo, header=header_row)
                 df.columns = [str(c).strip() for c in df.columns]
             else:
@@ -402,17 +414,23 @@ def inicializar_bd_desde_excel(archivos_dict):
                             )
                         df[col] = dt.dt.strftime("%Y-%m-%d")
 
-                # CORRECCIÓN CRÍTICA: Generar snapshot histórico ANTES de reemplazar la tabla vigente en SQLite[cite: 20]
                 if nombre_tabla.lower() == "universo":
                     guardar_snapshot_universo_si_cambio(conn, df)
-
-                df.to_sql(
-                    nombre_tabla,
-                    conn,
-                    if_exists="replace",
-                    index=False,
-                    chunksize=10000,
-                )
+                    df.to_sql(
+                        "universo",
+                        conn,
+                        if_exists="replace",
+                        index=False,
+                        chunksize=10000,
+                    )
+                else:
+                    df.to_sql(
+                        nombre_tabla,
+                        conn,
+                        if_exists="replace",
+                        index=False,
+                        chunksize=10000,
+                    )
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_vendedor ON vta(CodVendedor);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_cliente ON vta(Cliente);")
@@ -431,11 +449,11 @@ def inicializar_bd_desde_excel(archivos_dict):
 def importar_maestros_multisolapa_atomica(
     archivo_buffer_or_path, anio_def, mes_def
 ) -> tuple[bool, str]:
-    """Importa masivamente todas las solapas del Excel consolidado en una transacción atómica única[cite: 20]."""
+    """Importa masivamente todas las solapas del Excel consolidado en una transacción atómica única."""
     try:
         xls_global = pd.ExcelFile(archivo_buffer_or_path)
     except Exception as e:
-        return False, f"Error al leer el archivo Excel: {e}[cite: 20]"
+        return False, f"Error al leer el archivo Excel: {e}"
 
     sheet_to_table = {
         "Maestro_Vendedores": "maestro_vendedores",
@@ -481,28 +499,28 @@ def importar_maestros_multisolapa_atomica(
         conn.commit()
         return (
             True,
-            f"¡Se han importado y actualizado exitosamente {importados_count} tablas en SQLite de forma atómica e instantánea![cite: 20]",
+            f"¡Se han importado y actualizado exitosamente {importados_count} tablas en SQLite de forma atómica e instantánea!",
         )
     except Exception as e:
         conn.rollback()
-        return False, f"Error crítico en la transacción SQL: {e}[cite: 20]"
+        return False, f"Error crítico en la transacción SQL: {e}"
     finally:
         conn.close()
 
 
 def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
-    """Guarda o reemplaza los objetivos definitivos en 'objetivos_vendedores' para el período (Anio, Mes)[cite: 20]."""
+    """Guarda o reemplaza los objetivos definitivos en 'objetivos_vendedores' para el período (Anio, Mes)."""
     try:
         df_subida = pd.read_excel(file_buffer_or_path)
     except Exception as e:
-        return False, f"Error al leer el archivo Excel: {e}[cite: 20]"
+        return False, f"Error al leer el archivo Excel: {e}"
 
     columnas_requeridas = ["CodVendedor", "SEGMENTO", "Obj_Sugerido_Kg"]
     faltantes = [c for c in columnas_requeridas if c not in df_subida.columns]
     if faltantes:
         return (
             False,
-            f"El archivo Excel no tiene el formato correcto. Faltan las columnas: {', '.join(faltantes)}[cite: 20]",
+            f"El archivo Excel no tiene el formato correcto. Faltan las columnas: {', '.join(faltantes)}",
         )
 
     df_subida["CodVendedor"] = pd.to_numeric(
@@ -570,23 +588,23 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
 
     return (
         True,
-        f"¡Objetivos del período {mes_int:02d}/{anio_int} cargados y versionados con éxito en la base de datos![cite: 20]",
+        f"¡Objetivos del período {mes_int:02d}/{anio_int} cargados y versionados con éxito en la base de datos!",
     )
 
 
 def guardar_innovaciones_desde_excel(file_buffer_or_path, anio, mes):
-    """Guarda o reemplaza el maestro de innovaciones en la tabla 'maestro_innovaciones' para el período (Anio, Mes)[cite: 20]."""
+    """Guarda o reemplaza el maestro de innovaciones en la tabla 'maestro_innovaciones' para el período (Anio, Mes)."""
     try:
         df_subida = pd.read_excel(file_buffer_or_path)
     except Exception as e:
-        return False, f"Error al leer el archivo Excel de innovaciones: {e}[cite: 20]"
+        return False, f"Error al leer el archivo Excel de innovaciones: {e}"
 
     columnas_requeridas = ["Codigo", "Articulo", "Innovacion", "Condicion_Vta"]
     faltantes = [c for c in columnas_requeridas if c not in df_subida.columns]
     if faltantes:
         return (
             False,
-            f"El archivo Excel no tiene el formato correcto. Faltan las columnas: {', '.join(faltantes)}[cite: 20]",
+            f"El archivo Excel no tiene el formato correcto. Faltan las columnas: {', '.join(faltantes)}",
         )
 
     try:
@@ -650,5 +668,5 @@ def guardar_innovaciones_desde_excel(file_buffer_or_path, anio, mes):
 
     return (
         True,
-        f"¡Objetivos del período {mes_int:02d}/{anio_int} cargados y versionados con éxito en la base de datos![cite: 20]",
+        f"¡Objetivos del período {mes_int:02d}/{anio_int} cargados y versionados con éxito en la base de datos!",
     )
