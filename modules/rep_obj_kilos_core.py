@@ -26,6 +26,15 @@ def generar_rep_obj_kilos_core(anio_operativo: int, mes_operativo: int) -> pd.Da
     if df_segmentos is None or df_segmentos.empty:
         return pd.DataFrame(columns=columnas_salida)
 
+    # 1.0.1 Filtrar filas con SEGMENTO = "SIN SEGMENTO" inmediatamente después de obtener los datos
+    df_segmentos = df_segmentos[
+        df_segmentos["SEGMENTO"].fillna("").astype(str).str.strip().str.upper()
+        != "SIN SEGMENTO"
+    ].copy()
+
+    if df_segmentos.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
     # 1.1 Validación de Contrato
     faltantes = [c for c in columnas_salida if c not in df_segmentos.columns]
     if faltantes:
