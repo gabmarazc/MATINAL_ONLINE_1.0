@@ -13,18 +13,36 @@ Este documento constituye la referencia funcional oficial del sistema MATINAL.
 
 Su objetivo es definir:
 
-- Cómo se interpreta la operación comercial.
-- Qué reglas funcionales son válidas.
-- Qué criterios utiliza el negocio.
-- Qué condiciones determinan indicadores, coberturas y métricas.
-- Qué reglas tienen prioridad cuando existe conflicto.
+* Cómo se interpreta la operación comercial.
+
+
+* Qué reglas funcionales son válidas.
+
+
+* Qué criterios utiliza el negocio.
+
+
+* Qué condiciones determinan indicadores, coberturas y métricas.
+
+
+* Qué reglas tienen prioridad cuando existe conflicto.
+
+
 
 Este documento no describe:
 
-- Código.
-- Arquitectura.
-- Migraciones.
-- Implementaciones técnicas.
+* Código.
+
+
+* Arquitectura.
+
+
+* Migraciones.
+
+
+* Implementaciones técnicas.
+
+
 
 Su propósito es describir exclusivamente el comportamiento funcional esperado del sistema.
 
@@ -102,8 +120,12 @@ Subramo
 
 ### Valores Excluidos
 
-- EMPLEADOS
-- EMPLOYEES
+* EMPLEADOS
+
+
+* EMPLOYEES
+
+
 
 ### Alcance
 
@@ -155,15 +177,18 @@ CodVendedor = 20
 
 # 4. REGLAS OPERATIVAS
 
-## RO-001 - Titularidad Operativa
+## RO-001 - Titularidad Operativa y Cartera Operativa
 
 ### Objetivo
 
-Determinar quién ejecutó efectivamente una venta.
+Determinar quién ejecutó efectivamente una venta y construir la cartera operativa institucional a partir del universo elegible y la evidencia transaccional.
 
 ### Resultado
 
-CodVendedorOperativo
+* CodVendedorOperativo
+
+
+* Cartera Operativa por Vendedor
 
 ---
 
@@ -190,6 +215,102 @@ Garantizar continuidad comercial frente a ausencias temporales.
 ### Resultado
 
 La operación se atribuye al vendedor que efectivamente ejecutó la gestión.
+
+---
+
+## RO-003A - Compensaciones por Reemplazo
+
+### Objetivo
+
+Preservar la correcta atribución comercial del volumen cuando una operación es ejecutada por un vendedor distinto del titular original.
+
+### Principio
+
+La ejecución operativa y la titularidad comercial constituyen conceptos diferentes.
+
+Una venta puede:
+
+* pertenecer comercialmente a un vendedor
+
+
+* ser ejecutada operativamente por otro
+
+
+
+simultáneamente.
+
+### Variables Involucradas
+
+CodVendedorHistorico
+
+Titular original de la operación.
+
+CodVendedorOperativo
+
+Vendedor que ejecutó efectivamente la gestión.
+
+### Regla
+
+Cuando:
+
+CodVendedorOperativo ≠ CodVendedorHistorico
+
+se considera que existe una operación realizada mediante reemplazo.
+
+### Consecuencia
+
+El volumen comercial deberá:
+
+* descontarse del titular histórico
+
+
+* acreditarse al vendedor operativo
+
+
+
+manteniendo conservación total de masa.
+
+### Restricción Temporal
+
+Sólo participan operaciones clasificadas como:
+
+* Arrastre
+
+
+* Actual
+
+
+
+Quedan excluidas:
+
+* Futuro
+
+
+* Fuera de Período
+
+
+
+### Principio de Balance
+
+Toda compensación deberá cumplir:
+
+Suma de descuentos = Suma de acreditaciones
+
+No se admiten pérdidas ni generación artificial de volumen.
+
+### Vendedor Institucional de Reemplazo
+
+Cuando corresponda utilizar un vendedor comodín de reemplazos, el identificador institucional aprobado es:
+
+CodVendedor = 99
+
+Nombre:
+
+REEMPLAZO
+
+### Estado
+
+✅ Regla validada mediante auditoría forense de compensaciones.
 
 ---
 
@@ -241,10 +362,18 @@ Determinar avance operativo de vendedores.
 
 ### Resultados
 
-- días trabajados
-- días restantes
-- días ajustados
-- ritmo de ejecución
+* días trabajados
+
+
+* días restantes
+
+
+* días ajustados
+
+
+* ritmo de ejecución
+
+
 
 ---
 
@@ -266,14 +395,22 @@ Importe Neto > 0
 
 ### Objetivo
 
-Construir el universo evaluable de CCC.
+Construir el universo evaluable de CCC a partir de la cartera operativa institucional.
 
 ### Consideraciones
 
-- Altas
-- Reactivaciones
-- Inactivaciones
-- Cierres definitivos
+* Altas
+
+
+* Reactivaciones
+
+
+* Inactivaciones
+
+
+* Cierres definitivos
+
+
 
 ---
 
@@ -343,8 +480,12 @@ Minimo_Facturacion_70
 
 La adopción digital se define exclusivamente mediante:
 
-- ventas totales
-- ventas MiNegocio
+* ventas totales
+
+
+* ventas MiNegocio
+
+
 
 No se utilizan encuestas ni clasificaciones manuales.
 
@@ -384,9 +525,15 @@ La cobertura sólo puede generarse mediante compras válidas.
 
 Los objetivos se asignan por:
 
-- vendedor
-- segmento
-- período
+* vendedor
+
+
+* segmento
+
+
+* período
+
+
 
 ---
 
@@ -418,8 +565,12 @@ PesoKg
 
 El ritmo de ejecución surge del cruce entre:
 
-- volumen acumulado
-- calendario operativo
+* volumen acumulado
+
+
+* calendario operativo
+
+
 
 ---
 
@@ -427,9 +578,15 @@ El ritmo de ejecución surge del cruce entre:
 
 Las proyecciones utilizan:
 
-- avance actual
-- días restantes
-- calendario operativo
+* avance actual
+
+
+* días restantes
+
+
+* calendario operativo
+
+
 
 ---
 
@@ -479,10 +636,18 @@ Auditar el impacto operativo del Día Venta.
 
 Si una venta cumple una regla comercial pero viola:
 
-- Problema de Cierre
-- Filtro Empleados
-- Filtro PepsiCo
-- Exclusión Vendedor 20
+* Problema de Cierre
+
+
+* Filtro Empleados
+
+
+* Filtro PepsiCo
+
+
+* Exclusión Vendedor 20
+
+
 
 la venta queda excluida.
 
@@ -497,9 +662,17 @@ Las reglas definidas en este documento constituyen la referencia funcional ofici
 Toda nueva funcionalidad deberá:
 
 1. Identificar la regla funcional asociada.
+
+
 2. Clasificar la regla dentro de este manual.
+
+
 3. Respetar la jerarquía institucional.
+
+
 4. Mantener compatibilidad con las reglas críticas.
+
+
 
 Si existe discrepancia entre código y este documento:
 

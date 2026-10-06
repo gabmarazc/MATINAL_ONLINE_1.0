@@ -1,8 +1,11 @@
 # CORE_OPERACION_V1
 
-Versión: 3.0  
-Fecha de actualización: 30/09/2026  
-Estado: Vigente  
+Versión: 3.0
+
+Fecha de actualización: 30/09/2026
+
+Estado: Vigente
+
 Estado de Producción: Operativo
 
 ---
@@ -41,42 +44,87 @@ REPORTES
 
 CORE_OPERACION es responsable de determinar:
 
-- titularidad operativa
-- vendedor operativo
-- reemplazos
-- ausencias
-- clasificación temporal
-- calendario operativo
-- ritmo operativo
+* construcción de cartera operativa por vendedor
+* titularidad operativa
+* vendedor operativo
+* reemplazos
+* ausencias
+* clasificación temporal
+* calendario operativo
+* ritmo operativo
+
+
 
 No es responsable de:
 
-- CCC
-- MiNegocio
-- Coberturas
-- Objetivos
-- Pace
-- Efectividad
-- Compensaciones
-- KPIs
-- Clasificaciones comerciales
+* CCC
+* MiNegocio
+* Coberturas
+* Objetivos
+* Pace
+* Efectividad
+* Compensaciones
+* KPIs
+* Clasificaciones comerciales
+
+
 
 ---
 
-# 4. ENTRADAS OFICIALES
+# 4. CONSTRUCCIÓN DE CARTERA OPERATIVA
+
+## Principios Institucionales
+
+* UNIVERSO = universo elegible
+* VTA = evidencia transaccional válida
+* CORE_OPERACION = constructor oficial de cartera operativa
+
+## Resultado
+
+* Cartera Operativa por Vendedor
+
+## Flujo Institucional
+
+VTA
++
+UNIVERSO
+↓
+CORE_OPERACION
+↓
+Cartera Operativa por Vendedor
+↓
+BUSINESS RULES
+↓
+REPORTES
+
+## Consideración Metodológica
+
+La cartera consumida por los dominios comerciales no surge directamente de UNIVERSO.
+
+La cartera operativa institucional surge de la interpretación realizada por CORE_OPERACION utilizando:
+
+* universo elegible
+* evidencia transaccional válida
+* reglas operativas institucionales
+
+---
+
+# 5. ENTRADAS OFICIALES
 
 ## obtener_staging_vta()
 
 Contrato esperado:
 
-- FechaCarga_dt
-- FechaEntrega_dt
-- CodVendedor
-- Cliente
-- CantBase
-- ImporteNetoItem
-- PesoKg
-- Marca
+* FechaCarga_dt
+* FechaEntrega_dt
+* CodVendedor
+* Cliente
+* CantBase
+* ImporteNetoItem
+* PesoKg
+* Marca
+
+
 
 ---
 
@@ -92,9 +140,9 @@ Calendario operativo normalizado.
 
 Contrato esperado:
 
-- Fecha_dt
-- CodVend_clean
-- Reemplazo_clean
+* Fecha_dt
+* CodVend_clean
+* Reemplazo_clean
 
 Estado:
 
@@ -108,14 +156,16 @@ Estado:
 
 Contrato esperado:
 
-- maestro_vendedores
-- maestro_ccc
-- maestro_segmentos
-- maestro_marcas_cebe
+* maestro_vendedores
+* maestro_ccc
+* maestro_segmentos
+* maestro_marcas_cebe
+
+
 
 ---
 
-# 5. FLUJO OFICIAL
+# 6. FLUJO OFICIAL
 
 obtener_staging_vta()
 ↓
@@ -135,7 +185,7 @@ obtener_core_operacion()
 
 ---
 
-# 6. PROCESAR AUSENCIAS Y REEMPLAZOS
+# 7. PROCESAR AUSENCIAS Y REEMPLAZOS
 
 ## Función
 
@@ -193,7 +243,7 @@ CodVendedorOperativo = Reemplazo
 
 ---
 
-# 7. CLASIFICACIÓN TEMPORAL
+# 8. CLASIFICACIÓN TEMPORAL
 
 ## Función
 
@@ -231,7 +281,7 @@ No cumple criterios institucionales.
 
 ---
 
-# 8. CALENDARIO OPERATIVO
+# 9. CALENDARIO OPERATIVO
 
 ## Función
 
@@ -239,10 +289,12 @@ calcular_calendario_y_rutas()
 
 ## Resultados
 
-- dias_pasados_map
-- dias_restantes_map
-- total_dias_pasados
-- total_dias_restantes
+* dias_pasados_map
+* dias_restantes_map
+* total_dias_pasados
+* total_dias_restantes
+
+
 
 ---
 
@@ -252,7 +304,7 @@ Entregar una interpretación oficial del avance operativo de cada vendedor.
 
 ---
 
-# 9. CONTRATO DE SALIDA
+# 10. CONTRATO DE SALIDA
 
 ## Función
 
@@ -266,14 +318,16 @@ Estructura operativa consolidada.
 
 ### Métricas de Calendario
 
-- dias_pasados_map
-- dias_restantes_map
-- total_dias_pasados
-- total_dias_restantes
+* dias_pasados_map
+* dias_restantes_map
+* total_dias_pasados
+* total_dias_restantes
+
+
 
 ---
 
-# 10. PRINCIPIOS INSTITUCIONALES
+# 11. PRINCIPIOS INSTITUCIONALES
 
 ## PI-001
 
@@ -299,7 +353,7 @@ Toda entidad comercial debe consumir CORE y no replicar lógica operativa.
 
 ---
 
-# 11. CONSUMIDORES PRODUCTIVOS CONFIRMADOS
+# 12. CONSUMIDORES PRODUCTIVOS CONFIRMADOS
 
 ## Kilos
 
@@ -337,7 +391,25 @@ Resultado:
 
 ---
 
-# 12. VALIDACIÓN INSTITUCIONAL
+## CCC
+
+Arquitectura:
+
+rep_ccc_core.py
+↓
+business_rules_ccc.py
+↓
+obtener_core_operacion()
+
+Resultado:
+
+✅ Productivo
+
+✅ Validado
+
+---
+
+# 13. VALIDACIÓN INSTITUCIONAL
 
 CORE_OPERACION ha sido validado mediante múltiples dominios comerciales independientes.
 
@@ -346,6 +418,8 @@ Dominios validados:
 ✅ Kilos
 
 ✅ MiNegocio
+
+✅ CCC
 
 Resultado:
 
@@ -356,20 +430,6 @@ Resultado:
 ✅ Estable
 
 ✅ Sin conocimiento comercial embebido
-
----
-
-# 13. PRÓXIMO CONSUMIDOR APROBADO
-
-CCC
-
-Arquitectura objetivo:
-
-rep_ccc_core.py
-↓
-business_rules_ccc.py
-↓
-obtener_core_operacion()
 
 ---
 
@@ -418,4 +478,3 @@ CORE_OPERACION
 ✅ Consumido por múltiples dominios
 
 ✅ Componente institucional consolidado
-`

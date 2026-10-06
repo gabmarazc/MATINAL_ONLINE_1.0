@@ -1,8 +1,11 @@
 # GOBIERNO_IA
 
-Versión: 3.0  
-Fecha de actualización: 30/09/2026  
-Estado: Vigente  
+Versión: 3.0
+
+Fecha de actualización: 30/09/2026
+
+Estado: Vigente
+
 Naturaleza: Norma Institucional Obligatoria
 
 ---
@@ -13,11 +16,11 @@ Este documento constituye la guía de gobierno obligatoria para cualquier IA, LL
 
 Su objetivo es:
 
-- Preservar la metodología de trabajo.
-- Garantizar consistencia técnica.
-- Evitar pérdida de contexto.
-- Reducir riesgos de cambios incorrectos.
-- Asegurar continuidad entre sesiones.
+* Preservar la metodología de trabajo.
+* Garantizar consistencia técnica.
+* Evitar pérdida de contexto.
+* Reducir riesgos de cambios incorrectos.
+* Asegurar continuidad entre sesiones.
 
 ---
 
@@ -65,13 +68,13 @@ NO CONSIDERAR RESUELTO EL PROBLEMA.
 
 Toda afirmación técnica debe estar sustentada por al menos una de las siguientes fuentes:
 
-- Código fuente
-- Base SQLite
-- Logs
-- Outputs observables
-- Resultados de ejecución
-- Documentación institucional
-- Evidencia reproducible
+* Código fuente
+* Base SQLite
+* Logs
+* Outputs observables
+* Resultados de ejecución
+* Documentación institucional
+* Evidencia reproducible
 
 ---
 
@@ -144,11 +147,11 @@ No el síntoma final.
 
 ## Prohibido
 
-- Refactorizar sin requerimiento.
-- Reordenar componentes innecesariamente.
-- Renombrar estructuras sin necesidad.
-- Optimizar sin objetivo concreto.
-- Rediseñar arquitectura sin evidencia.
+* Refactorizar sin requerimiento.
+* Reordenar componentes innecesariamente.
+* Renombrar estructuras sin necesidad.
+* Optimizar sin objetivo concreto.
+* Rediseñar arquitectura sin evidencia.
 
 ---
 
@@ -156,11 +159,11 @@ No el síntoma final.
 
 Toda modificación debe ser:
 
-- Mínima
-- Localizada
-- Auditada
-- Reversible
-- Explicable
+* Mínima
+* Localizada
+* Auditada
+* Reversible
+* Explicable
 
 ---
 
@@ -228,32 +231,32 @@ No entregar:
 
 Constituyen la fuente principal de verdad:
 
-- ESTADO_ACTUAL.md
-- ARQUITECTURA.md
-- DECISIONES_TECNICAS.md
-- ROADMAP.md
+* ESTADO_ACTUAL.md
+* ARQUITECTURA.md
+* DECISIONES_TECNICAS.md
+* ROADMAP.md
 
 ---
 
 ## Documentos Funcionales
 
-- DICCIONARIO_TABLAS.md
-- GLOSARIO_REGLAS.md
-- CORE_OPERACION_V1.md
-- CORE_VENTAS_BASE_V1.md
+* DICCIONARIO_TABLAS.md
+* GLOSARIO_REGLAS.md
+* CORE_OPERACION_V1.md
+* CORE_VENTAS_BASE_V1.md
 
 ---
 
 ## Documentos Históricos
 
-- BITACORA.md
+* BITACORA.md
 
 ---
 
 ## Documentos de Contexto
 
-- CONTEXTO_IA.md
-- GOBIERNO_IA.md
+* CONTEXTO_IA.md
+* GOBIERNO_IA.md
 
 ---
 
@@ -279,9 +282,9 @@ Recién después analizar código.
 
 Toda validación deberá intentar medir:
 
-- COUNT registros
-- COUNT identificadores
-- SUM magnitudes relevantes
+* COUNT registros
+* COUNT identificadores
+* SUM magnitudes relevantes
 
 antes y después de una transformación.
 
@@ -301,11 +304,11 @@ SQLite = lo que ve el usuario.
 
 Siempre considerar:
 
-- Cache Data
-- Cache Resource
-- Session State
-- Objetos persistidos en memoria
-- Reruns
+* Cache Data
+* Cache Resource
+* Session State
+* Objetos persistidos en memoria
+* Reruns
 
 ---
 
@@ -331,11 +334,11 @@ Ante inconsistencias:
 
 Verificar:
 
-- st.rerun()
-- st.experimental_rerun()
-- st.cache_data.clear()
-- st.cache_resource.clear()
-- session_state
+* st.rerun()
+* st.experimental_rerun()
+* st.cache_data.clear()
+* st.cache_resource.clear()
+* session_state
 
 No asumir sincronización automática.
 
@@ -471,7 +474,7 @@ A partir de esta fecha constituye la estrategia oficial de evolución del proyec
 
 ✅ MiNegocio
 
-⏳ CCC
+✅ CCC
 
 ⏳ Cobertura Marca
 
@@ -504,29 +507,17 @@ Antes de migrar un reporte:
 
 Gerencial
 ↓
-CCC
-
-Gerencial
-↓
 Cobertura Marca
 
 Vespertina
 ↓
-CCC
+Cobertura Marca
 
 ---
 
 ## Próxima Dependencia a Eliminar
 
-CCC
-
-Arquitectura objetivo:
-
-rep_ccc_core.py
-↓
-business_rules_ccc.py
-↓
-core_*
+Cobertura Marca
 
 ---
 

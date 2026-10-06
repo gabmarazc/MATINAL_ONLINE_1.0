@@ -1,8 +1,11 @@
 # BITÁCORA - MATINAL
 
-Versión: 3.0  
-Fecha de actualización: 30/09/2026  
-Estado: Vigente  
+Versión: 3.0
+
+Fecha de actualización: 30/09/2026
+
+Estado: Vigente
+
 Naturaleza: Registro histórico institucional
 
 ---
@@ -47,10 +50,6 @@ FASE 4.8 APROBADA ⏳
 
 Eliminación de ETL duplicado en CORE
 
-## Próxima Migración
-
-CCC
-
 ---
 
 # INC-2026-09-24-001
@@ -77,6 +76,7 @@ Durante la validación operativa de la Fase 2A (Logging Estructurado) se detecta
 WARNING | matinal.database |
 La tabla consultada no existe en el catálogo de SQLite.
 SELECT * FROM parametros_marcas
+
 ```
 
 ## Acción Realizada
@@ -221,9 +221,9 @@ obtener_staging_ausencias()
 
 ## Contrato Aprobado
 
-- Fecha_dt
-- CodVend_clean
-- Reemplazo_clean
+* Fecha_dt
+* CodVend_clean
+* Reemplazo_clean
 
 ## Resultado
 
@@ -274,6 +274,7 @@ obtener_staging_ausencias        0.0087 s
 procesar_ausencias_y_reemplazos  0.7176 s
 obtener_core_operacion          13.4367 s
 obtener_matriz_kilos_comercial  14.6438 s
+
 ```
 
 ## Resultado
@@ -414,15 +415,15 @@ core_*
 
 ## Reglas Migradas
 
-- Clasificación Digital
-- No Digital
-- Híbrido
-- Fully Digital
-- Pct_MiNegocio
-- Minimo_Facturacion_70
-- Matriz comercial por cliente
-- Adopción por vendedor
-- Adopción por taxonomía
+* Clasificación Digital
+* No Digital
+* Híbrido
+* Fully Digital
+* Pct_MiNegocio
+* Minimo_Facturacion_70
+* Matriz comercial por cliente
+* Adopción por vendedor
+* Adopción por taxonomía
 
 ## Resultado
 
@@ -560,6 +561,8 @@ Migraciones completadas:
 
 ✅ MiNegocio
 
+✅ CCC
+
 Validaciones institucionales:
 
 ✅ BUSINESS RULES
@@ -570,13 +573,10 @@ Validaciones institucionales:
 
 ✅ STAGING
 
-Próxima migración aprobada:
-
-⏳ CCC
-
 Nivel de riesgo:
 
 ✅ Bajo
+
 ## INC-2026-10-02-001
 
 ### Título
@@ -751,7 +751,6 @@ Sin errores de ejecución observados.
 
 CERRADO
 
-
 ## EVENTO-2026-10-02-001
 
 ### Título
@@ -798,12 +797,11 @@ Control de Integridad del Período Operativo
 
 Objetivos:
 
-- Validación automática de bases mensuales
-- Semáforo de integridad del período
-- Diagnóstico operativo
-- Migración futura de Gerencial a CORE
-- Migración futura de Vespertina a CORE
-
+* Validación automática de bases mensuales
+* Semáforo de integridad del período
+* Diagnóstico operativo
+* Migración futura de Gerencial a CORE
+* Migración futura de Vespertina a CORE
 
 ## RESUMEN EJECUTIVO ACTUALIZADO
 
@@ -858,6 +856,7 @@ Migraciones futuras:
 Nivel de riesgo:
 
 ✅ Bajo
+
 ### INC-2026-10-02-002
 
 #### Título
@@ -886,8 +885,8 @@ Incorporar capacidades de auditoría y reconstrucción histórica sin modificar 
 
 Creación de:
 
-- universo_hist
-- universo_versiones
+* universo_hist
+* universo_versiones
 
 Implementación de snapshot automático basado en HashSnapshot.
 
@@ -907,10 +906,10 @@ Implementación de snapshot automático basado en HashSnapshot.
 
 Se verificó:
 
-- universo_versiones creada correctamente
-- snapshot registrado correctamente
-- hash registrado correctamente
-- CantClientes registrado correctamente
+* universo_versiones creada correctamente
+* snapshot registrado correctamente
+* hash registrado correctamente
+* CantClientes registrado correctamente
 
 #### Resultado Institucional
 
@@ -948,26 +947,251 @@ COMPLETADO
 
 La plataforma incorpora formalmente persistencia histórica del Universo Comercial mediante:
 
-- universo
-- universo_hist
-- universo_versiones
+* universo
+* universo_hist
+* universo_versiones
 
 #### Alcance Futuro Aprobado
 
-- reconstrucción histórica
-- auditoría temporal
-- administración SQL
-- análisis retrospectivo de cartera
-- futuras evoluciones de CORE_OPERACION
+* reconstrucción histórica
+* auditoría temporal
+* administración SQL
+* análisis retrospectivo de cartera
+* futuras evoluciones de CORE_OPERACION
 
 #### Observación
 
 La iniciativa surge del análisis del Caso ID2 y constituye la primera implementación institucional de versionado de entidades maestras.
 CORRECCION_UNIVERSO_SQLITE_2026
 
-- universo SQLite sincronizado 1:1 con UNIVERSO.xlsx
-- eliminación de esquema heredado incorrecto
-- corrección automática de schema drift en universo_hist
-- carga validada exitosamente
-- versión estable de database.py aprobada
+* universo SQLite sincronizado 1:1 con UNIVERSO.xlsx
+* eliminación de esquema heredado incorrecto
+* corrección automática de schema drift en universo_hist
+* carga validada exitosamente
+* versión estable de database.py aprobada
 ``
+
+## INC-2026-10-04-001
+
+### Título
+
+Auditoría Forense de Compensaciones por Reemplazo
+
+### Fecha de Apertura
+
+04/10/2026
+
+### Estado
+
+ABIERTO
+
+### Objetivo
+
+Determinar la causa raíz de diferencias observadas en compensaciones por reemplazo dentro del módulo KILOS y validar la consistencia funcional de:
+
+* CodVendedorHistorico
+* CodVendedorOperativo
+* CodVendedorVigente
+* vendedor comodín 99
+* calcular_compensaciones_reemplazos()
+
+### Contexto
+
+Durante la validación operativa de KILOS se observó un volumen de compensación elevado para determinados vendedores, particularmente:
+
+CodVendedor = 11
+
+ORTIZ
+
+El análisis inicial sugería posibles problemas asociados a:
+
+* vendedor 99
+* migración desde -998
+* CodVendedorHistorico
+* participación de ventas Fuera de Período
+* desbalance de compensaciones
+
+Se inició auditoría forense completa utilizando únicamente evidencia observable.
+
+### Componentes Auditados
+
+#### CORE
+
+* core_operaciones.py
+* obtener_core_operacion()
+* procesar_ausencias_y_reemplazos()
+
+#### BUSINESS RULES
+
+* business_rules_kilos.py
+* calcular_compensaciones_reemplazos()
+
+### Evidencia Relevante
+
+#### Validación de Exclusión de Fuera de Período
+
+Se verificó en:
+
+calcular_compensaciones_reemplazos()
+
+la existencia del filtro:
+
+Periodo ∈ {Arrastre, Actual}
+
+Resultado:
+
+✅ Fuera de Período excluido de compensaciones.
+
+#### Validación de Titularidad Histórica
+
+Se verificó la existencia de:
+
+CodVendedorHistorico
+
+creada antes de la reasignación hacia:
+
+CodVendedorVigente
+
+Resultado:
+
+✅ Titularidad histórica preservada.
+
+#### Validación del Vendedor Comodín
+
+Se verificó:
+
+CodVendedor = 99
+
+Nombre = REEMPLAZO
+
+Resultado:
+
+✅ Identificador operativo válido.
+
+#### Validación de Eliminación de -998
+
+Resultado:
+
+✅ -998 descartado como mecanismo vigente de compensación.
+
+### Auditoría de Reemplazos
+
+Para:
+
+Octubre 2026
+
+se auditó:
+
+CodVendedorOperativo = 99
+
+Resultado:
+
+Actual = 158.941 kg
+
+Distribución validada:
+
+CodVendedor 11 → 86.504 kg
+
+CodVendedor 25 → 68.973 kg
+
+CodVendedor 10 → 3.464 kg
+
+Total:
+
+158.941 kg
+
+Resultado:
+
+✅ Conservación de masa validada.
+
+✅ Balance contable validado.
+
+### Caso Principal Auditado
+
+#### Vendedor
+
+CodVendedor = 11
+
+ORTIZ
+
+#### Evidencia
+
+Se identificaron:
+
+228 movimientos reales
+
+asociados a:
+
+CodVendedorOperativo = 99
+
+para operaciones clasificadas dentro del período operativo vigente.
+
+#### Segmentación Auditada
+
+GOLD Salty      = 46.712 kg
+
+GOLD Crakers    = 5.525 kg
+
+SILVER Salty    = 13.867 kg
+
+SILVER Crakers  = 2.790 kg
+
+SILVER Cereals  = 0.470 kg
+
+Total auditado:
+
+69.364 kg
+
+### Hipótesis Descartadas
+
+Se descartó evidencia de:
+
+❌ Participación de Fuera de Período.
+
+❌ Desbalance de compensaciones.
+
+❌ Error de vendedor 99.
+
+❌ Error derivado de -998.
+
+❌ Falla observable en CodVendedorHistorico.
+
+❌ Generación artificial de kilos.
+
+### Hallazgos Confirmados
+
+✅ Compensaciones construidas exclusivamente sobre Arrastre y Actual.
+
+✅ Balance completo entre titular y reemplazante.
+
+✅ Vendedor 99 recibe únicamente kilos provenientes de operaciones reales.
+
+✅ CodVendedorHistorico preserva correctamente la titularidad original para compensaciones.
+
+✅ El volumen transferido a 99 proviene principalmente de vendedores:
+
+* 11
+* 25
+* 10
+
+### Investigación Pendiente
+
+Determinar el origen exacto de la diferencia residual observada entre:
+
+* kilos transferidos auditados por segmento
+* kilos visibles en matriz comercial final
+
+Líneas actualmente abiertas:
+
+* segmentación comercial
+* clasificación por Rubro
+* clasificación por Familia
+* exclusiones posteriores al cálculo operativo
+
+### Resultado Parcial
+
+No se encontró evidencia suficiente para afirmar la existencia de un bug en:
+
+calcular_compensaciones_reemplazos()
+
+La investigación continúa abierta hasta identificar el primer punto exacto de divergencia entre la auditoría de origen y la matriz comercial final.

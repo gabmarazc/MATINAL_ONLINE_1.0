@@ -767,3 +767,35 @@ Si una nueva IA está leyendo este documento debe asumir que:
 ✅ No deben proponerse arquitecturas alternativas sin evidencia objetiva.
 
 Con esta información la IA dispone del contexto mínimo necesario para continuar el desarrollo del proyecto sin perder continuidad técnica, funcional ni documental.
+INVESTIGACIÓN ACTIVA
+
+Tema:
+
+Compensaciones por reemplazo en KILOS.
+
+Estado:
+
+Abierta.
+
+Hallazgos confirmados:
+
+✅ vendedor 99 validado
+✅ -998 descartado
+✅ CodVendedorHistorico validado
+✅ balance validado
+✅ Fuera de Periodo descartado
+
+Hipótesis descartadas:
+
+- error en 99
+- error en -998
+- error de balance
+- error por Fuera de Periodo
+
+Pregunta pendiente:
+
+Explicar completamente la diferencia residual observada entre:
+
+kilos transferidos auditados
+vs
+kilos visibles por segmento

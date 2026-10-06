@@ -1,66 +1,61 @@
-# Estado Actual del Proyecto - MATINAL
+## Estado Actual del Proyecto - MATINAL
 
-Versión: 3.0
-
-Fecha de actualización: 02/10/2026
-
+Versión: 3.1
+Fecha de actualización: 04/10/2026
 Estado: Producción Operativa
+Estado de validación: Confirmado mediante ejecución real y auditoría forense
 
-Estado de validación: Confirmado mediante ejecución real
+## 1. Identificación del Producto
 
----
-
-# 1. Identificación del Producto
-
-## Nombre
+### Nombre
 
 MATINAL
 
-## Descripción
+### Descripción
 
 Sistema institucional de análisis, monitoreo, control operativo y seguimiento comercial para la gestión integral de preventa.
 
-## Estado
+### Estado
 
 Producto productivo en operación diaria.
 
-## Frecuencia de uso
+### Frecuencia de uso
 
-Múltiples veces por day por usuarios operativos, supervisión y gerencia.
+Múltiples veces por día por usuarios operativos, supervisión y gerencia.
 
 ---
 
-# 2. Estado General del Proyecto
+## 2. Estado General del Proyecto
 
-## Estado global
+### Estado global
 
 ESTABLE
 
-## Estado productivo
+### Estado productivo
 
 OPERATIVO
 
-## Estado arquitectónico
+### Estado arquitectónico
 
-EN TRANSICIÓN CONTROLADA HACIA ARQUITECTURA POR CAPAS
+ARQUITECTURA POR CAPAS IMPLEMENTADA Y VALIDADA
 
-## Nivel de riesgo
+### Nivel de riesgo
 
 BAJO
 
-## Última validación integral
+### Última validación integral
 
-02/10/2026
+04/10/2026
 
-## Resultado
+### Resultado
 
 EXITOSO
 
 ---
 
-# 3. Arquitectura Vigente
+## 3. Arquitectura Vigente
 
-## Arquitectura oficial
+### Arquitectura oficial
 
 RAW
 ↓
@@ -74,7 +69,7 @@ BUSINESS RULES
 ↓
 REPORTES
 
-## Estado de implementación
+### Estado de implementación
 
 RAW
 ✅
@@ -96,398 +91,334 @@ REPORTES
 
 ---
 
-# 4. Estado Arquitectónico Actual
+## 4. Estado Arquitectónico Actual
 
-## Capas validadas
+### Capas validadas
 
-### RAW
+#### RAW
 
-Estado:
 ✅ Productivo
 
-### SQLITE
+#### SQLITE
 
-Estado:
 ✅ Productivo
 
-### STAGING
+#### STAGING
 
-Estado:
 ✅ Productivo
+
+#### CORE
+
+✅ Productivo
+
+#### BUSINESS RULES
+
+✅ Productivo
+
+#### REPORTES
+
+✅ Productivo
+
+---
+
+## 5. Validaciones Productivas Confirmadas
 
 ### CORE
-
-Estado:
-✅ Productivo
-
-### BUSINESS RULES
-
-Estado:
-✅ Productivo
-
-### REPORTES
-
-Estado:
-✅ Productivo
-
----
-
-# 5. Validaciones Productivas Confirmadas
-
-## CORE
 
 Validado mediante ejecución real.
 
 Verificaciones:
 
 ✅ Carga SQLite
-
 ✅ Ejecución STAGING
-
 ✅ Ejecución CORE
-
 ✅ Integración Ausencias
-
 ✅ Integración Reemplazos
-
+✅ Integración Calendario
+✅ Integración Titularidad Operativa
 ✅ Sin errores de importación
-
 ✅ Sin NameError
-
 ✅ Sin KeyError
+✅ Sin Tracebacks
 
-✅ Sin tracebacks
-
----
-
-## BUSINESS RULES
+### BUSINESS RULES
 
 Validado mediante ejecución real.
 
 Implementaciones productivas:
 
+#### Kilos
+
+rep_kilos_core.py
+↓
+business_rules_kilos.py
+↓
+core_*
+
+Estado:
+
+✅ Migrado
+✅ Validado
+✅ Productivo
+
+#### MiNegocio
+
+rep_MN_core.py
+↓
+business_rules_mn.py
+↓
+core_*
+
+Estado:
+
+✅ Migrado
+✅ Validado
+✅ Productivo
+
+---
+
+## 6. Auditoría Forense de Reemplazos (04/10/2026)
+
+### Objetivo
+
+Validar la consistencia funcional y técnica del modelo de compensaciones por reemplazo implementado en BUSINESS RULES y alimentado por CORE.
+
+### Componentes Auditados
+
+- core_operaciones.py
+- procesar_ausencias_y_reemplazos()
+- business_rules_kilos.py
+- calcular_compensaciones_reemplazos()
+
+### Hallazgos Confirmados
+
+#### H-001
+
+El vendedor comodín institucional válido es:
+
+CodVendedor = 99
+
+Nombre:
+
+REEMPLAZO
+
+#### H-002
+
+El uso histórico de:
+
+-998
+
+queda descartado como identificador válido dentro del flujo operativo actual.
+
+#### H-003
+
+La columna:
+
+CodVendedorHistorico
+
+se encuentra implementada y utilizada para preservar la titularidad original de las operaciones antes de cualquier reasignación hacia CodVendedorVigente.
+
+#### H-004
+
+La función:
+
+calcular_compensaciones_reemplazos()
+
+utiliza:
+
+CodVendedorHistorico
+
+cuando dicha columna existe.
+
+#### H-005
+
+Las compensaciones excluyen explícitamente:
+
+Periodo = Fuera de Periodo
+
+y únicamente consideran:
+
+- Arrastre
+- Actual
+
+#### H-006
+
+No se detectaron pérdidas de masa en las compensaciones.
+
+Toda salida posee una entrada equivalente.
+
+Balance validado.
+
+---
+
+## 7. Caso de Auditoría Principal
+
+### Caso
+
+CodVendedor = 11
+
+ORTIZ
+
+### Contexto
+
+Se observó una diferencia significativa entre:
+
+- venta propia visible
+- ajuste por reemplazo
+
+lo que motivó una auditoría completa.
+
+### Resultado
+
+Se verificó que:
+
+CodVendedorOperativo = 99
+
+posee operaciones reales asociadas a la cartera del vendedor 11.
+
+### Evidencia Consolidada
+
+Transferencias auditadas:
+
+CodVendedor 11 → 99
+
+86.504 kg
+
+CodVendedor 25 → 99
+
+68.973 kg
+
+CodVendedor 10 → 99
+
+3.464 kg
+
+Total:
+
+158.941 kg
+
+### Conclusión
+
+No se encontró evidencia de generación artificial de kilos.
+
+Las compensaciones provienen de operaciones reales.
+
+---
+
+## 8. Hallazgos No Confirmados
+
+Actualmente NO existe evidencia que demuestre errores en:
+
+- CodVendedorHistorico
+- CodVendedorOperativo
+- vendedor 99
+- compensaciones
+- balance de reemplazos
+- exclusión de Fuera de Período
+
+---
+
+## 9. Investigación Actualmente Abierta
+
+### Estado
+
+ABIERTA
+
+### Objetivo
+
+Explicar completamente la diferencia observada entre:
+
+- kilos transferidos auditados
+- kilos visibles por segmento en la matriz comercial
+
+### Hipótesis pendientes
+
+- diferencias de segmentación comercial
+- clasificación por Rubro
+- clasificación por Familia
+- exclusiones posteriores al cálculo operativo
+
+### Restricción
+
+No modificar código hasta identificar evidencia del primer punto de divergencia.
+
+---
+
+## 10. Módulos Operativos en Producción
+
+### Dashboard Gerencial
+
+✅ Productivo
+
+### CCC
+
+✅ Productivo
+
+### Mi Negocio
+
+✅ Productivo
+
 ### Kilos
 
-rep_kilos_core.py
-↓
-business_rules_kilos.py
-↓
-core_*
+✅ Productivo
 
-Estado:
+Incluye:
 
-✅ Migrado
+- objetivos
+- compensaciones
+- reemplazos
+- proyecciones
+- titularidad operativa
 
-✅ Validado
+### Cobertura Marca
 
 ✅ Productivo
 
-### MiNegocio
+### Cobertura Innovación
 
-rep_MN_core.py
-↓
-business_rules_mn.py
-↓
-core_*
+✅ Productivo
 
-Estado:
+### Parámetros
 
-✅ Migrado
+✅ Productivo
 
-✅ Validado
+### Vespertina
 
 ✅ Productivo
 
 ---
 
-## Validación MiNegocio
+## 11. Fuente de Verdad Institucional
 
-Resultado final validado:
+Los siguientes conceptos tienen prioridad absoluta:
 
-```text
-TOTAL CARTERA = 5617
+- Día Matinal
+- Problema de Cierre
+- Ausencias
+- Reemplazos
+- Titularidad Operativa
+- Objetivos
+- Universo Operativo
+- Estructura Comercial
 
-```
-
-Validación de titularidad:
-
-```text
-CodVendedor -998 = 0
-
-```
-
-Estado:
-
-✅ Aprobado para producción
-
-Resultado:
-
-✅ Universo comercial consistente
-
-✅ Titularidad preservada
-
-✅ Sin contaminación por vendedor dummy
-
-✅ Exportaciones validadas
+Toda optimización que contradiga alguno de estos conceptos deberá rechazarse.
 
 ---
 
-# 6. Módulos Operativos en Producción
+## 12. Estado Técnico Consolidado
 
-Todos los siguientes módulos se encuentran activos.
-
-## Dashboard Gerencial
-
-Estado:
-PRODUCTIVO
-
-Funciones:
-
-* seguimiento directivo
-* consolidación comercial
-* proyecciones
-
-
-
-## CCC
-
-Estado:
-PRODUCTIVO
-
-Funciones:
-
-* cartera
-* altas
-* reactivaciones
-* batalla NC
-
-
-
-## Mi Negocio
-
-Estado:
-PRODUCTIVO
-
-Funciones:
-
-* adopción digital
-* clasificación digital
-* gap a objetivo
-
-
-
-Arquitectura:
-
-rep_MN_core.py
-↓
-business_rules_mn.py
-↓
-core_*
-
-Estado:
-
-✅ Validado
-
-## Kilos
-
-Estado:
-PRODUCTIVO
-
-Funciones:
-
-* avance kilos
-* objetivos
-* proyección
-* compensaciones
-* reemplazos
-
-
-
-Arquitectura:
-
-rep_kilos_core.py
-↓
-business_rules_kilos.py
-↓
-core_*
-
-Estado:
-
-✅ Validado
-
-## Cobertura Marca
-
-Estado:
-PRODUCTIVO
-
-## Cobertura Innovación
-
-Estado:
-PRODUCTIVO
-
-## Objetivos
-
-Estado:
-PRODUCTIVO
-
-## Parámetros
-
-Estado:
-PRODUCTIVO
-
-## Vespertina
-
-Estado:
-PRODUCTIVO
-
----
-
-# 7. Estado de las Migraciones
-
-## Migraciones completadas
-
-✅ Kilos
-
-✅ MiNegocio
-
-## Migraciones pendientes
-
-⏳ CCC
-
-⏳ Cobertura Marca
-
-⏳ Cobertura Innovación
-
-⏳ Gerencial
-
-⏳ Vespertina
-
----
-
-# 8. Próxima Migración Aprobada
-
-## Módulo
-
-CCC
-
-## Arquitectura objetivo
-
-rep_ccc.py
-↓
-business_rules_ccc.py
-↓
-rep_ccc_core.py
-
-## Objetivo
-
-Replicar el patrón validado exitosamente en:
-
-* Kilos
-* MiNegocio
-
-
-
-preservando la lógica institucional actual y desacoplando completamente la capa de reporte.
-
----
-
-# 9. Roles Activos
-
-## Nivel 1
-
-Administrador
-
-Acceso total.
-
-## Nivel 2
-
-Gerencia
-
-Acceso directivo.
-
-## Nivel 3
-
-Supervisión
-
-Acceso operativo controlado.
-
----
-
-# 10. Stack Tecnológico Vigente
-
-## Backend
-
-* Python
-
-
-
-## Procesamiento
-
-* Pandas
-* NumPy
-* OpenPyXL
-
-
-
-## Interfaz
-
-* Streamlit
-* AgGrid
-
-
-
-## Persistencia
-
-* SQLite WAL
-
-
-
----
-
-# 11. Fuente de Verdad Institucional
-
-Los siguientes conceptos poseen prioridad absoluta sobre cualquier decisión técnica:
-
-* Día Matinal
-* Problema de Cierre
-* Filtro N1
-* Filtro N2
-* Ausencias
-* Reemplazos
-* Objetivos
-* Universo Operativo
-* Coberturas
-* Estructura Comercial
-
-
-
-Si alguna optimización contradice estos principios:
-
-DEBE RECHAZARSE.
-
----
-
-# 12. Estado Técnico Consolidado
-
-## BUSINESS RULES
-
-Estado:
+### STAGING
 
 ✅ Consolidado
 
-## CORE
-
-Estado:
+### CORE
 
 ✅ Consolidado
 
-## STAGING
-
-Estado:
+### BUSINESS RULES
 
 ✅ Consolidado
 
-## Patrón Arquitectónico Validado
+### Patrón Arquitectónico
 
 Reporte
 ↓
@@ -495,59 +426,57 @@ Business Rules
 ↓
 Core
 
-Resultado:
+Estado:
 
-✅ Validado mediante múltiples implementaciones productivas.
-
----
-
-# 13. Historización y Trazabilidad Temporal del Universo
-
-* universo_hist implementado
-* universo_versiones implementado
-* HashSnapshot validado
-* snapshots automáticos validados
-* persistencia SQLite validada
-* validación mediante logs productivos
-* validación mediante consultas SQL
-* universo sigue siendo la fuente vigente para operación y reportes
-* universo_hist y universo_versiones quedan reservadas para auditoría histórica y trazabilidad temporal
+✅ Validado
+✅ Productivo
 
 ---
 
-# 14. Resumen Ejecutivo
+## 13. Historización
 
-Estado general del sistema:
+Implementado:
 
-✅ Producción operativa
+✅ universo_hist
+
+✅ universo_versiones
+
+✅ HashSnapshot
+
+✅ snapshots automáticos
+
+✅ persistencia SQLite validada
+
+---
+
+## 14. Resumen Ejecutivo
+
+Estado General:
+
+✅ Producción Operativa
 
 Arquitectura:
 
 ✅ RAW → SQLITE → STAGING → CORE → BUSINESS RULES → REPORTES
 
-Migraciones validadas:
+Migraciones Validadas:
 
 ✅ Kilos
-
 ✅ MiNegocio
+✅ CCC
 
-Validación MiNegocio:
+Auditoría de Reemplazos:
 
-✅ TOTAL CARTERA = 5617
+✅ vendedor 99 validado
+✅ CodVendedorHistorico validado
+✅ balance validado
+✅ Fuera de Período descartado
+✅ reemplazos auditados con datos reales
 
-✅ CodVendedor -998 = 0
+Investigación Abierta:
 
-Historización de Universo
-✅ universo_hist implementado
-✅ universo_versiones implementado
-✅ HashSnapshot validado
-✅ snapshots automáticos validados
-✅ persistencia SQLite validada
+⏳ reconciliación final entre compensaciones segmentadas y matriz comercial
 
-Próximo objetivo aprobado:
-
-⏳ Migración CCC
-
-Nivel de riesgo actual:
+Nivel de Riesgo:
 
 ✅ Bajo

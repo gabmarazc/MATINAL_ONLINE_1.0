@@ -1,8 +1,11 @@
 # DECISIONES TÉCNICAS - MATINAL
 
-Versión: 3.0  
-Fecha de actualización: 30/09/2026  
-Estado: Vigente  
+Versión: 3.0
+
+Fecha de actualización: 30/09/2026
+
+Estado: Vigente
+
 Estado de validación: Producción Operativa
 
 ---
@@ -83,10 +86,10 @@ WAL (Write Ahead Logging)
 
 ### Objetivos
 
-- Reducir lecturas de Excel.
-- Mejorar rendimiento.
-- Centralizar persistencia.
-- Garantizar consistencia.
+* Reducir lecturas de Excel.
+* Mejorar rendimiento.
+* Centralizar persistencia.
+* Garantizar consistencia.
 
 ---
 
@@ -108,61 +111,61 @@ Cada capa posee responsabilidades exclusivas.
 
 Permitido:
 
-- Lectura SQLite
-- Tipado
-- Normalización
-- Parseo de fechas
-- Contratos de datos
+* Lectura SQLite
+* Tipado
+* Normalización
+* Parseo de fechas
+* Contratos de datos
 
 Prohibido:
 
-- Objetivos
-- CCC
-- MiNegocio
-- Coberturas
-- Pace
-- KPIs
-- Compensaciones
-- Lógica comercial
+* Objetivos
+* CCC
+* MiNegocio
+* Coberturas
+* Pace
+* KPIs
+* Compensaciones
+* Lógica comercial
 
 ### CORE
 
 Permitido:
 
-- Interpretación operativa
-- Calendario
-- Clasificación temporal
-- Titularidad operativa
-- Reemplazos
+* Interpretación operativa
+* Calendario
+* Clasificación temporal
+* Titularidad operativa
+* Reemplazos
 
 Prohibido:
 
-- ETL
-- Parseos heredados
-- Normalización técnica
-- KPIs
-- Reglas comerciales
+* ETL
+* Parseos heredados
+* Normalización técnica
+* KPIs
+* Reglas comerciales
 
 ### BUSINESS RULES
 
 Permitido:
 
-- CCC
-- MiNegocio
-- Coberturas
-- Objetivos
-- Problema de Cierre
-- Reglas comerciales institucionales
+* CCC
+* MiNegocio
+* Coberturas
+* Objetivos
+* Problema de Cierre
+* Reglas comerciales institucionales
 
 ### REPORTES
 
 Permitido:
 
-- KPIs
-- Visualizaciones
-- Proyecciones
-- Exportaciones
-- Dashboards
+* KPIs
+* Visualizaciones
+* Proyecciones
+* Exportaciones
+* Dashboards
 
 ---
 
@@ -184,11 +187,11 @@ La capa STAGING se considera implementada y operativa.
 
 ### Entidades Activas
 
-- obtener_staging_vta()
-- obtener_staging_clientes()
-- obtener_staging_rutas()
-- obtener_staging_ausencias()
-- obtener_staging_maestros()
+* obtener_staging_vta()
+* obtener_staging_clientes()
+* obtener_staging_rutas()
+* obtener_staging_ausencias()
+* obtener_staging_maestros()
 
 ### Resultado
 
@@ -216,12 +219,12 @@ Toda transformación técnica debe residir en STAGING.
 
 ### Incluye
 
-- Parseo de fechas.
-- Tipado.
-- Normalización.
-- Detección de columnas.
-- Conversión de tipos.
-- Contratos técnicos.
+* Parseo de fechas.
+* Tipado.
+* Normalización.
+* Detección de columnas.
+* Conversión de tipos.
+* Contratos técnicos.
 
 ### Objetivo
 
@@ -247,31 +250,31 @@ Las entidades STAGING deben entregar contratos explícitos y estables.
 
 Contrato mínimo:
 
-- FechaCarga_dt
-- FechaEntrega_dt
-- CodVendedor
-- Cliente
-- PesoKg
-- CantBase
-- ImporteNetoItem
-- Marca
+* FechaCarga_dt
+* FechaEntrega_dt
+* CodVendedor
+* Cliente
+* PesoKg
+* CantBase
+* ImporteNetoItem
+* Marca
 
 ### STAGING_CLIENTES
 
 Contrato mínimo:
 
-- Cliente
-- Taxonomia
-- NombreCliente
-- CodVendedor
+* Cliente
+* Taxonomia
+* NombreCliente
+* CodVendedor
 
 ### STAGING_AUSENCIAS
 
 Contrato mínimo:
 
-- Fecha_dt
-- CodVend_clean
-- Reemplazo_clean
+* Fecha_dt
+* CodVend_clean
+* Reemplazo_clean
 
 ---
 
@@ -293,10 +296,10 @@ La capa CORE se encuentra implementada y operativa.
 
 ### Componentes Activos
 
-- obtener_core_operacion()
-- obtener_core_clientes()
-- obtener_core_vendedores()
-- obtener_core_ventas_base()
+* obtener_core_operacion()
+* obtener_core_clientes()
+* obtener_core_vendedores()
+* obtener_core_ventas_base()
 
 ### Resultado
 
@@ -324,21 +327,22 @@ CORE is responsable de interpretar entidades provenientes de STAGING.
 
 ### Responsabilidades
 
-- Titularidad operativa.
-- Vendedor operativo.
-- Ausencias.
-- Reemplazos.
-- Calendario.
-- Clasificación temporal.
+* Construcción de cartera operativa por vendedor.
+* Titularidad operativa.
+* Vendedor operativo.
+* Ausencias.
+* Reemplazos.
+* Calendario.
+* Clasificación temporal.
 
 ### Exclusiones
 
-- Objetivos.
-- CCC.
-- MiNegocio.
-- Coberturas.
-- KPIs.
-- Compensaciones.
+* Objetivos.
+* CCC.
+* MiNegocio.
+* Coberturas.
+* KPIs.
+* Compensaciones.
 
 ---
 
@@ -356,10 +360,10 @@ Vigente ✅
 
 Toda transacción debe clasificarse en:
 
-- Arrastre
-- Actual
-- Futuro
-- Fuera de Período
+* Arrastre
+* Actual
+* Futuro
+* Fuera de Período
 
 ### Implementación
 
@@ -391,6 +395,48 @@ CodVendedorOperativo
 
 ---
 
+## DT.24: Modelo Vigente de Construcción de Cartera Operativa
+
+### Fecha
+
+04/10/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+Se establece formalmente el modelo institucional de construcción de cartera operativa bajo los siguientes principios institucionales:
+
+* UNIVERSO = universo elegible
+* VTA = evidencia transaccional válida
+* CORE_OPERACION = constructor oficial de cartera operativa
+* BUSINESS RULES = consumidores de cartera operativa
+* REPORTES = consumidores finales
+
+### Flujo Institucional
+
+VTA
++
+UNIVERSO
+↓
+CORE_OPERACION
+↓
+Cartera Operativa por Vendedor
+↓
+Business Rules
+↓
+Reportes
+
+### Objetivo
+
+* Eliminar dependencia directa de reportes respecto de asignaciones estáticas de cartera.
+* Formalizar una única fuente operativa reutilizable.
+* Preservar consistencia entre CCC, MiNegocio, Kilos y futuras migraciones.
+
+---
+
 # D. DECISIONES SOBRE AUSENCIAS
 
 ## DT.30: Implementación de STAGING_AUSENCIAS
@@ -413,9 +459,9 @@ como punto oficial de entrada para ausencias.
 
 ### Contrato Oficial
 
-- Fecha_dt
-- CodVend_clean
-- Reemplazo_clean
+* Fecha_dt
+* CodVend_clean
+* Reemplazo_clean
 
 ---
 
@@ -439,9 +485,9 @@ obtener_staging_ausencias()
 
 ### Resultado
 
-- Menor acoplamiento.
-- Contratos explícitos.
-- Mayor mantenibilidad.
+* Menor acoplamiento.
+* Contratos explícitos.
+* Mayor mantenibilidad.
 
 ---
 
@@ -513,9 +559,9 @@ objetivos_vendedores
 
 ### Contrato
 
-- CodVendedor
-- SEGMENTO
-- Obj_Sugerido_Kg
+* CodVendedor
+* SEGMENTO
+* Obj_Sugerido_Kg
 
 ---
 
@@ -691,8 +737,8 @@ Vigente ✅
 
 Una vez completadas las migraciones de:
 
-- Kilos
-- MiNegocio
+* Kilos
+* MiNegocio
 
 la siguiente prioridad institucional pasa a ser:
 
@@ -745,9 +791,9 @@ Vigente ✅
 
 No combinar simultáneamente:
 
-- Creación de STAGING.
-- Cambio de orquestación.
-- Eliminación de lógica heredada.
+* Creación de STAGING.
+* Cambio de orquestación.
+* Eliminación de lógica heredada.
 
 ### Motivo
 
@@ -795,14 +841,14 @@ Vigente ✅
 
 ### Documentos
 
-- ARQUITECTURA.md
-- ESTADO_ACTUAL.md
-- DECISIONES_TECNICAS.md
-- ROADMAP.md
-- DICCIONARIO_TABLAS.md
-- GLOSARIO_REGLAS.md
-- CORE_OPERACION_V1.md
-- CORE_VENTAS_BASE_V1.md
+* ARQUITECTURA.md
+* ESTADO_ACTUAL.md
+* DECISIONES_TECNICAS.md
+* ROADMAP.md
+* DICCIONARIO_TABLAS.md
+* GLOSARIO_REGLAS.md
+* CORE_OPERACION_V1.md
+* CORE_VENTAS_BASE_V1.md
 
 ---
 
@@ -859,14 +905,18 @@ El detonante funcional fue el análisis del caso ID2, donde se observó que un c
 
 Se incorporan las siguientes entidades persistidas:
 
-- universo_hist
-- universo_versiones
+* universo_hist
+* universo_versiones
 
 #### universo
 
-Continúa siendo la fuente oficial vigente de cartera.
+Fuente oficial vigente de universo elegible.
 
 Contiene exclusivamente la versión actual del Universo.
+
+#### CORE_OPERACION
+
+Fuente oficial de cartera operativa.
 
 #### universo_hist
 
@@ -874,10 +924,10 @@ Almacena snapshots históricos completos.
 
 Cada registro conserva:
 
-- información original del cliente
-- FechaSnapshot
-- FechaCargaSistema
-- HashSnapshot
+* información original del cliente
+* FechaSnapshot
+* FechaCargaSistema
+* HashSnapshot
 
 Modelo:
 
@@ -889,11 +939,11 @@ Almacena catálogo de versiones.
 
 Cada registro conserva:
 
-- VersionID
-- FechaSnapshot
-- FechaCargaSistema
-- HashSnapshot
-- CantClientes
+* VersionID
+* FechaSnapshot
+* FechaCargaSistema
+* HashSnapshot
+* CantClientes
 
 Modelo:
 
@@ -903,22 +953,22 @@ Una fila por snapshot.
 
 Si el hash del Universo difiere del último snapshot registrado:
 
-- generar snapshot histórico
-- registrar versión
+* generar snapshot histórico
+* registrar versión
 
 Si el hash coincide:
 
-- no generar snapshot
-- no registrar versión
+* no generar snapshot
+* no registrar versión
 
 ### Compatibilidad
 
 La incorporación de la historización no modifica el comportamiento de:
 
-- STAGING
-- CORE
-- BUSINESS RULES
-- REPORTES
+* STAGING
+* CORE
+* BUSINESS RULES
+* REPORTES
 
 Los componentes productivos continúan consumiendo:
 
@@ -930,12 +980,12 @@ como fuente vigente.
 
 Esta decisión habilita capacidades futuras de:
 
-- auditoría histórica
-- reconstrucción de cartera
-- análisis de transferencias
-- versionado de maestros
-- trazabilidad temporal
-- apropiación histórica de clientes
+* auditoría histórica
+* reconstrucción de cartera
+* análisis de transferencias
+* versionado de maestros
+* trazabilidad temporal
+* apropiación histórica de clientes
 
 ### Principio Institucional Derivado
 
@@ -981,10 +1031,6 @@ Estado actual:
 
 ✅ MiNegocio migrado
 
-Próxima migración:
-
-⏳ CCC
-
 Patrón institucional vigente:
 
 Reporte
@@ -992,3 +1038,141 @@ Reporte
 Business Rules
 ↓
 Core
+
+### DT.73: Preservación de Titularidad Histórica para Compensaciones
+
+#### Fecha
+
+04/10/2026
+
+#### Estado
+
+Vigente ✅
+
+#### Decisión
+
+Las compensaciones por reemplazo deberán determinarse utilizando la titularidad histórica de la operación cuando dicha información exista.
+
+#### Implementación
+
+Columna:
+
+CodVendedorHistorico
+
+#### Contexto
+
+Durante la auditoría forense de compensaciones realizada sobre el módulo de Kilos se detectó la necesidad de preservar explícitamente la titularidad original de las operaciones antes de cualquier transformación posterior asociada a:
+
+* CodVendedorVigente
+* CodVendedorOperativo
+* vendedor comodín 99
+
+#### Regla
+
+Si existe:
+
+CodVendedorHistorico
+
+las comparaciones de reemplazo deberán realizarse contra dicha columna.
+
+En ausencia de dicha columna podrá utilizarse:
+
+CodVendedor
+
+como mecanismo de compatibilidad.
+
+#### Objetivo
+
+Evitar pérdida de trazabilidad de titularidad comercial.
+
+Preservar consistencia en compensaciones históricas.
+
+Garantizar balance institucional de reemplazos.
+
+#### Resultado Validado
+
+✅ Compatible con vendedor 99.
+
+✅ Compatible con reasignaciones operativas.
+
+✅ Compatible con CodVendedorVigente.
+
+✅ Balance de compensaciones validado mediante auditoría.
+
+#### Restricción
+
+La existencia de:
+
+CodVendedorVigente
+
+no reemplaza la necesidad de conservar:
+
+CodVendedorHistorico
+
+para fines de auditoría y compensaciones.
+
+### DT.74: Exclusión de Fuera de Período en Compensaciones
+
+#### Fecha
+
+04/10/2026
+
+#### Estado
+
+Vigente ✅
+
+#### Decisión
+
+Las compensaciones por reemplazo sólo podrán considerar operaciones clasificadas como:
+
+* Arrastre
+* Actual
+
+#### Exclusiones
+
+No participan:
+
+* Futuro
+* Fuera de Período
+
+#### Implementación
+
+calcular_compensaciones_reemplazos()
+
+#### Justificación
+
+Se validó mediante auditoría forense que las compensaciones deben reflejar exclusivamente volumen operativo vigente.
+
+La incorporación de operaciones clasificadas como Fuera de Período alteraría la interpretación comercial del avance mensual.
+
+#### Resultado Validado
+
+✅ Fuera de Período excluido.
+
+✅ Balance de compensaciones consistente.
+
+✅ Resultado compatible con la matriz comercial institucional.
+
+### DT.75: Oficialización del Vendedor Comodín de Reemplazos
+
+#### Fecha
+
+04/10/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+El identificador institucional aprobado para operaciones de reemplazo es:
+
+CodVendedor = 99
+
+Nombre:
+
+REEMPLAZO
+
+### Contexto
+
+La auditoría forense de reemplazos confirmó la utilización operativa del vendedor 99 como entidad institucional de consolidación de reemplazos

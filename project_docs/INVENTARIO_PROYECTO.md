@@ -1,8 +1,11 @@
 # INVENTARIO DEL PROYECTO MATINAL
 
-Versión: 3.0  
-Fecha de actualización: 30/09/2026  
-Estado: Vigente  
+Versión: 3.0
+
+Fecha de actualización: 30/09/2026
+
+Estado: Vigente
+
 Estado de validación: Producción Operativa
 
 ---
@@ -25,11 +28,16 @@ REPORTES
 
 ## Estado actual
 
-RAW               ✅  
-SQLITE            ✅  
-STAGING           ✅  
-CORE              ✅  
-BUSINESS RULES    ✅  
+RAW               ✅
+
+SQLITE            ✅
+
+STAGING           ✅
+
+CORE              ✅
+
+BUSINESS RULES    ✅
+
 REPORTES          ✅
 
 ---
@@ -50,8 +58,10 @@ core_*
 
 Estado:
 
-✅ Validado  
-✅ Productivo  
+✅ Validado
+
+✅ Productivo
+
 ✅ Patrón institucional aprobado
 
 ---
@@ -68,15 +78,35 @@ core_*
 
 Estado:
 
-✅ Validado  
-✅ Productivo  
+✅ Validado
+
+✅ Productivo
+
 ✅ Segundo patrón institucional aprobado
 
 ---
 
-## Migraciones pendientes
+### CCC
 
-⏳ CCC
+Arquitectura:
+
+rep_ccc_core.py
+↓
+business_rules_ccc.py
+↓
+core_*
+
+Estado:
+
+✅ Validado
+
+✅ Productivo
+
+✅ Tercer patrón institucional aprobado
+
+---
+
+## Migraciones pendientes
 
 ⏳ Cobertura Marca
 
@@ -88,34 +118,20 @@ Estado:
 
 ---
 
-## Próxima migración aprobada
-
-CCC
-
-Arquitectura objetivo:
-
-rep_ccc.py
-↓
-business_rules_ccc.py
-↓
-rep_ccc_core.py
-
----
-
 # ARCHIVOS RAÍZ
 
-- .gitignore
-- app.py
-- app copy.py
-- config.py
-- contexto.py
-- data_loader.py
-- generar_objetivos_manuales.py
-- iniciar_sistema.bat
-- requirements.txt
-- runtime.txt
-- st_aggrid.py
-- todo_el_proyecto.txt
+* .gitignore
+* app.py
+* app copy.py
+* config.py
+* contexto.py
+* data_loader.py
+* generar_objetivos_manuales.py
+* iniciar_sistema.bat
+* requirements.txt
+* runtime.txt
+* st_aggrid.py
+* todo_el_proyecto.txt
 
 ---
 
@@ -123,16 +139,16 @@ rep_ccc_core.py
 
 ## Persistencia
 
-- modules/database.py
-- modules/logger.py
+* modules/database.py
+* modules/logger.py
 
 ## Configuración
 
-- modules/parametros.py
+* modules/parametros.py
 
 ## Utilidades
 
-- modules/utils.py
+* modules/utils.py
 
 ---
 
@@ -140,14 +156,17 @@ rep_ccc_core.py
 
 ## STAGING
 
-- modules/staging.py
+* modules/staging.py
 
 ## CORE
 
-- modules/core/core_clientes.py
-- modules/core/core_operaciones.py
-- modules/core/core_vendedores.py
-- modules/core/core_ventas_base.py
+* modules/core/core_clientes.py
+* modules/core/core_operaciones.py
+* modules/core/core_vendedores.py
+* modules/core/core_ventas_base.py
+* modules/core/core_potencial_cliente.py
+* modules/core/core_potencial_cliente_segmento.py
+* modules/core/core_validacion_periodo.py
 
 ---
 
@@ -155,13 +174,13 @@ rep_ccc_core.py
 
 ## Implementadas y productivas
 
-- modules/business_rules/business_rules_repository.py
-- modules/business_rules/business_rules_kilos.py
-- modules/business_rules/business_rules_mn.py
-
-## Planificadas
-
-- modules/business_rules/business_rules_ccc.py
+* modules/business_rules/business_rules_repository.py
+* modules/business_rules/business_rules_kilos.py
+* modules/business_rules/business_rules_mn.py
+* modules/business_rules/business_rules_ccc.py
+* modules/business_rules/business_rules_objetivo_clientes.py
+* modules/business_rules/business_rules_objetivo_segmentos.py
+* modules/business_rules/business_rules_objetivo_carteras.py
 
 ---
 
@@ -169,24 +188,22 @@ rep_ccc_core.py
 
 ## Históricos
 
-- modules/rep_kilos.py
-- modules/rep_MN.py
-- modules/rep_ccc.py
-- modules/rep_cob_marca.py
-- modules/rep_cob_innovacion.py
-- modules/rep_gerencial.py
-- modules/rep_vespertina.py
-- modules/rep_tp.py
-- modules/rep_obj_kilos.py
+* modules/rep_kilos.py
+* modules/rep_MN.py
+* modules/rep_ccc.py
+* modules/rep_cob_marca.py
+* modules/rep_cob_innovacion.py
+* modules/rep_gerencial.py
+* modules/rep_vespertina.py
+* modules/rep_tp.py
+* modules/rep_obj_kilos.py
 
 ## Desacoplados y productivos
 
-- modules/rep_kilos_core.py
-- modules/rep_MN_core.py
-
-## Próximo reporte a migrar
-
-- modules/rep_ccc_core.py
+* modules/rep_kilos_core.py
+* modules/rep_MN_core.py
+* modules/rep_ccc_core.py
+* modules/rep_obj_kilos_core.py
 
 ---
 
@@ -224,7 +241,7 @@ Reporte
 ↓
 Reporte
 
-y reemplazar por:
+y reemplazarlas por:
 
 Reporte
 ↓
@@ -290,35 +307,35 @@ Acceso directo desde Reportes a Excel
 
 ## Documentos rectores
 
-- ARQUITECTURA.md
-- ESTADO_ACTUAL.md
-- DECISIONES_TECNICAS.md
-- ROADMAP.md
+* ARQUITECTURA.md
+* ESTADO_ACTUAL.md
+* DECISIONES_TECNICAS.md
+* ROADMAP.md
 
 ## Documentos funcionales
 
-- DICCIONARIO_TABLAS.md
-- GLOSARIO_REGLAS.md
-- CORE_OPERACION_V1.md
-- CORE_VENTAS_BASE_V1.md
+* DICCIONARIO_TABLAS.md
+* GLOSARIO_REGLAS.md
+* CORE_OPERACION_V1.md
+* CORE_VENTAS_BASE_V1.md
 
 ## Documentos de contexto
 
-- CONTEXTO_GLOBAL.md
-- CONTEXTO_IA.md
-- GOBIERNO_IA.md
+* CONTEXTO_GLOBAL.md
+* CONTEXTO_IA.md
+* GOBIERNO_IA.md
 
 ## Documentos históricos
 
-- BITACORA.md
+* BITACORA.md
 
 ## Inventario
 
-- INVENTARIO_PROYECTO.md
+* INVENTARIO_PROYECTO.md
 
 ## Referencia de código
 
-- CODIGO_CONSOLIDADO.md
+* CODIGO_CONSOLIDADO.md
 
 ---
 
@@ -334,8 +351,11 @@ Arquitectura:
 
 Migraciones completadas:
 
-✅ Kilos  
+✅ Kilos
+
 ✅ MiNegocio
+
+✅ CCC
 
 Business Rules:
 
@@ -343,25 +363,27 @@ Business Rules:
 
 Implementaciones productivas:
 
-✅ business_rules_kilos.py  
+✅ business_rules_kilos.py
+
 ✅ business_rules_mn.py
+
+✅ business_rules_ccc.py
+
+✅ business_rules_objetivo_clientes.py
+
+✅ business_rules_objetivo_segmentos.py
+
+✅ business_rules_objetivo_carteras.py
 
 Reportes desacoplados:
 
-✅ rep_kilos_core.py  
+✅ rep_kilos_core.py
+
 ✅ rep_MN_core.py
 
-Próximo objetivo institucional:
+✅ rep_ccc_core.py
 
-⏳ CCC
-
-Arquitectura objetivo:
-
-rep_ccc.py
-↓
-business_rules_ccc.py
-↓
-rep_ccc_core.py
+✅ rep_obj_kilos_core.py
 
 Objetivo estratégico final:
 

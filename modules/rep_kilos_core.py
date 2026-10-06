@@ -7,7 +7,7 @@ import numpy as np
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules.utils import tarjeta_metrica_html
 
-# REGLA FUNDAMENTAL: Consumo exclusivo de BUSINESS_RULES (Cero acceso a DB, SQLite, RAW o STAGING)[cite: 16]
+# REGLA FUNDAMENTAL: Consumo exclusivo de BUSINESS_RULES (Cero acceso a DB, SQLite, RAW o STAGING)
 from modules.business_rules.business_rules_kilos import obtener_matriz_kilos_comercial
 
 
@@ -25,7 +25,7 @@ def render_fragmento_interactivo_kilos_core(
     """
     # SEPARACIÓN EXPLÍCITA: Matriz Técnica (matriz_comercial) vs Vista Comercial (matriz_comercial_comercial)
     matriz_comercial_comercial = matriz_comercial[
-        matriz_comercial["CodVendedor"].ne(-998)
+        matriz_comercial["CodVendedor"].ne(99)
     ].copy()
 
     # Extracción de dimensiones únicas para filtros de UI (sobre Vista Comercial)
@@ -74,7 +74,7 @@ def render_fragmento_interactivo_kilos_core(
     if not s_selec:
         s_selec = segmentos_disponibles
 
-    # Filtrado interactivo exclusivo sobre la Vista Comercial (-998 excluido de pantalla y KPIs)
+    # Filtrado interactivo exclusivo sobre la Vista Comercial (99 excluido de pantalla y KPIs)
     rep_filtrado = matriz_comercial_comercial[
         matriz_comercial_comercial["Nombre"].astype(str).str.strip().isin(v_selec)
         & matriz_comercial_comercial["SEGMENTO"].astype(str).str.strip().isin(s_selec)
@@ -145,6 +145,7 @@ def render_fragmento_interactivo_kilos_core(
     # MÉTRICAS OBLIGATORIAS CALCULADAS EXCLUSIVAMENTE DESDE LA VISTA COMERCIAL
     total_arrastre = float(rep_filtrado["Arrastre"].sum())
     total_actual = float(rep_filtrado["Actual"].sum())
+    total_ajuste_reemp = float(rep_filtrado["Ajuste_Por_Reemp"].sum())
     total_neto_operativo = float(rep_filtrado["OPERATIVO"].sum())
     total_objetivo_mes = float(rep_filtrado["Objetivo Mes Corriente"].sum())
     pct_avance = (
@@ -164,13 +165,18 @@ def render_fragmento_interactivo_kilos_core(
         else 0.0
     )
 
-    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+    mcol1, mcol2, mcol3, mcol4, mcol5 = st.columns(5)
     with mcol1:
         st.markdown(
             tarjeta_metrica_html(
                 "📦 Arrastre", f"{total_arrastre:,.1f} kg", "#3b82f6", "39px", "21px"
             ),
             unsafe_allow_html=True,
+        )
+        st.caption(
+            "Kilos de arrastre pertenecientes a las carteras vigentes.\n"
+            "Corresponde a ventas cargadas el mes anterior y entregadas en el mes actual.\n"
+            "No incluye compensaciones por reemplazos."
         )
     with mcol2:
         st.markdown(
@@ -179,7 +185,28 @@ def render_fragmento_interactivo_kilos_core(
             ),
             unsafe_allow_html=True,
         )
+        st.caption(
+            "Kilos del período actual pertenecientes a las carteras vigentes.\n"
+            "Corresponde a ventas cargadas y entregadas en el mes actual.\n"
+            "No incluye compensaciones por reemplazos."
+        )
     with mcol3:
+        st.markdown(
+            tarjeta_metrica_html(
+                "🔄 Reemp/AUS",
+                f"{total_ajuste_reemp:,.1f} kg",
+                "#eab308",
+                "39px",
+                "21px",
+            ),
+            unsafe_allow_html=True,
+        )
+        st.caption(
+            "Kilos transferidos por ausencias, reemplazos y reasignaciones operativas.\n"
+            "Valores negativos indican kilos descontados de vendedores reales.\n"
+            "Valores positivos indican kilos recibidos por reemplazos."
+        )
+    with mcol4:
         st.markdown(
             tarjeta_metrica_html(
                 "📊 Neto Operativo",
@@ -190,13 +217,18 @@ def render_fragmento_interactivo_kilos_core(
             ),
             unsafe_allow_html=True,
         )
-    with mcol4:
+        st.caption(
+            "Kilos comercialmente atribuibles a vendedores reales luego de aplicar compensaciones por ausencias, reemplazos y titularidad vigente de cartera.\n"
+            "Los kilos asignados al vendedor técnico 99 no forman parte de este indicador."
+        )
+    with mcol5:
         st.markdown(
             tarjeta_metrica_html(
                 "📈 % Avance", f"{pct_avance:,.2f}%", "#3b82f6", "39px", "21px"
             ),
             unsafe_allow_html=True,
         )
+        st.caption("Porcentaje del objetivo alcanzado utilizando el NETO OPERATIVO.")
 
     tcol1, tcol2, tcol3 = st.columns(3)
     with tcol1:
@@ -210,6 +242,7 @@ def render_fragmento_interactivo_kilos_core(
             ),
             unsafe_allow_html=True,
         )
+        st.caption("Objetivo comercial asignado a las carteras vigentes seleccionadas.")
     with tcol2:
         st.markdown(
             tarjeta_metrica_html(
@@ -221,6 +254,9 @@ def render_fragmento_interactivo_kilos_core(
             ),
             unsafe_allow_html=True,
         )
+        st.caption(
+            "Proyección de cierre del mes calculada a partir del ritmo actual de ventas y los días restantes."
+        )
     with tcol3:
         st.markdown(
             tarjeta_metrica_html(
@@ -231,6 +267,9 @@ def render_fragmento_interactivo_kilos_core(
                 "21px",
             ),
             unsafe_allow_html=True,
+        )
+        st.caption(
+            "Porcentaje de cumplimiento estimado al cierre del mes manteniendo el ritmo actual."
         )
 
     st.divider()

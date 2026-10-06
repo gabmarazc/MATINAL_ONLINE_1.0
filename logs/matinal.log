@@ -472,3 +472,38 @@ pandas.errors.DatabaseError: Execution failed on sql 'SELECT Codigo, SegmentoCli
 2026-10-04 10:42:12 | INFO     | matinal.database | UNIVERSO_VERSIONES: versión registrada correctamente
 2026-10-04 10:42:12 | WARNING  | matinal.database | CARGANDO TABLA: vta
 2026-10-04 10:45:42 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-05 12:03:19 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-05 12:03:43 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-05 12:12:12 | WARNING  | matinal.database | CARGANDO TABLA: altas
+2026-10-05 12:12:12 | WARNING  | matinal.database | CARGANDO TABLA: rutas
+2026-10-05 12:12:18 | WARNING  | matinal.database | CARGANDO TABLA: tp
+2026-10-05 12:12:18 | WARNING  | matinal.database | DETECTADA CARGA ESPECIAL TP: tp
+2026-10-05 12:12:19 | WARNING  | matinal.database | CARGANDO TABLA: universo
+2026-10-05 12:12:19 | INFO     | matinal.database | Nuevo snapshot histórico del universo guardado en 'universo_hist' (detectados cambios en el contenido).
+2026-10-05 12:12:19 | INFO     | matinal.database | UNIVERSO_VERSIONES: versión registrada correctamente
+2026-10-05 12:12:19 | WARNING  | matinal.database | CARGANDO TABLA: vta
+2026-10-05 12:15:55 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-05 12:54:31 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-05 14:21:45 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-05 14:35:23 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-05 16:19:31 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-05 16:45:34 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-05 16:54:39 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-05 16:54:59 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-05 17:05:08 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-06 12:11:37 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-06 12:11:58 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-06 12:18:23 | WARNING  | matinal.database | CARGANDO TABLA: altas
+2026-10-06 12:18:23 | WARNING  | matinal.database | CARGANDO TABLA: rutas
+2026-10-06 12:18:29 | WARNING  | matinal.database | CARGANDO TABLA: tp
+2026-10-06 12:18:29 | WARNING  | matinal.database | DETECTADA CARGA ESPECIAL TP: tp
+2026-10-06 12:18:30 | WARNING  | matinal.database | CARGANDO TABLA: universo
+2026-10-06 12:18:31 | INFO     | matinal.database | Nuevo snapshot histórico del universo guardado en 'universo_hist' (detectados cambios en el contenido).
+2026-10-06 12:18:31 | INFO     | matinal.database | UNIVERSO_VERSIONES: versión registrada correctamente
+2026-10-06 12:18:31 | WARNING  | matinal.database | CARGANDO TABLA: vta
+2026-10-06 12:20:35 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-06 12:34:44 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-06 12:37:08 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-06 12:39:22 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-06 13:02:06 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-06 13:52:53 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===

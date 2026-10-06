@@ -132,7 +132,7 @@ def _filtrar_ventas_mn_comercial(
 
     df["CodVendedor_Efectivo"] = np.select(
         [is_special, valid_op_mask, valid_tit_mask],
-        [-998, cod_op.fillna(-999).astype(int), cod_tit.fillna(-999).astype(int)],
+        [99, cod_op.fillna(-999).astype(int), cod_tit.fillna(-999).astype(int)],
         default=cod_tit.fillna(-999).astype(int),
     )
     df["CodVendedor_Efectivo"] = (

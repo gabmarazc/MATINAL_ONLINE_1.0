@@ -206,18 +206,29 @@ def calcular_compensaciones_reemplazos(df_vta_operativa: pd.DataFrame) -> pd.Dat
                 f"Falta la columna obligatoria '{col_req}' para calcular las compensaciones por reemplazo."
             )
 
+    col_det = (
+        "CodVendedorHistorico"
+        if "CodVendedorHistorico" in df.columns
+        else "CodVendedor"
+    )
+    col_imp = (
+        "CodVendedorVigente" if "CodVendedorVigente" in df.columns else "CodVendedor"
+    )
+
     df["CodVendedor"] = pd.to_numeric(df["CodVendedor"], errors="coerce").astype(
         "Int64"
     )
+    df[col_det] = pd.to_numeric(df[col_det], errors="coerce").astype("Int64")
+    df[col_imp] = pd.to_numeric(df[col_imp], errors="coerce").astype("Int64")
     df["CodVendedorOperativo"] = pd.to_numeric(
         df["CodVendedorOperativo"], errors="coerce"
     ).astype("Int64")
     df["SEGMENTO"] = df["SEGMENTO"].fillna("").astype(str).str.strip()
     df["PesoKg"] = pd.to_numeric(df["PesoKg"], errors="coerce").fillna(0.0)
 
-    # Identificación de transacciones con divergencia entre titular y operador
+    # Identificación de transacciones con divergencia entre titular histórico y operador
     reemplazos = df[
-        df["CodVendedorOperativo"].ne(df["CodVendedor"])
+        df["CodVendedorOperativo"].ne(df[col_det])
         & df["Periodo"].isin(["Arrastre", "Actual"])
     ].copy()
 
@@ -235,9 +246,9 @@ def calcular_compensaciones_reemplazos(df_vta_operativa: pd.DataFrame) -> pd.Dat
             ]
         )
 
-    # Descuento al titular (salida de kilos)
-    mov_titular = reemplazos[["CodVendedor", "SEGMENTO", "Periodo", "PesoKg"]].rename(
-        columns={"CodVendedor": "CodVend"}
+    # Descuento al titular vigente (salida de kilos)
+    mov_titular = reemplazos[[col_imp, "SEGMENTO", "Periodo", "PesoKg"]].rename(
+        columns={col_imp: "CodVend"}
     )
     mov_titular["Ajuste_Valor"] = -mov_titular.pop("PesoKg")
 
@@ -582,6 +593,33 @@ def obtener_matriz_kilos_comercial(
     # Asegurar segmentación comercial sobre los datos operativos
     df_vta_op = _asegurar_segmento_comercial(df_vta_op)
 
+    # Creación de CodVendedorHistorico antes de cualquier mutación a vigente
+    if "CodVendedor" in df_vta_op.columns:
+        df_vta_op["CodVendedorHistorico"] = pd.to_numeric(
+            df_vta_op["CodVendedor"], errors="coerce"
+        ).astype("Int64")
+
+    # Alineación de titularidad comercial con CodVendedorVigente (preservando comodines 99 / 99)
+    codigos_validos = set(padron_vend["CodVendedor"].dropna().tolist())
+    if "CodVendedorVigente" in df_vta_op.columns:
+        cod_vig = pd.to_numeric(df_vta_op["CodVendedorVigente"], errors="coerce")
+        cod_tit_orig = pd.to_numeric(df_vta_op["CodVendedor"], errors="coerce")
+        cod_op = pd.to_numeric(df_vta_op.get("CodVendedorOperativo"), errors="coerce")
+        reemp = df_vta_op.get("Reemplazo", pd.Series(pd.NA, index=df_vta_op.index))
+
+        is_special = ((reemp == 99) | (cod_op == 99) | (cod_tit_orig == 99)).fillna(
+            False
+        )
+
+        df_vta_op["CodVendedor"] = np.select(
+            [is_special, cod_vig.isin(codigos_validos).fillna(False)],
+            [99, cod_vig.fillna(-999).astype(int)],
+            default=cod_tit_orig.fillna(-999).astype(int),
+        )
+        df_vta_op["CodVendedor"] = (
+            pd.Series(df_vta_op["CodVendedor"]).replace(-999, pd.NA).astype("Int64")
+        )
+
     # Filtrado por período comercial operativo (Arrastre y Actual)
     df_periodo = df_vta_op[
         df_vta_op["Periodo"].isin(["Arrastre", "Actual"])
@@ -593,8 +631,7 @@ def obtener_matriz_kilos_comercial(
         )
         return pd.DataFrame()
 
-    # Mapeo de titularidad operativa con soporte para comodines especiales (-998)
-    codigos_validos = set(padron_vend["CodVendedor"].dropna().tolist())
+    # Mapeo de titularidad operativa con soporte para comodines especiales (99)
     cod_op = df_periodo["CodVendedorOperativo"]
     cod_tit = df_periodo["CodVendedor"]
     reemp = df_periodo.get("Reemplazo", pd.Series(pd.NA, index=df_periodo.index))
@@ -605,7 +642,7 @@ def obtener_matriz_kilos_comercial(
 
     df_periodo["CodVend_Op"] = np.select(
         [is_special, valid_op_mask, valid_tit_mask],
-        [-998, cod_op.fillna(-999).astype(int), cod_tit.fillna(-999).astype(int)],
+        [99, cod_op.fillna(-999).astype(int), cod_tit.fillna(-999).astype(int)],
         default=cod_tit.fillna(-999).astype(int),
     )
     df_periodo["CodVend_Op"] = (
@@ -613,15 +650,14 @@ def obtener_matriz_kilos_comercial(
     )
     df_periodo["SEGMENTO"] = df_periodo["SEGMENTO"].astype(str).str.strip()
 
-    # Agregación volumétrica por operador y segmento
+    # Agregación volumétrica por vendedor vigente y segmento
     kilos_agrup = (
-        df_periodo.groupby(["CodVend_Op", "SEGMENTO", "Periodo"], dropna=False)[
+        df_periodo.groupby(["CodVendedor", "SEGMENTO", "Periodo"], dropna=False)[
             "PesoKg"
         ]
         .sum()
         .reset_index()
     )
-    kilos_agrup = kilos_agrup.rename(columns={"CodVend_Op": "CodVendedor"})
 
     kilos_pivot = kilos_agrup.pivot_table(
         index=["CodVendedor", "SEGMENTO"],
@@ -651,7 +687,7 @@ def obtener_matriz_kilos_comercial(
 
     df_comodin = pd.DataFrame(
         {
-            "CodVendedor": pd.Series([-998], dtype="Int64"),
+            "CodVendedor": pd.Series([99], dtype="Int64"),
             "Nombre": ["REEMPLAZO"],
             "SUP": ["GENERAL"],
         }
@@ -686,7 +722,7 @@ def obtener_matriz_kilos_comercial(
     else:
         matriz_comercial["Objetivo Mes Corriente"] = 0.0
 
-    # Integración de Compensaciones por Reemplazo
+    # Integración de Compensaciones por Reemplazo (consumiendo df_vta_op unificado a vigente)
     df_compensaciones = calcular_compensaciones_reemplazos(df_vta_op)
     if not df_compensaciones.empty:
         matriz_comercial = matriz_comercial.merge(
@@ -720,7 +756,7 @@ def obtener_matriz_kilos_comercial(
     # Incorporación de Métricas Analíticas de Proyección y Tendencia (Incluyendo variantes TODO y AJUSTADO)
     matriz_comercial = _calcular_proyecciones_y_tendencias(matriz_comercial)
 
-    # Incorporación de Ventas Temporales de Soporte (Última y Penúltima semana)
+    # Incorporación de Ventas Temporales de Soporte utilizando df_vta_op directamente
     matriz_comercial = _incorporar_ventas_temporales_soporte(
         matriz_comercial, df_vta_op, dia_matinal
     )

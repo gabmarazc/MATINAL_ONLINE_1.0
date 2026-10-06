@@ -1,13 +1,20 @@
 # ROADMAP - MATINAL
 
-Versión: 3.0  
-Fecha de actualización: 02/10/2026  
-Estado: Vigente  
+
+
+Versión: 3.0
+
+Fecha de actualización: 02/10/2026
+
+Estado: Vigente
+
 Estado de validación: Producción Operativa
 
 ---
 
 # Objetivo Estratégico
+
+
 
 Consolidar la arquitectura institucional:
 
@@ -28,6 +35,8 @@ mediante migraciones incrementales, controladas y validadas en producción.
 ---
 
 # Estado Arquitectónico General
+
+
 
 RAW
 ✅
@@ -51,23 +60,41 @@ REPORTES
 
 # Fases Completadas
 
+
+
 ## FASE 4.1 a 4.6
+
+
 
 Estado:
 ✅ COMPLETADAS
 
 Resultados alcanzados:
 
-- Definición formal de arquitectura por capas.
-- Incorporación de SQLite como fuente física única.
-- Definición de responsabilidades STAGING.
-- Definición de responsabilidades CORE.
-- Estrategia de migración incremental aprobada.
-- Contratos técnicos institucionales definidos.
+* Definición formal de arquitectura por capas.
+
+
+* Incorporación de SQLite como fuente física única.
+
+
+* Definición de responsabilidades STAGING.
+
+
+* Definición de responsabilidades CORE.
+
+
+* Estrategia de migración incremental aprobada.
+
+
+* Contratos técnicos institucionales definidos.
+
+
 
 ---
 
 ## FASE 4.7
+
+
 
 Nombre:
 
@@ -83,14 +110,24 @@ Fecha de cierre:
 
 Resultado:
 
-- Implementación de obtener_staging_ausencias().
-- Separación efectiva entre ETL y lógica operativa.
-- Contrato técnico validado.
-- Producción validada sin regresiones.
+* Implementación de obtener_staging_ausencias().
+
+
+* Separación efectiva entre ETL y lógica operativa.
+
+
+* Contrato técnico validado.
+
+
+* Producción validada sin regresiones.
+
+
 
 ---
 
 ## FASE 4.9
+
+
 
 Nombre:
 
@@ -128,7 +165,11 @@ Resultado:
 
 # Validaciones Arquitectónicas Alcanzadas
 
+
+
 ## Validación 1
+
+
 
 Kilos
 
@@ -142,12 +183,15 @@ core_*
 
 Estado:
 
-✅ Productivo  
+✅ Productivo
+
 ✅ Validado
 
 ---
 
 ## Validation 2
+
+
 
 MiNegocio
 
@@ -161,7 +205,8 @@ core_*
 
 Estado:
 
-✅ Productivo  
+✅ Productivo
+
 ✅ Validado
 
 Validaciones finales:
@@ -173,6 +218,8 @@ Validaciones finales:
 ---
 
 # Estado Actual de BUSINESS RULES
+
+
 
 La arquitectura:
 
@@ -190,7 +237,11 @@ A partir de esta fecha deja de considerarse una prueba de concepto y se transfor
 
 # Fase Pendiente Inmediata
 
+
+
 ## FASE 4.8
+
+
 
 Nombre:
 
@@ -212,12 +263,24 @@ obtener_staging_ausencias()
 
 Elementos identificados:
 
-- cols_vend_cand
-- cols_f_cand
-- cols_reemp_cand
-- parsear_fecha_robusta()
-- CodVend_clean
-- Reemplazo_clean
+* cols_vend_cand
+
+
+* cols_f_cand
+
+
+* cols_reemp_cand
+
+
+* parsear_fecha_robusta()
+
+
+* CodVend_clean
+
+
+* Reemplazo_clean
+
+
 
 Resultado esperado:
 
@@ -231,7 +294,7 @@ Toda eliminación deberá validarse nuevamente en producción.
 
 ---
 
-# Próxima Migración Aprobada
+# Migraciones Completadas
 
 ## FASE 4.10
 
@@ -241,44 +304,48 @@ Migración CCC hacia BUSINESS RULES
 
 Estado:
 
-⏳ APROBADA
+✅ COMPLETADA Y VALIDADA
 
-Arquitectura objetivo:
+Fecha de cierre:
 
-rep_ccc.py
+04/10/2026
+
+Arquitectura implementada:
+
+rep_ccc_core.py
 ↓
 business_rules_ccc.py
 ↓
-rep_ccc_core.py
+core_*
 
-Objetivos:
+Objetivos alcanzados:
 
-- Eliminar lógica comercial embebida en rep_ccc.py.
-- Crear una fuente única de verdad para CCC.
-- Reutilizar Core institucional.
-- Preparar el desacoplamiento de Vespertina.
-- Preparar el desacoplamiento de Gerencial.
-- Eliminar dependencias futuras entre reportes.
-
-Restricción:
-
-No duplicar lógica ya existente en CORE o BUSINESS RULES.
+* Eliminación de lógica comercial embebida en rep_ccc.py.
+* Creación de fuente única de verdad para CCC.
+* Reutilización de Core institucional.
+* Validación y despliegue productivo completados.
 
 ---
 
 # Roadmap de Migraciones
 
+
+
 ## Completadas
+
+
 
 ✅ Kilos
 
 ✅ MiNegocio
 
+✅ CCC
+
 ---
 
 ## Pendientes
 
-⏳ CCC
+
 
 ⏳ Cobertura Marca
 
@@ -292,17 +359,28 @@ No duplicar lógica ya existente en CORE o BUSINESS RULES.
 
 # Orden Estratégico Vigente
 
-1. CCC
-2. Cobertura Marca
-3. Cobertura Innovación
-4. Gerencial
-5. Vespertina
+
+
+1. Cobertura Marca
+2. Cobertura Innovación
+
+
+3. Gerencial
+
+
+4. Vespertina
+
+
 
 ---
 
 # Iniciativa Estratégica Futura
 
+
+
 ## Historización Institucional de Maestros
+
+
 
 Estado:
 
@@ -310,13 +388,27 @@ Estado:
 
 Líneas de trabajo identificadas tras la implementación validada de `universo_hist`, `universo_versiones`, `HashSnapshot` y snapshots automáticos:
 
-- Auditoría histórica de cartera.
-- Comparación entre versiones de Universo.
-- Herramientas de administración SQL.
-- Reconstrucción temporal de estados históricos.
-- Análisis de transferencias comerciales.
-- Apropiación histórica (pendiente de validación).
-- Evoluciones futuras de CORE_OPERACION.
+* Auditoría histórica de cartera.
+
+
+* Comparación entre versiones de Universo.
+
+
+* Herramientas de administración SQL.
+
+
+* Reconstrucción temporal de estados históricos.
+
+
+* Análisis de transferencias comerciales.
+
+
+* Apropiación histórica (pendiente de validación).
+
+
+* Evoluciones futuras de CORE_OPERACION.
+
+
 
 Restricción:
 
@@ -325,6 +417,8 @@ No constituyen fases activas aprobadas ni alteran las prioridades del roadmap op
 ---
 
 # Objetivo Final
+
+
 
 Eliminar progresivamente todas las dependencias:
 

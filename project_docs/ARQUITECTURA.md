@@ -1,5 +1,7 @@
 # Arquitectura del Sistema MATINAL
 
+
+
 Versión: 3.0
 
 Fecha de actualización: 02/10/2026
@@ -11,6 +13,8 @@ Estado de validación: Producción Operativa
 ---
 
 # 1. Propósito del Documento
+
+
 
 Este documento constituye la definición oficial de la arquitectura del sistema MATINAL.
 
@@ -53,6 +57,8 @@ Recién después analizar el código fuente.
 
 # 2. Arquitectura Oficial Vigente
 
+
+
 La arquitectura institucional aprobada es:
 
 RAW
@@ -72,6 +78,8 @@ Este modelo constituye la arquitectura oficial del proyecto.
 ---
 
 # 3. Estado de Implementación
+
+
 
 RAW
 ✅ Productivo
@@ -95,7 +103,11 @@ REPORTES
 
 # 4. Arquitectura Física
 
+
+
 ## Punto de Entrada
+
+
 
 app.py
 
@@ -120,6 +132,8 @@ Responsabilidades:
 ---
 
 ## Persistencia
+
+
 
 Ubicación:
 
@@ -149,11 +163,17 @@ Características:
 
 * Soporte para persistencia vigente, historización (`universo_hist`) y control de versiones (`universo_versiones`).
 
+
+
 ---
 
 ## Estructura Principal
 
+
+
 ### Persistencia
+
+
 
 * database.py
 
@@ -164,17 +184,23 @@ Características:
 
 ### Configuración
 
+
+
 * parametros.py
 
 
 
 ### Utilidades
 
+
+
 * utils.py
 
 
 
 ### Arquitectura Institucional
+
+
 
 * staging.py
 
@@ -188,13 +214,24 @@ Características:
 
 ### Reportes
 
+
+
 * rep_kilos.py
+
+
+* rep_kilos_core.py
 
 
 * rep_MN.py
 
 
+* rep_MN_core.py
+
+
 * rep_ccc.py
+
+
+* rep_ccc_core.py
 
 
 * rep_cob_marca.py
@@ -215,12 +252,19 @@ Características:
 * rep_obj_kilos.py
 
 
+* rep_obj_kilos_core.py
+
+
 
 ---
 
 # 5. Capas Arquitectónicas
 
+
+
 ## RAW
+
+
 
 Responsabilidad:
 
@@ -255,6 +299,8 @@ No contiene lógica de negocio.
 
 ## SQLITE
 
+
+
 Responsabilidad:
 
 Persistencia institucional de datos y gestión de versiones.
@@ -268,7 +314,11 @@ Tablas principales:
 
 
 * universo_hist
+
+
 * universo_versiones
+
+
 * rutas
 
 
@@ -295,6 +345,8 @@ No contiene lógica de negocio.
 ---
 
 ## STAGING
+
+
 
 Estado:
 
@@ -359,6 +411,8 @@ Responsabilidades prohibidas:
 
 ## CORE
 
+
+
 Estado:
 
 ✅ Implementado
@@ -387,6 +441,71 @@ Responsabilidades:
 * Venta institucional
 
 
+* Construcción de cartera operativa por vendedor
+
+
+
+## Modelo de Cartera Operativa
+
+
+
+# UNIVERSO
+
+
+
+universo elegible
+
+# VTA
+
+
+
+evidencia transaccional válida
+
+# CORE_OPERACION
+
+
+
+constructor oficial de cartera operativa
+
+# BUSINESS RULES
+
+
+
+consumidores de cartera operativa
+
+# REPORTES
+
+
+
+consumidores finales
+
+Flujo arquitectónico oficial:
+
+VTA
++
+UNIVERSO
+↓
+CORE_OPERACION
+↓
+Cartera Operativa por Vendedor
+↓
+BUSINESS RULES
+↓
+REPORTES
+
+Aclaración arquitectónica explícita:
+La cartera utilizada por BUSINESS RULES y REPORTES no surge directamente de UNIVERSO.
+La cartera operativa institucional surge de la interpretación realizada por CORE_OPERACION utilizando:
+
+* universo elegible
+
+
+* evidencia transaccional válida
+
+
+* reglas operativas institucionales
+
+
 
 Responsabilidades prohibidas:
 
@@ -412,6 +531,8 @@ Responsabilidades prohibidas:
 ---
 
 ## BUSINESS RULES
+
+
 
 Estado:
 
@@ -458,6 +579,8 @@ Responsabilidades prohibidas:
 
 ## REPORTES
 
+
+
 Estado:
 
 ✅ Operativos
@@ -492,7 +615,11 @@ Los reportes no deben contener reglas comerciales institucionales.
 
 # 6. Componentes Institucionales
 
+
+
 ## STAGING
+
+
 
 Implementados:
 
@@ -516,6 +643,8 @@ Implementados:
 
 ## CORE
 
+
+
 Implementados:
 
 * obtener_core_ventas_base()
@@ -530,10 +659,33 @@ Implementados:
 * obtener_core_operacion()
 
 
+* core_clientes.py
+
+
+* core_operaciones.py
+
+
+* core_vendedores.py
+
+
+* core_ventas_base.py
+
+
+* core_potencial_cliente.py
+
+
+* core_potencial_cliente_segmento.py
+
+
+* core_validacion_periodo.py
+
+
 
 ---
 
 ## BUSINESS RULES
+
+
 
 Implementados:
 
@@ -546,10 +698,16 @@ Implementados:
 * business_rules_mn.py
 
 
-
-Planificados:
-
 * business_rules_ccc.py
+
+
+* business_rules_objetivo_clientes.py
+
+
+* business_rules_objetivo_segmentos.py
+
+
+* business_rules_objetivo_carteras.py
 
 
 
@@ -557,7 +715,11 @@ Planificados:
 
 # 7. Business Rules Validadas
 
+
+
 ## Kilos
+
+
 
 Arquitectura:
 
@@ -577,6 +739,8 @@ Estado:
 
 ## MiNegocio
 
+
+
 Arquitectura:
 
 rep_MN_core.py
@@ -593,7 +757,29 @@ Estado:
 
 ---
 
+## CCC
+
+
+
+Arquitectura:
+
+rep_ccc_core.py
+↓
+business_rules_ccc.py
+↓
+core_*
+
+Estado:
+
+✅ Productivo
+
+✅ Validado
+
+---
+
 # 8. Regla Arquitectónica Fundamental
+
+
 
 Permitido:
 
@@ -641,36 +827,52 @@ Excel
 
 ---
 
-# 9. Próxima Migración Aprobada
+# 9. Estado de Migraciones Arquitectónicas
 
-CCC
 
-Arquitectura objetivo:
 
-rep_ccc.py
-↓
-business_rules_ccc.py
-↓
-rep_ccc_core.py
+## Migraciones Arquitectónicas Validadas
+
+
+
+* ✅ Kilos
+
+
+* ✅ MiNegocio
+
+
+* ✅ CCC
+
+
+
+## Migraciones Pendientes
+
+
+
+* ⏳ Cobertura Marca
+
+
+* ⏳ Cobertura Innovación
+
+
+* ⏳ Gerencial
+
+
+* ⏳ Vespertina
+
+
 
 Objetivo:
 
-* Desacoplar CCC.
-
-
-* Crear fuente única de verdad para CCC.
-
-
-* Preparar desacoplamiento de Vespertina.
-
-
-* Preparar desacoplamiento de Gerencial.
+* Consolidar fuentes únicas de verdad para los reportes restantes mediante la adopción progresiva del patrón `Reporte -> Business Rules -> Core`.
 
 
 
 ---
 
 # 10. Objetivo Arquitectónico Final
+
+
 
 Eliminar progresivamente todas las dependencias:
 
