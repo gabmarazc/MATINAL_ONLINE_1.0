@@ -12,11 +12,7 @@ from modules.utils import parsear_fecha_robusta
 
 
 def _filtrar_ventas_ccc_comercial(
-    df_vta_core: pd.DataFrame,
-    anio_op: int,
-    mes_op: int,
-    dia_matinal: str,
-    aplicar_periodo: bool = True,
+    df_vta_core: pd.DataFrame, anio_op: int, mes_op: int, dia_matinal: str
 ) -> pd.DataFrame:
     """
     BUSINESS_RULES CCC: Aplica filtros institucionales de exclusión y período.
@@ -24,7 +20,7 @@ def _filtrar_ventas_ccc_comercial(
     - Restricción exclusiva al proveedor PepsiCo.
     - Exclusión del vendedor 20 (Depósito).
     - Filtro de fecha matinal.
-    - Clasificación en períodos comerciales (Arrastre, Actual) según parámetro.
+    - Clasificación en períodos comerciales (Arrastre, Actual).
     """
     if df_vta_core is None or df_vta_core.empty:
         return pd.DataFrame()
@@ -120,8 +116,8 @@ def _filtrar_ventas_ccc_comercial(
         df["CodVendedorOperativo"], errors="coerce"
     ).astype("Int64")
 
-    # Filtrar solo Arrastre y Actual condicionalmente
-    if aplicar_periodo and "Periodo" in df.columns:
+    # Filtrar solo Arrastre y Actual
+    if "Periodo" in df.columns:
         df = df[df["Periodo"].isin(["Arrastre", "Actual"])].copy()
 
     return df
@@ -527,49 +523,13 @@ def obtener_detalle_clientes_ccc(
     df_vta_core = datos_operativos["df_vta_operativa"]
     df_clientes_core = obtener_core_clientes()
 
-    df_vta_filtrada = _filtrar_ventas_ccc_comercial(
-        df_vta_core, anio, mes, dia_matinal, aplicar_periodo=True
-    )
+    df_vta_filtrada = _filtrar_ventas_ccc_comercial(df_vta_core, anio, mes, dia_matinal)
     df_atribucion = _procesar_atribucion_clientes_completo(
         df_vta_filtrada, df_clientes_core, anio, mes
     )
 
     print(
         f"[PERF_CORE] obtener_detalle_clientes_ccc -> {time.perf_counter() - t0:.4f} s"
-    )
-    return df_atribucion
-
-
-def obtener_detalle_clientes_ccc_v2(
-    anio: int, mes: int, filtros_globales: dict = None
-) -> pd.DataFrame:
-    """
-    BUSINESS_RULES (Función Pública V2 de Detalle de Clientes CCC):
-    Utiliza _filtrar_ventas_ccc_comercial con aplicar_periodo=False.
-    """
-    t0 = time.perf_counter()
-
-    if filtros_globales is None:
-        filtros_globales = {}
-
-    dia_matinal = filtros_globales.get("dia_matinal", None)
-    dia_venta = filtros_globales.get("dia_venta", None)
-
-    datos_operativos = obtener_core_operacion(
-        anio, mes, dia_matinal, dia_venta, modo_ajuste="AJUSTADO"
-    )
-    df_vta_core = datos_operativos["df_vta_operativa"]
-    df_clientes_core = obtener_core_clientes()
-
-    df_vta_filtrada = _filtrar_ventas_ccc_comercial(
-        df_vta_core, anio, mes, dia_matinal, aplicar_periodo=False
-    )
-    df_atribucion = _procesar_atribucion_clientes_completo(
-        df_vta_filtrada, df_clientes_core, anio, mes
-    )
-
-    print(
-        f"[PERF_CORE] obtener_detalle_clientes_ccc_v2 -> {time.perf_counter() - t0:.4f} s"
     )
     return df_atribucion
 
@@ -738,9 +698,7 @@ def obtener_matriz_ccc_comercial(
     df_clientes_core = obtener_core_clientes()
     vendedores_df = obtener_core_vendedores()
 
-    df_vta_filtrada = _filtrar_ventas_ccc_comercial(
-        df_vta_core, anio, mes, dia_matinal, aplicar_periodo=True
-    )
+    df_vta_filtrada = _filtrar_ventas_ccc_comercial(df_vta_core, anio, mes, dia_matinal)
     df_detalle = _procesar_atribucion_clientes_completo(
         df_vta_filtrada, df_clientes_core, anio, mes
     )
@@ -871,165 +829,5 @@ def obtener_matriz_ccc_comercial(
     resultado_final = reporte[[c for c in columnas_salida if c in reporte.columns]]
     print(
         f"[PERF_CORE] obtener_matriz_ccc_comercial -> {time.perf_counter() - t0:.4f} s"
-    )
-    return resultado_final
-
-
-def obtener_matriz_ccc_comercial_v2(
-    anio: int, mes: int, filtros_globales: dict = None
-) -> pd.DataFrame:
-    """
-    BUSINESS_RULES (Función Orquestadora Pública V2 de CCC):
-    Construye la matriz comercial consolidada utilizando aplicar_periodo=False.
-    Preserva intactas las reglas de negocio, matriz y objetivos.
-    """
-    t0 = time.perf_counter()
-
-    if filtros_globales is None:
-        filtros_globales = {}
-
-    dia_matinal = filtros_globales.get("dia_matinal", None)
-    dia_venta = filtros_globales.get("dia_venta", None)
-
-    datos_operativos = obtener_core_operacion(
-        anio, mes, dia_matinal, dia_venta, modo_ajuste="AJUSTADO"
-    )
-    df_vta_core = datos_operativos["df_vta_operativa"]
-    df_clientes_core = obtener_core_clientes()
-    vendedores_df = obtener_core_vendedores()
-
-    df_vta_filtrada = _filtrar_ventas_ccc_comercial(
-        df_vta_core, anio, mes, dia_matinal, aplicar_periodo=False
-    )
-    df_detalle = _procesar_atribucion_clientes_completo(
-        df_vta_filtrada, df_clientes_core, anio, mes
-    )
-
-    if df_detalle.empty:
-        return pd.DataFrame(
-            columns=[
-                "CodVendedor",
-                "Nombre",
-                "SUP",
-                "Taxonomia",
-                "Cartera_Total",
-                "Altas",
-                "Reactivaciones",
-                "Cartera_Neta",
-                "CCC_Vendedor",
-                "CCC_Gerencia",
-                "NC",
-                "Objetivo_CCC",
-                "Pct_Cartera",
-                "Pct_Objetivo",
-            ]
-        )
-
-    excluidos_set = set(
-        df_detalle[df_detalle["Es_Alta_Periodo"] | df_detalle["Es_Reactivacion"]][
-            "Cliente"
-        ]
-        .dropna()
-        .tolist()
-    )
-
-    cartera_matriz = df_detalle.groupby(
-        ["CodVendedor_Titular", "Taxonomia"], as_index=False
-    ).agg(
-        Cartera_Total=("Cliente", "count"),
-        Altas=("Es_Alta_Periodo", lambda x: int(x.sum())),
-        Reactivaciones=("Es_Reactivacion", lambda x: int(x.sum())),
-        Cartera_Neta=("Cliente", lambda x: int(len(x) - x.isin(excluidos_set).sum())),
-        CCC_Vendedor=("Es_CCC_Vendedor", lambda x: int(x.sum())),
-        CCC_Gerencia=("Es_CCC_Gerencia", lambda x: int(x.sum())),
-    )
-
-    if vendedores_df.empty:
-        vendedores_df = pd.DataFrame(
-            {"CodVendedor": [0], "Nombre": ["SIN ASIGNAR"], "SUP": ["GENERAL"]}
-        )
-    else:
-        vendedores_df = vendedores_df.rename(
-            columns={"CodVendedor": "CodVendedor_Titular"}
-        )
-
-    vendedores_df = vendedores_df[
-        vendedores_df["CodVendedor_Titular"] != 20
-    ].drop_duplicates("CodVendedor_Titular")
-
-    taxonomias_df = pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"]})
-    vendedores_df["_k"], taxonomias_df["_k"] = 1, 1
-    matriz_base = vendedores_df.merge(taxonomias_df, on="_k").drop(columns="_k")
-
-    reporte = matriz_base.merge(
-        cartera_matriz, on=["CodVendedor_Titular", "Taxonomia"], how="left"
-    )
-
-    for col_num in [
-        "Cartera_Total",
-        "Altas",
-        "Reactivaciones",
-        "Cartera_Neta",
-        "CCC_Vendedor",
-        "CCC_Gerencia",
-    ]:
-        reporte[col_num] = reporte[col_num].fillna(0).astype("Int64")
-
-    reporte["NC"] = (
-        (reporte["Cartera_Neta"] - reporte["CCC_Vendedor"])
-        .clip(lower=0)
-        .astype("Int64")
-    )
-
-    hoja_ccc = _obtener_hoja_ccc_config(anio, mes)
-    reporte = reporte.merge(hoja_ccc, on="Taxonomia", how="left")
-    reporte["Porcentaje_Cartera"] = reporte["Porcentaje_Cartera"].fillna(80.0)
-    reporte["Objetivo_CCC"] = (
-        (reporte["Cartera_Neta"] * (reporte["Porcentaje_Cartera"] / 100.0))
-        .round(0)
-        .astype("Int64")
-    )
-
-    reporte["Pct_Cartera"] = (
-        (reporte["CCC_Vendedor"] / reporte["Cartera_Neta"].replace(0, pd.NA))
-        .mul(100)
-        .fillna(0.0)
-        .round(2)
-    )
-    reporte["Pct_Objetivo"] = (
-        (reporte["CCC_Vendedor"] / reporte["Objetivo_CCC"].replace(0, pd.NA))
-        .mul(100)
-        .fillna(0.0)
-        .round(2)
-    )
-
-    reporte = reporte.rename(columns={"CodVendedor_Titular": "CodVendedor"})
-    reporte["CodVendedor"] = pd.to_numeric(
-        reporte["CodVendedor"], errors="coerce"
-    ).astype("Int64")
-    reporte = reporte.sort_values(
-        by=["CodVendedor", "Taxonomia"], ascending=[True, True]
-    ).reset_index(drop=True)
-
-    columnas_salida = [
-        "CodVendedor",
-        "Nombre",
-        "SUP",
-        "Taxonomia",
-        "Cartera_Total",
-        "Altas",
-        "Reactivaciones",
-        "Cartera_Neta",
-        "CCC_Vendedor",
-        "CCC_Gerencia",
-        "NC",
-        "Objetivo_CCC",
-        "Pct_Cartera",
-        "Pct_Objetivo",
-    ]
-
-    resultado_final = reporte[[c for c in columnas_salida if c in reporte.columns]]
-    print(
-        f"[PERF_CORE] obtener_matriz_ccc_comercial_v2 -> {time.perf_counter() - t0:.4f} s"
     )
     return resultado_final
