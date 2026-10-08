@@ -3,12 +3,14 @@ import time
 import io
 import streamlit as st
 import pandas as pd
+import numpy as np
 from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 
 from modules.business_rules.business_rules_ccc import (
     obtener_matriz_ccc_comercial,
     obtener_detalle_clientes_ccc,
 )
+from modules import database as db
 
 
 def _tarjeta_metrica_compacta_html(
@@ -33,12 +35,15 @@ def _tarjeta_metrica_compacta_html(
 
 @st.fragment
 def render_fragmento_interactivo_ccc_core(
-    matriz_ccc: pd.DataFrame, detalle_ccc: pd.DataFrame, sup_seleccionado: str
+    matriz_ccc: pd.DataFrame,
+    detalle_ccc: pd.DataFrame,
+    sup_seleccionado: str,
+    dia_matinal: str,
 ):
     """
     Fragmento interactivo de presentación para CCC.
     Aplica filtros locales (Vendedor, Taxonomía, Día de Visita) sin recalcular reglas de negocio.
-    Renderiza KPIs, Grilla 1 (Resumen CCC), Grilla 2 (Detalle CCC) y botones de exportación a Excel.
+    Renderiza KPIs, Grilla 1 (Resumen CCC), Grilla 2 (Batalla CCC) y botones de exportación a Excel.
     """
     if matriz_ccc is None or matriz_ccc.empty:
         st.info("No hay datos disponibles para procesar el reporte CCC.")
@@ -167,7 +172,43 @@ def render_fragmento_interactivo_ccc_core(
     else:
         df_detalle_filtrado = pd.DataFrame()
 
-    # KPIs solicitados
+    # Lógica ES_DEL_DIA basada estrictamente en la tabla rutas (Fecha, Codigo)
+    clientes_del_dia_set = set()
+    if dia_matinal and str(dia_matinal).strip():
+        try:
+            df_rutas_db = db.cargar_tabla_sql("SELECT * FROM rutas")
+            if df_rutas_db is not None and not df_rutas_db.empty:
+                df_rutas = df_rutas_db.copy()
+                df_rutas["Fecha_dt"] = pd.to_datetime(
+                    df_rutas["Fecha"], errors="coerce"
+                )
+                dia_matinal_dt = pd.to_datetime(
+                    dia_matinal, format="%d/%m/%Y", errors="coerce"
+                )
+                if pd.notna(dia_matinal_dt):
+                    rutas_dia = df_rutas[
+                        df_rutas["Fecha_dt"].dt.date == dia_matinal_dt.date()
+                    ]
+                    if "Codigo" in rutas_dia.columns:
+                        s_cod = (
+                            pd.to_numeric(rutas_dia["Codigo"], errors="coerce")
+                            .dropna()
+                            .astype("Int64")
+                        )
+                        clientes_del_dia_set = set(s_cod.dropna().astype(int).tolist())
+        except Exception:
+            pass
+
+    if not df_detalle_filtrado.empty:
+        s_cli = pd.to_numeric(df_detalle_filtrado["Cliente"], errors="coerce")
+        df_detalle_filtrado["ES_DEL_DIA"] = np.where(
+            s_cli.isin(clientes_del_dia_set), "✅ SI", "❌ NO"
+        )
+    else:
+        if "ES_DEL_DIA" not in df_detalle_filtrado.columns:
+            df_detalle_filtrado["ES_DEL_DIA"] = "❌ NO"
+
+    # KPIs solicitados (Sin CCC_Gerencia)
     tot_cartera = (
         int(df_resumen_filtrado["Cartera_Total"].sum())
         if not df_resumen_filtrado.empty
@@ -188,11 +229,6 @@ def render_fragmento_interactivo_ccc_core(
     )
     tot_ccc_vendedor = (
         int(df_resumen_filtrado["CCC_Vendedor"].sum())
-        if not df_resumen_filtrado.empty
-        else 0
-    )
-    tot_ccc_gerencia = (
-        int(df_resumen_filtrado["CCC_Gerencia"].sum())
         if not df_resumen_filtrado.empty
         else 0
     )
@@ -225,7 +261,7 @@ def render_fragmento_interactivo_ccc_core(
         unsafe_allow_html=True,
     )
 
-    cols_kpi1 = st.columns(5)
+    cols_kpi1 = st.columns(4)
     with cols_kpi1[0]:
         st.markdown(
             _tarjeta_metrica_compacta_html(
@@ -254,19 +290,12 @@ def render_fragmento_interactivo_ccc_core(
             ),
             unsafe_allow_html=True,
         )
-    with cols_kpi1[4]:
-        st.markdown(
-            _tarjeta_metrica_compacta_html(
-                "CCC VENDEDOR", f"{tot_ccc_vendedor:,.0f}", "#3b82f6", "2px"
-            ),
-            unsafe_allow_html=True,
-        )
 
     cols_kpi2 = st.columns(5)
     with cols_kpi2[0]:
         st.markdown(
             _tarjeta_metrica_compacta_html(
-                "CCC GERENCIA", f"{tot_ccc_gerencia:,.0f}", "#3b82f6", "1px"
+                "CCC VENDEDOR", f"{tot_ccc_vendedor:,.0f}", "#3b82f6", "2px"
             ),
             unsafe_allow_html=True,
         )
@@ -300,11 +329,14 @@ def render_fragmento_interactivo_ccc_core(
     st.divider()
 
     # --------------------------------------------------
-    # GRILLA 1: Resumen CCC
+    # GRILLA 1: Resumen CCC (Sin CCC_Gerencia)
     # --------------------------------------------------
     st.subheader("📋 Resumen CCC por Taxonomía y Vendedor")
     if not df_resumen_filtrado.empty:
         display_resumen = df_resumen_filtrado.copy()
+        if "CCC_Gerencia" in display_resumen.columns:
+            display_resumen = display_resumen.drop(columns=["CCC_Gerencia"])
+
         for col_p in ["Pct_Cartera", "Pct_Objetivo"]:
             if col_p in display_resumen.columns:
                 display_resumen[col_p] = display_resumen[col_p].apply(
@@ -338,30 +370,37 @@ def render_fragmento_interactivo_ccc_core(
     st.divider()
 
     # --------------------------------------------------
-    # GRILLA 2: Detalle CCC
+    # GRILLA 2: BATALLA CCC (Reconciliado exacto contra NC y con ES_DEL_DIA)
     # --------------------------------------------------
-    st.subheader("🔍 Detalle CCC por Cliente")
+    st.subheader("⚔️ BATALLA CCC")
     if not df_detalle_filtrado.empty:
-        cols_detalle_requeridas = [
+        df_batalla = df_detalle_filtrado.copy()
+        if "Es_CCC_Vendedor" in df_batalla.columns:
+            df_batalla = df_batalla[df_batalla["Es_CCC_Vendedor"] == False].copy()
+        if "Es_Alta_Periodo" in df_batalla.columns:
+            df_batalla = df_batalla[df_batalla["Es_Alta_Periodo"] == False].copy()
+        if "Es_Reactivacion" in df_batalla.columns:
+            df_batalla = df_batalla[df_batalla["Es_Reactivacion"] == False].copy()
+
+        cols_batalla_requeridas = [
             "Cliente",
             "NombreCliente",
             "CodVendedor_Titular",
-            "Propietario_CCC",
-            "Origen_CCC",
+            "Nombre",
+            "SUP",
             "Taxonomia",
-            "Es_CCC_Gerencia",
-            "Es_CCC_Vendedor",
-            "Es_Alta_Periodo",
-            "Es_Reactivacion",
+            "DiaVisita",
+            "Origen_CCC",
+            "ES_DEL_DIA",
         ]
-        df_detalle_view = pd.DataFrame()
-        for c in cols_detalle_requeridas:
-            if c in df_detalle_filtrado.columns:
-                df_detalle_view[c] = df_detalle_filtrado[c]
+        df_batalla_view = pd.DataFrame()
+        for c in cols_batalla_requeridas:
+            if c in df_batalla.columns:
+                df_batalla_view[c] = df_batalla[c]
             else:
-                df_detalle_view[c] = pd.Series(dtype=object)
+                df_batalla_view[c] = pd.Series(dtype=object)
 
-        gb2 = GridOptionsBuilder.from_dataframe(df_detalle_view)
+        gb2 = GridOptionsBuilder.from_dataframe(df_batalla_view)
         gb2.configure_default_column(
             filterable=True, sortable=True, resizable=True, minWidth=110
         )
@@ -369,7 +408,7 @@ def render_fragmento_interactivo_ccc_core(
         grid_opts2 = gb2.build()
 
         AgGrid(
-            df_detalle_view,
+            df_batalla_view,
             gridOptions=grid_opts2,
             height=400,
             width="100%",
@@ -379,7 +418,7 @@ def render_fragmento_interactivo_ccc_core(
             fit_columns_on_grid_load=False,
         )
     else:
-        st.info("No hay datos de detalle CCC para los filtros seleccionados.")
+        st.info("No hay datos de Batalla CCC para los filtros seleccionados.")
 
     st.divider()
 
@@ -390,7 +429,10 @@ def render_fragmento_interactivo_ccc_core(
     with col_dl1:
         buf_res = io.BytesIO()
         with pd.ExcelWriter(buf_res, engine="openpyxl") as writer:
-            df_resumen_filtrado.to_excel(writer, index=False, sheet_name="Resumen_CCC")
+            df_resumen_export = df_resumen_filtrado.copy()
+            if "CCC_Gerencia" in df_resumen_export.columns:
+                df_resumen_export = df_resumen_export.drop(columns=["CCC_Gerencia"])
+            df_resumen_export.to_excel(writer, index=False, sheet_name="Resumen_CCC")
         buf_res.seek(0)
         st.download_button(
             label="📥 Exportar Resumen CCC",
@@ -403,14 +445,27 @@ def render_fragmento_interactivo_ccc_core(
     with col_dl2:
         buf_det = io.BytesIO()
         with pd.ExcelWriter(buf_det, engine="openpyxl") as writer:
-            df_detalle_filtrado.to_excel(writer, index=False, sheet_name="Detalle_CCC")
+            df_batalla_export = df_detalle_filtrado.copy()
+            if "Es_CCC_Vendedor" in df_batalla_export.columns:
+                df_batalla_export = df_batalla_export[
+                    df_batalla_export["Es_CCC_Vendedor"] == False
+                ].copy()
+            if "Es_Alta_Periodo" in df_batalla_export.columns:
+                df_batalla_export = df_batalla_export[
+                    df_batalla_export["Es_Alta_Periodo"] == False
+                ].copy()
+            if "Es_Reactivacion" in df_batalla_export.columns:
+                df_batalla_export = df_batalla_export[
+                    df_batalla_export["Es_Reactivacion"] == False
+                ].copy()
+            df_batalla_export.to_excel(writer, index=False, sheet_name="Batalla_CCC")
         buf_det.seek(0)
         st.download_button(
-            label="📥 Exportar Detalle CCC",
+            label="📥 Exportar Batalla CCC",
             data=buf_det,
-            file_name="Detalle_CCC.xlsx",
+            file_name="Batalla_CCC.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="btn_dl_detalle_ccc",
+            key="btn_dl_batalla_ccc",
         )
 
 
@@ -436,6 +491,7 @@ def render_rep_ccc_core(filtros_globales=None):
     anio_op = int(filtros_globales["anio"])
     mes_op = int(filtros_globales["mes"])
     sup_filtro = str(filtros_globales.get("supervisor", "TODOS")).strip()
+    dia_matinal = filtros_globales.get("dia_matinal", None)
 
     st.subheader("📊 Avance de Clientes con Compra (CCC)")
     st.markdown(
@@ -454,7 +510,9 @@ def render_rep_ccc_core(filtros_globales=None):
         return
 
     # Renderizado del fragmento interactivo
-    render_fragmento_interactivo_ccc_core(matriz_ccc, detalle_ccc, sup_filtro)
+    render_fragmento_interactivo_ccc_core(
+        matriz_ccc, detalle_ccc, sup_filtro, dia_matinal
+    )
 
     print(
         f"[PERF_CORE] Tiempo total render_rep_ccc_core -> {time.perf_counter() - t0:.4f} s"

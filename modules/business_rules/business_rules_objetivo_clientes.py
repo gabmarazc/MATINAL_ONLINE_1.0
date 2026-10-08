@@ -1,8 +1,10 @@
+# modules/business_rules/business_rules_objetivo_clientes.py
 import pandas as pd
 from modules.core.core_potencial_cliente_segmento import (
     generar_core_potencial_cliente_segmento,
 )
 from modules.staging import obtener_staging_maestros
+from modules import database as db
 
 
 def generar_business_rules_objetivos_cliente(
@@ -13,7 +15,9 @@ def generar_business_rules_objetivos_cliente(
     una distribución jerárquica: Objetivo Marca -> Segmento -> Cliente, apoyada en
     los objetivos corporativos provenientes de los maestros de Staging.
 
-    Arquitectura: BUSINESS RULES (Sistema Matinal 2.0)
+    La población base se restringe exclusivamente a los clientes presentes en la tabla universo vigente (SELECT Codigo FROM universo).
+
+    Arquitectura: BUSINESS RULES (Sistema Matinal 2.0)[cite: 8]
     """
     columnas_salida = [
         "Cliente",
@@ -31,6 +35,53 @@ def generar_business_rules_objetivos_cliente(
 
     # 1. Obtener datos de la capa CORE ampliada con SEGMENTO
     df_core = generar_core_potencial_cliente_segmento(anio_operativo, mes_operativo)
+
+    if df_core is None or df_core.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    # REGLA DE NEGOCIO: Filtrar df_core exclusivamente contra la tabla universo vigente usando SELECT Codigo FROM universo
+    try:
+        df_universo = db.cargar_tabla_sql("SELECT Codigo FROM universo")
+    except Exception:
+        df_universo = pd.DataFrame()
+
+    if df_universo is not None and not df_universo.empty:
+        col_cli_u = (
+            "Codigo" if "Codigo" in df_universo.columns else df_universo.columns[0]
+        )
+        clientes_vigentes = set(
+            pd.to_numeric(df_universo[col_cli_u], errors="coerce")
+            .dropna()
+            .astype("Int64")
+            .tolist()
+        )
+
+        # Trazabilidad robusta de clientes antes del filtro
+        clientes_antes = (
+            df_core["Cliente"].nunique()
+            if "Cliente" in df_core.columns
+            else len(df_core)
+        )
+
+        if "Cliente" in df_core.columns:
+            df_core["Cliente_Int64"] = pd.to_numeric(
+                df_core["Cliente"].astype(str).str.strip(), errors="coerce"
+            )
+            df_core = df_core[df_core["Cliente_Int64"].isin(clientes_vigentes)].copy()
+            df_core = df_core.drop(columns=["Cliente_Int64"], errors="ignore")
+
+        clientes_despues = (
+            df_core["Cliente"].nunique()
+            if "Cliente" in df_core.columns
+            else len(df_core)
+        )
+        excluidos = clientes_antes - clientes_despues
+
+        print(
+            f"[OBJ_CLIENTES] Antes={clientes_antes} | "
+            f"Después={clientes_despues} | "
+            f"Excluidos={excluidos}"
+        )
 
     if df_core is None or df_core.empty:
         return pd.DataFrame(columns=columnas_salida)
