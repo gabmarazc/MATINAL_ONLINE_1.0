@@ -532,3 +532,18 @@ pandas.errors.DatabaseError: Execution failed on sql 'SELECT Codigo, SegmentoCli
 2026-10-07 22:31:07 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
 2026-10-07 23:52:48 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
 2026-10-08 00:03:28 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-08 10:17:51 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-08 10:18:09 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-08 10:26:00 | WARNING  | matinal.database | CARGANDO TABLA: altas
+2026-10-08 10:26:01 | WARNING  | matinal.database | CARGANDO TABLA: rutas
+2026-10-08 10:26:05 | WARNING  | matinal.database | CARGANDO TABLA: tp
+2026-10-08 10:26:05 | WARNING  | matinal.database | DETECTADA CARGA ESPECIAL TP: tp
+2026-10-08 10:26:06 | WARNING  | matinal.database | CARGANDO TABLA: universo
+2026-10-08 10:26:07 | INFO     | matinal.database | Nuevo snapshot histórico del universo guardado en 'universo_hist' (detectados cambios en el contenido).
+2026-10-08 10:26:07 | INFO     | matinal.database | UNIVERSO_VERSIONES: versión registrada correctamente
+2026-10-08 10:26:07 | WARNING  | matinal.database | CARGANDO TABLA: vta
+2026-10-08 10:30:39 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'ausencias' (modo: replace).
+2026-10-08 10:54:21 | WARNING  | matinal.database | La tabla consultada no existe en el catálogo de SQLite. Retornando DataFrame vacío para: SELECT name FROM sqlite_master WHERE type='table' AND name='maestro_ccc'
+2026-10-08 10:54:21 | INFO     | matinal.database | DataFrame persistido con éxito en la tabla 'maestro_ccc' (modo: replace).
+2026-10-08 12:45:57 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===
+2026-10-08 12:48:22 | INFO     | matinal | === SUBSISTEMA DE LOGGING MATINAL INICIALIZADO CORRECTAMENTE ===

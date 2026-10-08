@@ -22,7 +22,7 @@ def _filtrar_ventas_mn_comercial(
     - Exclusión del preventista 20 (Depósito).
     - Filtro de fecha matinal (excluye cargas >= dia_matinal en el mes en curso).
     - Clasificación en períodos comerciales (Arrastre, Actual, Futuro).
-    - Detección de canal digital MiNegocio y resolución orientada al vendedor vigente.
+    - Detección de canal digital MiNegocio y resolución del operador efectivo.
     """
     if df_vta_core is None or df_vta_core.empty:
         return pd.DataFrame()
@@ -111,7 +111,7 @@ def _filtrar_ventas_mn_comercial(
     )
     df = df[df["CodVendedor"] != 20]
 
-    # Resolución de titularidad comercial: la verdad comercial es el vendedor vigente (sin 99 comercial)
+    # Resolución de titularidad comercial idéntica a business_rules_kilos.py
     padron_vend = obtener_core_vendedores()
     codigos_validos = (
         set(padron_vend["CodVendedor"].dropna().tolist())
@@ -122,25 +122,26 @@ def _filtrar_ventas_mn_comercial(
     if "CodVendedorOperativo" not in df.columns:
         df["CodVendedorOperativo"] = df["CodVendedor"]
 
-    # Preservación de histórico para auditoría
+    # Creación de CodVendedorHistorico antes de cualquier mutación a vigente
     if "CodVendedor" in df.columns:
         df["CodVendedorHistorico"] = pd.to_numeric(
             df["CodVendedor"], errors="coerce"
         ).astype("Int64")
 
-    # Alineación estricta con CodVendedorVigente (el 99 opera pero la venta computa para el vigente)
+    # Alineación de titularidad comercial con CodVendedorVigente (preservando comodines 99 / 99)
     if "CodVendedorVigente" in df.columns:
         cod_vig = pd.to_numeric(df["CodVendedorVigente"], errors="coerce")
         cod_tit_orig = pd.to_numeric(df["CodVendedor"], errors="coerce")
-        valid_vig_mask = cod_vig.isin(codigos_validos).fillna(False)
-        valid_tit_mask = cod_tit_orig.isin(codigos_validos).fillna(False)
+        cod_op = pd.to_numeric(df.get("CodVendedorOperativo"), errors="coerce")
+        reemp = df.get("Reemplazo", pd.Series(pd.NA, index=df.index))
+
+        is_special = ((reemp == 99) | (cod_op == 99) | (cod_tit_orig == 99)).fillna(
+            False
+        )
 
         df["CodVendedor"] = np.select(
-            [valid_vig_mask, valid_tit_mask],
-            [
-                cod_vig.fillna(-999).astype(int),
-                cod_tit_orig.fillna(-999).astype(int),
-            ],
+            [is_special, cod_vig.isin(codigos_validos).fillna(False)],
+            [99, cod_vig.fillna(-999).astype(int)],
             default=cod_tit_orig.fillna(-999).astype(int),
         )
         df["CodVendedor"] = (

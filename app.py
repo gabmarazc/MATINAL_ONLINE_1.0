@@ -164,9 +164,9 @@ def main():
             prog_bar = st.progress(20, text="Iniciando lectura de bases...")
             time.sleep(0.1)
             prog_bar.progress(50, text="Procesando registros en SQLite...")
-            st.session_state["bases"] = cargar_todas_las_bases(forzar=True)
             st.cache_data.clear()
             st.cache_resource.clear()
+            st.session_state["bases"] = cargar_todas_las_bases(forzar=True)
             prog_bar.progress(100, text="¡Sincronización completada!")
             t_fin = time.time()
             duracion = t_fin - t_inicio
