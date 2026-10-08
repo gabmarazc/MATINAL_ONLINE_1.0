@@ -1,7 +1,7 @@
 # CONTEXTO_IA
 
-Versión: 3.0
-Fecha de actualización: 02/10/2026
+Versión: 3.1
+Fecha de actualización: 06/10/2026
 Estado: Vigente
 Naturaleza: Documento de Onboarding Institucional para IA
 
@@ -16,23 +16,11 @@ No constituye una copia de la documentación.
 Constituye una guía de orientación para entender:
 
 * qué es MATINAL
-
-
 * cómo funciona
-
-
 * cómo está construido
-
-
 * qué decisiones ya fueron tomadas
-
-
 * qué decisiones no deben volver a discutirse
-
-
 * cuál es el siguiente objetivo institucional
-
-
 
 ---
 
@@ -45,41 +33,19 @@ El sistema se encuentra en producción operativa.
 Es utilizado por:
 
 * administración
-
-
 * supervisión
-
-
 * gerencia
-
-
 
 El sistema procesa:
 
 * ventas
-
-
 * clientes
-
-
 * cartera
-
-
 * objetivos
-
-
 * cobertura
-
-
 * adopción digital
-
-
 * indicadores gerenciales
-
-
 * seguimiento comercial
-
-
 
 ---
 
@@ -104,6 +70,18 @@ Estado Documental:
 Estado de Business Rules:
 
 ✅ Validada
+
+✅ Kilos migrado
+
+✅ MiNegocio migrado
+
+✅ CCC migrado
+
+✅ Auditoría de Reemplazos completada
+
+✅ Auditoría de Objetivos completada
+
+✅ Historización del Universo implementada
 
 ---
 
@@ -146,17 +124,9 @@ Recepción de datos externos.
 Ejemplos:
 
 * VTA.xlsx
-
-
 * UNIVERSO.xlsx
-
-
 * RUTAS.xlsx
-
-
 * ALTAS.xlsx
-
-
 
 ---
 
@@ -183,35 +153,17 @@ Normalización técnica.
 Incluye:
 
 * tipado
-
-
 * parseo de fechas
-
-
 * normalización
-
-
 * contratos de datos
-
-
 
 No contiene:
 
 * objetivos
-
-
 * CCC
-
-
 * MiNegocio
-
-
 * coberturas
-
-
 * reglas comerciales
-
-
 
 ---
 
@@ -224,35 +176,17 @@ Interpretación operativa.
 Incluye:
 
 * reemplazos
-
-
 * ausencias
-
-
 * calendario
-
-
 * titularidad operativa
-
-
 * clasificación temporal
-
-
 
 No contiene:
 
 * decisiones comerciales
-
-
 * KPIs
-
-
 * objetivos
-
-
 * compensaciones
-
-
 
 ---
 
@@ -265,17 +199,9 @@ Aplicar reglas comerciales.
 Incluye:
 
 * CCC
-
-
 * MiNegocio
-
-
 * Coberturas
-
-
 * Objetivos
-
-
 
 ---
 
@@ -288,17 +214,9 @@ Visualización.
 Incluye:
 
 * dashboards
-
-
 * KPIs
-
-
 * proyecciones
-
-
 * exportaciones
-
-
 
 ---
 
@@ -328,13 +246,13 @@ STAGING is responsable exclusivo del ETL.
 
 ## DA-004
 
-CORE es responsable exclusivo de la interpretación operativa.
+CORE is responsable exclusivo de la interpretación operativa.
 
 ---
 
 ## DA-005
 
-BUSINESS RULES es responsable exclusivo de las decisiones comerciales.
+BUSINESS RULES is responsable exclusivo de las decisiones comerciales.
 
 ---
 
@@ -384,6 +302,34 @@ Implementaciones productivas confirmadas:
 
 ---
 
+## CCC
+
+✅ Productivo
+
+✅ Validado
+
+---
+
+## Objetivos
+
+✅ Productivo
+
+✅ Validado
+
+✅ Distribución validada sobre Universo vigente
+
+✅ Elegibilidad institucional validada
+
+✅ Integración con BUSINESS RULES validada
+
+Universo vigente
+↓
+Elegibilidad
+↓
+Distribución de Objetivos
+
+---
+
 Resultado institucional:
 
 BUSINESS RULES ya no se considera experimental.
@@ -407,6 +353,16 @@ Estado:
 Estado:
 
 ✅ Completado
+
+---
+
+## CCC
+
+Estado:
+
+✅ Completado
+
+✅ Validado
 
 ---
 
@@ -456,52 +412,30 @@ Estas capacidades quedan como líneas futuras de investigación y evolución que
 
 Orden aprobado:
 
-1. CCC
-
-
-2. Cobertura Marca
-
-
-3. Cobertura Innovación
-
-
-4. Gerencial
-
-
-5. Vespertina
-
-
+1. Cobertura Marca
+2. Cobertura Innovación
+3. Gerencial
+4. Vespertina
 
 ---
 
 # 11. SIGUIENTE OBJETIVO INSTITUCIONAL
 
-## CCC
+## Cobertura Marca
 
-Es la próxima migración aprobada.
+Estado:
 
-Arquitectura objetivo:
+⏳ Próxima migración institucional aprobada
 
-rep_ccc_core.py
+Objetivo:
+
+Migrar la lógica comercial de Cobertura Marca hacia BUSINESS RULES siguiendo el patrón institucional:
+
+Reporte
 ↓
-business_rules_ccc.py
+Business Rules
 ↓
-core_*
-
-Objetivos:
-
-* desacoplar lógica comercial
-
-
-* reutilizar CORE
-
-
-* consolidar fuente única CCC
-
-
-* eliminar dependencias futuras
-
-
+Core
 
 ---
 
@@ -513,12 +447,7 @@ Actualmente existen dependencias históricas que deberán eliminarse.
 
 Depende parcialmente de:
 
-* CCC
-
-
 * Cobertura Marca
-
-
 
 ---
 
@@ -527,8 +456,6 @@ Depende parcialmente de:
 Depende parcialmente de:
 
 * CCC
-
-
 
 ---
 
@@ -551,25 +478,92 @@ MANUAL_FUNCIONAL.md
 Especialmente:
 
 * Problema de Cierre
-
-
 * Filtro Empleados
-
-
 * Filtro PepsiCo
-
-
 * Exclusión Vendedor 20
-
-
 * Titularidad Operativa
-
-
 * Clasificación Temporal
 
-
-
 Ninguna optimización técnica puede contradecir estas reglas.
+
+---
+
+## PRINCIPIOS INSTITUCIONALES CRÍTICOS
+
+Toda IA que participe en MATINAL deberá asumir como verdades institucionales:
+
+### Principio 1
+
+Universo vigente
+↓
+Elegibilidad
+↓
+Distribución
+
+### Principio 2
+
+El potencial comercial distribuye objetivos.
+El potencial comercial NO crea objetivos.
+
+### Principio 3
+
+Toda distribución debe validar población elegible antes de calcular participaciones.
+
+### Principio 4
+
+Toda distribución debe validar conservación de masa.
+
+### Principio 5
+
+CORE interpreta la operación.
+CORE no distribuye objetivos.
+
+### Principio 6
+
+BUSINESS RULES es responsable de:
+
+* distribución de objetivos
+* apropiación comercial
+* reglas comerciales institucionales
+
+---
+
+# AUDITORÍAS INSTITUCIONALES COMPLETADAS
+
+## Auditoría de Reemplazos
+
+Estado:
+
+✅ Cerrada
+
+Hallazgos institucionales:
+
+✅ vendedor 99 validado
+✅ CodVendedorHistorico validado
+✅ balance de compensaciones validado
+✅ exclusión de Fuera de Período validada
+
+Resultado:
+
+No existe evidencia de generación artificial de volumen.
+
+## Auditoría de Objetivos
+
+Estado:
+
+✅ Cerrada
+
+Hallazgos institucionales:
+
+✅ Universo oficializado como fuente de elegibilidad.
+✅ Distribución validada sobre Universo vigente.
+✅ Conservación de masa validada.
+✅ Reglas institucionales formalizadas.
+✅ Arquitectura validada.
+
+Resultado:
+
+La diferencia observada quedó explicada y documentada institucionalmente.
 
 ---
 
@@ -628,35 +622,15 @@ BITACORA.md
 # 15. ORDEN DE LECTURA PARA UNA NUEVA IA
 
 1. GOBIERNO_IA.md
-
-
 2. CONTEXTO_IA.md
-
-
 3. ESTADO_ACTUAL.md
-
-
 4. ARQUITECTURA.md
-
-
 5. DECISIONES_TECNICAS.md
-
-
 6. MANUAL_FUNCIONAL.md
-
-
 7. DICCIONARIO_TABLAS.md
-
-
 8. CORE_OPERACION_V1.md
-
-
 9. CORE_VENTAS_BASE_V1.md
-
-
 10. BITACORA.md
-
-
 
 ---
 
@@ -758,44 +732,24 @@ Si una nueva IA está leyendo este documento debe asumir que:
 
 ✅ MiNegocio fue migrado.
 
+✅ CCC fue migrado y validado.
+
 ✅ Business Rules fue validada.
 
 ✅ Se implementó y validó la historización del Universo (`universo_hist`, `universo_versiones`, `HashSnapshot`) el 02/10/2026.
 
-✅ CCC es el siguiente objetivo institucional de migración de reportes.
+✅ Auditoría de Objetivos completada.
+
+✅ Auditoría de Reemplazos completada.
+
+✅ Universo vigente oficializado como fuente de elegibilidad.
+
+✅ Distribución de Objetivos validada.
+
+✅ Conservación de masa validada.
+
+✅ Cobertura Marca es la próxima migración aprobada.
 
 ✅ No deben proponerse arquitecturas alternativas sin evidencia objetiva.
 
 Con esta información la IA dispone del contexto mínimo necesario para continuar el desarrollo del proyecto sin perder continuidad técnica, funcional ni documental.
-INVESTIGACIÓN ACTIVA
-
-Tema:
-
-Compensaciones por reemplazo en KILOS.
-
-Estado:
-
-Abierta.
-
-Hallazgos confirmados:
-
-✅ vendedor 99 validado
-✅ -998 descartado
-✅ CodVendedorHistorico validado
-✅ balance validado
-✅ Fuera de Periodo descartado
-
-Hipótesis descartadas:
-
-- error en 99
-- error en -998
-- error de balance
-- error por Fuera de Periodo
-
-Pregunta pendiente:
-
-Explicar completamente la diferencia residual observada entre:
-
-kilos transferidos auditados
-vs
-kilos visibles por segmento

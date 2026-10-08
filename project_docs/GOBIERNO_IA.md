@@ -130,6 +130,28 @@ No el síntoma final.
 
 ---
 
+## 6A. POLÍTICA DE IDENTIFICACIÓN DE POBLACIONES
+
+### Regla
+
+Ante cualquier diferencia observada en resultados agregados deberá verificarse:
+
+* población fuente
+* población destino
+* exclusiones aplicadas
+* criterios de elegibilidad
+antes de analizar fórmulas o algoritmos.
+
+### Objetivo
+
+Evitar diagnósticos incorrectos originados por diferencias poblacionales.
+
+### Principio
+
+Toda auditoría deberá validar primero las poblaciones participantes y después los cálculos realizados sobre ellas.
+
+---
+
 # 7. POLÍTICA DE MODIFICACIÓN DE CÓDIGO
 
 ## Secuencia Obligatoria
@@ -293,6 +315,65 @@ antes y después de una transformación.
 ## Principio
 
 La conservación de masa constituye un criterio obligatorio de auditoría.
+
+---
+
+# 12A. POLÍTICA DE ELEGIBILIDAD
+
+### Objetivo
+
+Garantizar que toda distribución, asignación o apropiación comercial opere exclusivamente sobre poblaciones válidas y auditables.
+
+### Regla
+
+Antes de cualquier distribución deberá identificarse explícitamente:
+
+* población origen
+* población elegible
+* población excluida
+
+### Principio
+
+Ninguna distribución podrá ejecutarse sin validar previamente qué entidades son elegibles para participar.
+
+### Resultado Esperado
+
+Toda apropiación comercial deberá ser trazable respecto de la población utilizada.
+
+---
+
+# 12B. POLÍTICA DE CONSERVACIÓN DE MASA
+
+### Objetivo
+
+Garantizar la integridad matemática de cualquier distribución comercial.
+
+### Regla
+
+# Toda transformación de magnitudes deberá validar:
+SUM Entradas
+
+SUM Salidas
+antes de considerarse aprobada.
+
+### Alcance
+
+Aplica a:
+
+* objetivos
+* compensaciones
+* coberturas
+* apropiaciones
+* distribuciones
+* reasignaciones
+
+### Principio
+
+La conservación de masa constituye un criterio institucional obligatorio de validación.
+
+### Resultado Esperado
+
+Ningún proceso podrá crear ni destruir magnitudes sin justificación explícita y verificable.
 
 ---
 

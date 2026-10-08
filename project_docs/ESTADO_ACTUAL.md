@@ -1,7 +1,8 @@
+```markdown
 ## Estado Actual del Proyecto - MATINAL
 
 Versión: 3.1
-Fecha de actualización: 04/10/2026
+Fecha de actualización: 06/10/2026
 Estado: Producción Operativa
 Estado de validación: Confirmado mediante ejecución real y auditoría forense
 
@@ -21,7 +22,7 @@ Producto productivo en operación diaria.
 
 ### Frecuencia de uso
 
-Múltiples veces por día por usuarios operativos, supervisión y gerencia.
+Múltiples veces por day por usuarios operativos, supervisión y gerencia.
 
 ---
 
@@ -45,7 +46,7 @@ BAJO
 
 ### Última validación integral
 
-04/10/2026
+06/10/2026
 
 ### Resultado
 
@@ -185,10 +186,10 @@ Validar la consistencia funcional y técnica del modelo de compensaciones por re
 
 ### Componentes Auditados
 
-- core_operaciones.py
-- procesar_ausencias_y_reemplazos()
-- business_rules_kilos.py
-- calcular_compensaciones_reemplazos()
+- core_operaciones.py   
+- procesar_ausencias_y_reemplazos()   
+- business_rules_kilos.py   
+- calcular_compensaciones_reemplazos()   
 
 ### Hallazgos Confirmados
 
@@ -200,7 +201,7 @@ CodVendedor = 99
 
 Nombre:
 
-REEMPLAZO
+REEMPLAZO   
 
 #### H-002
 
@@ -208,7 +209,7 @@ El uso histórico de:
 
 -998
 
-queda descartado como identificador válido dentro del flujo operativo actual.
+queda descartado como identificador válido dentro del flujo operativo actual.   
 
 #### H-003
 
@@ -216,7 +217,7 @@ La columna:
 
 CodVendedorHistorico
 
-se encuentra implementada y utilizada para preservar la titularidad original de las operaciones antes de cualquier reasignación hacia CodVendedorVigente.
+se encuentra implementada y utilizada para preservar la titularidad original de las operaciones antes de cualquier reasignación hacia CodVendedorVigente.   
 
 #### H-004
 
@@ -228,7 +229,7 @@ utiliza:
 
 CodVendedorHistorico
 
-cuando dicha columna existe.
+cuando dicha columna existe.   
 
 #### H-005
 
@@ -238,8 +239,8 @@ Periodo = Fuera de Periodo
 
 y únicamente consideran:
 
-- Arrastre
-- Actual
+- Arrastre   
+- Actual   
 
 #### H-006
 
@@ -247,7 +248,7 @@ No se detectaron pérdidas de masa en las compensaciones.
 
 Toda salida posee una entrada equivalente.
 
-Balance validado.
+Balance validado.   
 
 ---
 
@@ -257,16 +258,16 @@ Balance validado.
 
 CodVendedor = 11
 
-ORTIZ
+ORTIZ   
 
 ### Contexto
 
 Se observó una diferencia significativa entre:
 
-- venta propia visible
-- ajuste por reemplazo
+- venta propia visible   
+- ajuste por reemplazo   
 
-lo que motivó una auditoría completa.
+lo que motivó una auditoría completa.   
 
 ### Resultado
 
@@ -274,50 +275,132 @@ Se verificó que:
 
 CodVendedorOperativo = 99
 
-posee operaciones reales asociadas a la cartera del vendedor 11.
+posee operaciones reales asociadas a la cartera del vendedor 11.   
 
 ### Evidencia Consolidada
 
 Transferencias auditadas:
 
-CodVendedor 11 → 99
+CodVendedor 11 → 99   
 
-86.504 kg
+86.504 kg   
 
-CodVendedor 25 → 99
+CodVendedor 25 → 99   
 
-68.973 kg
+68.973 kg   
 
-CodVendedor 10 → 99
+CodVendedor 10 → 99   
 
-3.464 kg
+3.464 kg   
 
 Total:
 
-158.941 kg
+158.941 kg   
 
 ### Conclusión
 
 No se encontró evidencia de generación artificial de kilos.
 
-Las compensaciones provienen de operaciones reales.
+Las compensaciones provienen de operaciones reales.   
 
 ---
 
-## 8. Hallazgos No Confirmados
+## 8. Auditoría Forense de Objetivos (06/10/2026)
+
+### Objetivo
+
+Validar la correcta distribución de los objetivos comerciales y determinar la causa raíz de la diferencia detectada entre el Objetivo Corporativo y el Objetivo Visible.
+
+### Componentes Auditados
+
+- core_potencial_cliente_segmento.py
+- business_rules_objetivo_clientes.py
+- business_rules_objetivo_carteras.py
+- business_rules_objetivo_segmentos.py
+
+### Hechos Confirmados
+
+- Objetivo Corporativo: 61.300 kg
+- Objetivo Visible previo: 61.227,37 kg
+- Diferencia identificada: 72,630941 kg
+
+### Hallazgos
+
+- 93 clientes fuera de Universo participaban en la distribución.
+- Generaban 71,647538 kg.
+- Clasificación: CLIENTE_SIN_CARTERA
+
+### Composición Auditada
+
+- CLIENTE_SIN_CARTERA: 71,647538 kg
+- VENDEDOR_NO_ASIGNADO: 0,983403 kg
+- TOTAL: 72,630941 kg
+
+### Causa Raíz Validada
+
+business_rules_objetivo_clientes distribuía objetivos utilizando la población proveniente de core_potencial_cliente_segmento sin filtrar previamente la población contra SELECT Codigo FROM universo. Como consecuencia, clientes fuera de universo seguían absorbiendo participación dentro de la distribución de objetivos.
+
+### Corrección Implementada
+
+Filtrado obligatorio mediante SELECT Codigo FROM universo antes del cálculo de:
+- ParticipacionMarcaSegmento
+- ParticipacionClienteDentroSegmento
+- ObjetivoClienteKg
+
+### Validaciones Ejecutadas
+
+✅ Auditoría de población utilizada por Objetivos.
+✅ Comparación entre Universo vigente y población de Potencial.
+✅ Validación de clientes excluidos.
+✅ Validación matemática de conservación de masa.
+✅ Validación de SUM ObjetivoClienteKg.
+✅ Validación de apropiación por cartera.
+✅ Identificación individual de diferencias residuales.
+
+### Resultados
+
+- SUM ObjetivoClienteKg: 61.300 kg
+- Resultado visible posterior: 61.299,02 kg
+- Diferencia residual: 0,983403 kg
+
+### Auditoría Residual
+
+- Cliente: 46987
+- Razón Social: LAURA
+- Hallazgos: 
+  - ✅ Existe en Universo.
+  - ✅ Participa correctamente en la distribución.
+  - ❌ Sin codven.
+  - ❌ Sin Ruta.
+- Resultado:
+  - Clasificación: VENDEDOR_NO_ASIGNADO
+  - Objetivo: 0,983403 kg
+
+### Conclusión Institucional
+
+✅ Distribución de objetivos validada exclusivamente sobre el padrón vigente de universo.
+✅ Clientes fuera de universo excluidos de la distribución.
+✅ Conservación de masa validada.
+✅ Diferencia residual completamente explicada.
+✅ No existe evidencia de falla algorítmica en la distribución.
+La diferencia residual restante corresponde exclusivamente a datos maestros incompletos del cliente 46987.
+
+---
+
+## 9. Hallazgos No Confirmados
 
 Actualmente NO existe evidencia que demuestre errores en:
 
-- CodVendedorHistorico
-- CodVendedorOperativo
-- vendedor 99
-- compensaciones
-- balance de reemplazos
-- exclusión de Fuera de Período
+- CodVendedorHistorico   
+- CodVendedorOperativo   
+- vendedor 99   
+- compensaciones   
+- balance de reemplazos   
+- exclusión de Fuera de Período   
 
 ---
 
-## 9. Investigación Actualmente Abierta
+## 10. Investigación Actualmente Abierta
 
 ### Estado
 
@@ -327,96 +410,96 @@ ABIERTA
 
 Explicar completamente la diferencia observada entre:
 
-- kilos transferidos auditados
-- kilos visibles por segmento en la matriz comercial
+- kilos transferidos auditados   
+- kilos visibles por segmento en la matriz comercial   
 
 ### Hipótesis pendientes
 
-- diferencias de segmentación comercial
-- clasificación por Rubro
-- clasificación por Familia
-- exclusiones posteriores al cálculo operativo
+- diferencias de segmentación comercial   
+- clasificación por Rubro   
+- clasificación por Familia   
+- exclusiones posteriores al cálculo operativo   
 
 ### Restricción
 
-No modificar código hasta identificar evidencia del primer punto de divergencia.
+No modificar código hasta identificar evidencia del primer punto de divergencia.   
 
 ---
 
-## 10. Módulos Operativos en Producción
+## 11. Módulos Operativos en Producción
 
 ### Dashboard Gerencial
 
-✅ Productivo
+✅ Productivo   
 
 ### CCC
 
-✅ Productivo
+✅ Productivo   
 
 ### Mi Negocio
 
-✅ Productivo
+✅ Productivo   
 
 ### Kilos
 
-✅ Productivo
+✅ Productivo   
 
 Incluye:
 
-- objetivos
-- compensaciones
-- reemplazos
-- proyecciones
-- titularidad operativa
+- objetivos   
+- compensaciones   
+- reemplazos   
+- proyecciones   
+- titularidad operativa   
 
 ### Cobertura Marca
 
-✅ Productivo
+✅ Productivo   
 
 ### Cobertura Innovación
 
-✅ Productivo
+✅ Productivo   
 
 ### Parámetros
 
-✅ Productivo
+✅ Productivo   
 
 ### Vespertina
 
-✅ Productivo
+✅ Productivo   
 
 ---
 
-## 11. Fuente de Verdad Institucional
+## 12. Fuente de Verdad Institucional
 
 Los siguientes conceptos tienen prioridad absoluta:
 
-- Día Matinal
-- Problema de Cierre
-- Ausencias
-- Reemplazos
-- Titularidad Operativa
-- Objetivos
-- Universo Operativo
-- Estructura Comercial
+- Día Matinal   
+- Problema de Cierre   
+- Ausencias   
+- Reemplazos   
+- Titularidad Operativa   
+- Objetivos   
+- Universo Operativo   
+- Estructura Comercial   
 
-Toda optimización que contradiga alguno de estos conceptos deberá rechazarse.
+Toda optimización que contradiga alguno de estos conceptos deberá rechazarse.   
 
 ---
 
-## 12. Estado Técnico Consolidado
+## 13. Estado Técnico Consolidado
 
 ### STAGING
 
-✅ Consolidado
+✅ Consolidado   
 
 ### CORE
 
-✅ Consolidado
+✅ Consolidado   
 
 ### BUSINESS RULES
 
-✅ Consolidado
+✅ Consolidado   
 
 ### Patrón Arquitectónico
 
@@ -428,55 +511,60 @@ Core
 
 Estado:
 
-✅ Validado
-✅ Productivo
+✅ Validado   
+✅ Productivo   
 
 ---
 
-## 13. Historización
+## 14. Historización
 
 Implementado:
 
 ✅ universo_hist
-
 ✅ universo_versiones
-
 ✅ HashSnapshot
-
 ✅ snapshots automáticos
-
-✅ persistencia SQLite validada
+✅ persistencia SQLite validada   
 
 ---
 
-## 14. Resumen Ejecutivo
+## 15. Resumen Ejecutivo
 
 Estado General:
 
-✅ Producción Operativa
+✅ Producción Operativa   
 
 Arquitectura:
 
-✅ RAW → SQLITE → STAGING → CORE → BUSINESS RULES → REPORTES
+✅ RAW → SQLITE → STAGING → CORE → BUSINESS RULES → REPORTES   
 
 Migraciones Validadas:
 
-✅ Kilos
-✅ MiNegocio
-✅ CCC
+✅ Kilos   
+✅ MiNegocio   
+✅ CCC   
 
 Auditoría de Reemplazos:
 
-✅ vendedor 99 validado
-✅ CodVendedorHistorico validado
-✅ balance validado
-✅ Fuera de Período descartado
-✅ reemplazos auditados con datos reales
+✅ vendedor 99 validado   
+✅ CodVendedorHistorico validado   
+✅ balance validado   
+✅ Fuera de Período descartado   
+✅ reemplazos auditados con datos reales   
+
+Auditoría de Objetivos:
+
+✅ Distribución sobre universo vigente validada
+✅ Filtrado obligatorio contra universo implementado
+✅ Diferencia huérfana de clientes fuera de universo eliminada
+✅ Diferencia residual explicada (Cliente 46987)
+✅ 93 clientes fuera de universo identificados y excluidos.
+✅ Conservación de masa validada (61.300 kg).
 
 Investigación Abierta:
 
-⏳ reconciliación final entre compensaciones segmentadas y matriz comercial
+⏳ reconciliación final entre compensaciones segmentadas y matriz comercial   
 
 Nivel de Riesgo:
 
-✅ Bajo
+✅ Bajo   

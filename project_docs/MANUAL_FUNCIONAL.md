@@ -14,35 +14,17 @@ Este documento constituye la referencia funcional oficial del sistema MATINAL.
 Su objetivo es definir:
 
 * Cómo se interpreta la operación comercial.
-
-
 * Qué reglas funcionales son válidas.
-
-
 * Qué criterios utiliza el negocio.
-
-
 * Qué condiciones determinan indicadores, coberturas y métricas.
-
-
 * Qué reglas tienen prioridad cuando existe conflicto.
-
-
 
 Este documento no describe:
 
 * Código.
-
-
-* Arquitectura.
-
-
+* Arquitectura. mismismos.
 * Migraciones.
-
-
 * Implementaciones técnicas.
-
-
 
 Su propósito es describir exclusivamente el comportamiento funcional esperado del sistema.
 
@@ -121,11 +103,7 @@ Subramo
 ### Valores Excluidos
 
 * EMPLEADOS
-
-
 * EMPLOYEES
-
-
 
 ### Alcance
 
@@ -186,8 +164,6 @@ Determinar quién ejecutó efectivamente una venta y construir la cartera operat
 ### Resultado
 
 * CodVendedorOperativo
-
-
 * Cartera Operativa por Vendedor
 
 ---
@@ -231,11 +207,7 @@ La ejecución operativa y la titularidad comercial constituyen conceptos diferen
 Una venta puede:
 
 * pertenecer comercialmente a un vendedor
-
-
 * ser ejecutada operativamente por otro
-
-
 
 simultáneamente.
 
@@ -262,11 +234,7 @@ se considera que existe una operación realizada mediante reemplazo.
 El volumen comercial deberá:
 
 * descontarse del titular histórico
-
-
 * acreditarse al vendedor operativo
-
-
 
 manteniendo conservación total de masa.
 
@@ -275,20 +243,12 @@ manteniendo conservación total de masa.
 Sólo participan operaciones clasificadas como:
 
 * Arrastre
-
-
 * Actual
-
-
 
 Quedan excluidas:
 
 * Futuro
-
-
 * Fuera de Período
-
-
 
 ### Principio de Balance
 
@@ -363,17 +323,9 @@ Determinar avance operativo de vendedores.
 ### Resultados
 
 * días trabajados
-
-
 * días restantes
-
-
 * días ajustados
-
-
 * ritmo de ejecución
-
-
 
 ---
 
@@ -400,17 +352,9 @@ Construir el universo evaluable de CCC a partir de la cartera operativa instituc
 ### Consideraciones
 
 * Altas
-
-
 * Reactivaciones
-
-
 * Inactivaciones
-
-
 * Cierres definitivos
-
-
 
 ---
 
@@ -481,11 +425,7 @@ Minimo_Facturacion_70
 La adopción digital se define exclusivamente mediante:
 
 * ventas totales
-
-
 * ventas MiNegocio
-
-
 
 No se utilizan encuestas ni clasificaciones manuales.
 
@@ -526,14 +466,8 @@ La cobertura sólo puede generarse mediante compras válidas.
 Los objetivos se asignan por:
 
 * vendedor
-
-
 * segmento
-
-
 * período
-
-
 
 ---
 
@@ -548,6 +482,84 @@ objetivos_vendedores
 ## OBJ-003 - Cumplimiento
 
 Toda evaluación de cumplimiento se realiza contra el objetivo vigente del período.
+
+---
+
+## OBJ-004 - Distribución de Objetivos
+
+### Objetivo
+
+Distribuir los objetivos corporativos entre marcas, segmentos y clientes utilizando el potencial comercial vigente.
+
+### Principio
+
+El potencial comercial no genera objetivos.
+Los objetivos provienen exclusivamente de los objetivos corporativos definidos para cada marca.
+El potencial comercial determina únicamente cómo se distribuyen dichos objetivos.
+
+### Jerarquía de Distribución
+
+Objetivo Marca
+↓
+Segmento
+↓
+Cliente
+
+### Fórmula Funcional
+
+# ObjetivoClienteKg
+
+ObjetivoMarcaKg
+× ParticipacionMarcaSegmento
+× ParticipacionClienteDentroSegmento
+
+### ParticipacionMarcaSegmento
+
+PotencialMarcaSegmentoTotal
+/
+PotencialMarcaGlobal
+
+### ParticipacionClienteDentroSegmento
+
+PotencialKg
+/
+PotencialMarcaSegmentoTotal
+
+### Resultado
+
+La suma de los objetivos distribuidos deberá conservar el objetivo total originalmente asignado a la marca.
+
+---
+
+## OBJ-005 - Elegibilidad para Distribución de Objetivos
+
+### Objetivo
+
+Determinar qué clientes pueden participar en la distribución de objetivos.
+
+### Regla
+
+Sólo podrán participar clientes pertenecientes al Universo vigente del período.
+
+### Alcance
+
+Aplica a:
+
+* ParticipacionMarcaSegmento
+* ParticipacionClienteDentroSegmento
+* ObjetivoClienteKg
+
+### Exclusión
+
+Los clientes que no pertenezcan al Universo vigente no participarán de la distribución de objetivos.
+
+### Principio de Consistencia
+
+La distribución de objetivos deberá realizarse sobre la misma población utilizada como Universo Comercial vigente.
+
+### Resultado Esperado
+
+La distribución de objetivos y el Universo Comercial deberán representar la misma población elegible.
 
 ---
 
@@ -566,11 +578,7 @@ PesoKg
 El ritmo de ejecución surge del cruce entre:
 
 * volumen acumulado
-
-
 * calendario operativo
-
-
 
 ---
 
@@ -579,14 +587,8 @@ El ritmo de ejecución surge del cruce entre:
 Las proyecciones utilizan:
 
 * avance actual
-
-
 * días restantes
-
-
 * calendario operativo
-
-
 
 ---
 
@@ -637,17 +639,9 @@ Auditar el impacto operativo del Día Venta.
 Si una venta cumple una regla comercial pero viola:
 
 * Problema de Cierre
-
-
 * Filtro Empleados
-
-
 * Filtro PepsiCo
-
-
 * Exclusión Vendedor 20
-
-
 
 la venta queda excluida.
 
@@ -662,17 +656,9 @@ Las reglas definidas en este documento constituyen la referencia funcional ofici
 Toda nueva funcionalidad deberá:
 
 1. Identificar la regla funcional asociada.
-
-
 2. Clasificar la regla dentro de este manual.
-
-
 3. Respetar la jerarquía institucional.
-
-
 4. Mantener compatibilidad con las reglas críticas.
-
-
 
 Si existe discrepancia entre código y este documento:
 

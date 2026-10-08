@@ -1,7 +1,5 @@
 ## DICCIONARIO DE TABLAS - MATINAL
 
-
-
 Versión: 3.0
 
 Fecha de actualización: 30/09/2026
@@ -14,27 +12,15 @@ Estado de validación: Producción Operativa
 
 # 1. PROPÓSITO DEL DOCUMENTO
 
-
-
 El presente documento constituye la fuente de verdad institucional para la estructura de datos de MATINAL.
 
 Su objetivo es documentar:
 
 * Tablas físicas persistidas en SQLite.
-
-
 * Entidades expuestas por STAGING.
-
-
 * Entidades consumidas por CORE.
-
-
 * Entidades disponibles en BUSINESS RULES.
-
-
 * Contratos de datos institucionales.
-
-
 
 Ante cualquier discrepancia:
 
@@ -57,8 +43,6 @@ Recién después revisar el código fuente.
 
 # 2. ARQUITECTURA DE DATOS OFICIAL
 
-
-
 RAW
 ↓
 SQLITE
@@ -75,41 +59,27 @@ REPORTES
 
 ## Principios Institucionales
 
-
-
 ### RAW
-
-
 
 Recibe información externa.
 
 ### SQLITE
 
-
-
 Persiste información.
 
 ### STAGING
-
-
 
 Normaliza y tipa.
 
 ### CORE
 
-
-
 Interpreta la operación.
 
 ### BUSINESS RULES
 
-
-
 Aplica reglas comerciales.
 
 ### REPORTES
-
-
 
 Presentan resultados.
 
@@ -117,157 +87,79 @@ Presentan resultados.
 
 # 3. PERSISTENCIA OFICIAL
 
-
-
 ## Ubicación
-
-
 
 data/matinal.db
 
 ## Motor
 
-
-
 SQLite
 
 ## Modo
-
-
 
 WAL (Write Ahead Logging)
 
 ## Características
 
-
-
 * Fuente física única de datos.
-
-
 * Persistencia institucional.
-
-
 * Lectura desacoplada de Excel.
-
-
 * Alto rendimiento.
-
-
 * Base oficial de la arquitectura.
-
-
 
 ---
 
 # A. TABLAS TRANSACCIONALES
 
-
-
 ## VTA
 
-
-
 ### Nombre Técnico
-
-
 
 vta
 
 ### Clasificación
 
-
-
 Transaccional
 
 ### Descripción
-
-
 
 Registro completo de transacciones comerciales utilizadas por los procesos operativos y analíticos del sistema.
 
 ### Origen
 
-
-
 VTA.xlsx
 
 ### Campos Relevantes
 
-
-
 * CodVendedor
-
-
 * Cliente
-
-
 * FechaCarga
-
-
 * FechaEntrega
-
-
 * FechaLiquidacion
-
-
 * PesoKg
-
-
 * CantBase
-
-
 * ImporteNetoItem
-
-
 * Marca
-
-
 * Proveedor
-
-
 * Articulo
-
-
 * Subramo
-
-
 * TipoDeVenta
-
-
 
 ### Índices Institucionales
 
-
-
 * idx_vta_vendedor
-
-
 * idx_vta_cliente
-
-
 * idx_vta_fechacarga
-
-
 * idx_vta_fechaentrega
-
-
 * idx_vta_marca
-
-
 
 ### Consumidores
 
-
-
 #### STAGING
-
-
 
 obtener_staging_vta()
 
 #### CORE
-
-
 
 obtener_core_operacion()
 
@@ -275,15 +167,11 @@ obtener_core_ventas_base()
 
 #### BUSINESS RULES
 
-
-
 business_rules_kilos.py
 
 business_rules_mn.py
 
 #### REPORTES
-
-
 
 Todos los reportes comerciales a través de capas intermedias.
 
@@ -291,120 +179,73 @@ Todos los reportes comerciales a través de capas intermedias.
 
 ### Contrato STAGING Garantizado
 
-
-
 * FechaCarga_dt
-
-
 * FechaEntrega_dt
-
-
 * CodVendedor
-
-
 * Cliente
-
-
 * PesoKg
-
-
 * CantBase
-
-
 * ImporteNetoItem
-
-
 * Marca
-
-
 
 ---
 
 # B. TABLAS MAESTRAS
 
-
-
 ## UNIVERSO
 
-
-
 ### Nombre Técnico
-
-
 
 universo
 
 ### Clasificación
 
-
-
 Maestra
 
 ### Descripción
 
-
-
-Padrón institucional de clientes. Constituye la fuente oficial de: universo elegible, taxonomías, segmentación y titularidad comercial.
+Padrón institucional de clientes. Constituye la fuente oficial de: universo elegible, taxonomías, segmentación y titularidad comercial. Constituye además la fuente oficial de elegibilidad para la distribución institucional de objetivos.
 
 ### Origen
-
-
 
 UNIVERSO.xlsx
 
 ### Campos Relevantes
 
-
-
 * Codigo
-
-
 * Cliente
-
-
 * SegmentoClienteCodigo
-
-
 * CodVen
-
-
 * Razon_Social
-
-
 * Subramo
-
-
 * Direccion
 
+### Responsabilidades Institucionales
 
+* Universo comercial vigente.
+* Titularidad comercial.
+* Segmentación de clientes.
+* Taxonomías institucionales.
+* Fuente de elegibilidad para distribución de objetivos.
+* Población oficial de clientes operativos.
 
 ### Consumidores
 
-
-
 #### STAGING
-
-
 
 obtener_staging_clientes()
 
 #### CORE
 
-
-
 obtener_core_clientes()
 
 #### BUSINESS RULES
-
-
 
 business_rules_mn.py
 
 business_rules_ccc.py
 
 #### REPORTES
-
-
 
 CCC
 
@@ -416,270 +257,175 @@ Vespertina
 
 ---
 
+### Consumidores de Elegibilidad
+
+#### BUSINESS RULES
+
+* business_rules_objetivo_clientes.py
+* business_rules_objetivo_segmentos.py
+* business_rules_objetivo_carteras.py
+
+#### Propósito
+
+Determinar la población elegible para:
+
+* ParticipacionMarcaSegmento
+* ParticipacionClienteDentroSegmento
+* ObjetivoClienteKg
+
+---
+
+### Principio Institucional
+
+Toda distribución de objetivos deberá utilizar exclusivamente clientes pertenecientes al Universo vigente.
+El Universo constituye la fuente oficial de elegibilidad comercial del sistema.
+
+---
+
 ### Contrato STAGING Garantizado
 
-
-
 * Cliente
-
-
 * Taxonomia
-
-
 * NombreCliente
-
-
 * CodVendedor
-
-
 
 ---
 
 ## UNIVERSO_HIST
 
-
-
 ### Nombre Técnico
-
-
 
 universo_hist
 
 ### Clasificación
 
-
-
 Maestra Histórica
 
 ### Estado
 
-
-
 ✅ Implementada
 
 ### Descripción
-
-
 
 Histórico completo de snapshots del universo comercial. Permite preservar la evolución temporal de la cartera y registrar los cambios de titularidad.
 
 ### Origen
 
-
-
 Proceso automático de versionado de Universo
 
 ### Campos Relevantes
 
-
-
 * FechaSnapshot
-
-
 * FechaCargaSistema
-
-
 * HashSnapshot
 
-
-
 ### Modelo
-
-
 
 Una fila por cliente por versión.
 
 ### Consumidores
 
-
-
 #### Consumidores Actuales
-
-
 
 Ninguno.
 
 #### Consumidores Futuros
 
-
-
 * Administración SQL
-
-
 * Auditorías
-
-
 * Comparación histórica
-
-
 * Reconstrucción temporal de cartera
-
-
 
 ---
 
 ## UNIVERSO_VERSIONES
 
-
-
 ### Nombre Técnico
-
-
 
 universo_versiones
 
 ### Clasificación
 
-
-
 Maestra de Control de Versiones
 
 ### Estado
-
-
 
 ✅ Implementada
 
 ### Descripción
 
-
-
 Catálogo de versiones del universo comercial, encargado de registrar los metadatos y resúmenes de cada snapshot generado.
 
 ### Origen
-
-
 
 Proceso automático de control de cambios de Universo
 
 ### Campos Relevantes
 
-
-
 * VersionID
-
-
 * FechaSnapshot
-
-
 * FechaCargaSistema
-
-
 * HashSnapshot
-
-
 * CantClientes
 
-
-
 ### Modelo
-
-
 
 Una fila por snapshot.
 
 ### Consumidores
 
-
-
 #### Consumidores Actuales
-
-
 
 Ninguno.
 
 #### Consumidores Futuros
 
-
-
 * Administración SQL
-
-
 * Auditorías
-
-
 * Comparación histórica
-
-
 * Reconstrucción temporal de cartera
-
-
 
 ---
 
 ## RUTAS
 
-
-
 ### Nombre Técnico
-
-
 
 rutas
 
 ### Clasificación
 
-
-
 Maestra Operativa
 
 ### Descripción
-
-
 
 Calendario operativo institucional.
 
 Fuente oficial para:
 
 * días pasados
-
-
 * días restantes
-
-
 * ritmo operativo
-
-
 * proyecciones
 
-
-
 ### Origen
-
-
 
 RUTAS.xlsx
 
 ### Campos Relevantes
 
-
-
 * Fecha
-
-
 * CodVen
-
-
 * CodVendedor
-
-
 * Vendedor
-
-
 
 ### Consumidores
 
-
-
 #### STAGING
-
-
 
 obtener_staging_rutas()
 
 #### CORE
-
-
 
 calcular_calendario_y_rutas()
 
@@ -689,69 +435,37 @@ obtener_core_operacion()
 
 ## ALTAS
 
-
-
 ### Nombre Técnico
-
-
 
 altas
 
 ### Clasificación
 
-
-
 Maestra Operativa
 
 ### Descripción
-
-
 
 Registro consolidado de movimientos de cartera.
 
 ### Origen
 
-
-
 ALTAS.xlsx
 
 ### Campos Relevantes
 
-
-
 * Fecha
-
-
 * Codigo
-
-
 * Estado
-
-
 * Origen_Hoja
-
-
 
 ### Tablas Auxiliares
 
-
-
 * altas_creacion
-
-
 * altas_activacion
-
-
 * altas_inactivacion
-
-
 * altas_modificacion
 
-
-
 ### Consumidores
-
-
 
 CCC
 
@@ -761,61 +475,37 @@ Gerencial
 
 ## AUSENCIAS
 
-
-
 ### Nombre Técnico
-
-
 
 ausencias
 
 ### Clasificación
 
-
-
 Operativa
 
 ### Estado
-
-
 
 ✅ Implementada
 
 ### Descripción
 
-
-
 Fuente oficial de ausencias y reemplazos de vendedores.
 
 ### Propósito Institucional
 
-
-
 Determinar:
 
 * CodVendedorOperativo
-
-
 * reemplazos
-
-
 * titularidad temporal
-
-
 
 ### Consumidores
 
-
-
 #### STAGING
-
-
 
 obtener_staging_ausencias()
 
 #### CORE
-
-
 
 procesar_ausencias_y_reemplazos()
 
@@ -825,31 +515,17 @@ obtener_core_operacion()
 
 ### Contrato STAGING Garantizado
 
-
-
 * Fecha_dt
-
-
 * CodVend_clean
-
-
 * Reemplazo_clean
-
-
 
 ---
 
 # C. ENTIDADES STAGING
 
-
-
 ## Activas
 
-
-
 ### obtener_staging_vta()
-
-
 
 Dominio:
 
@@ -857,15 +533,11 @@ Ventas
 
 ### obtener_staging_clientes()
 
-
-
 Dominio:
 
 Clientes
 
 ### obtener_staging_rutas()
-
-
 
 Dominio:
 
@@ -873,15 +545,11 @@ Calendario operativo
 
 ### obtener_staging_ausencias()
 
-
-
 Dominio:
 
 Ausencias y reemplazos
 
 ### obtener_staging_maestros()
-
-
 
 Dominio:
 
@@ -891,11 +559,7 @@ Catálogos institucionales
 
 # D. ENTIDADES CORE
 
-
-
 ## obtener_core_ventas_base()
-
-
 
 Responsabilidad:
 
@@ -905,8 +569,6 @@ Ventas institucionales base.
 
 ## obtener_core_clientes()
 
-
-
 Responsabilidad:
 
 Clientes institucionales.
@@ -914,8 +576,6 @@ Clientes institucionales.
 ---
 
 ## obtener_core_vendedores()
-
-
 
 Responsabilidad:
 
@@ -925,8 +585,6 @@ Padrón institucional de vendedores.
 
 ## obtener_core_operacion()
 
-
-
 Responsabilidad:
 
 Interpretación operativa consolidada.
@@ -934,48 +592,32 @@ Responsable de:
 
 * construcción de cartera operativa por vendedor
 
-
-
 Incluye:
 
 * reemplazos
-
-
 * ausencias
-
-
 * calendario
-
-
 * clasificación temporal
-
-
 * vendedor operativo
-
-
 
 ### Modelo Institucional de Cartera Operativa
 
+# UNIVERSO
 
-
-UNIVERSO
-=
 universo elegible
 
-VTA
-=
+# VTA
+
 evidencia transaccional válida
 
-CORE_OPERACION
-=
+# CORE_OPERACION
+
 constructor oficial de cartera operativa
 
 Resultado:
 Cartera Operativa por Vendedor
 
 ### Flujo Institucional de Cartera
-
-
 
 VTA
 +
@@ -994,11 +636,7 @@ La cartera consumida por BUSINESS RULES no surge directamente de UNIVERSO. La ca
 
 #### Columnas Operativas Auditadas
 
-
-
 ##### CodVendedorHistorico
-
-
 
 Descripción:
 
@@ -1016,8 +654,6 @@ Estado:
 
 ##### CodVendedorVigente
 
-
-
 Descripción:
 
 Titular comercial vigente luego de aplicar reglas operativas de cartera.
@@ -1033,8 +669,6 @@ Estado:
 ---
 
 ##### CodVendedorOperativo
-
-
 
 Descripción:
 
@@ -1056,8 +690,6 @@ Estado:
 
 ##### Reemplazo
 
-
-
 Descripción:
 
 Identificador del vendedor que reemplaza temporalmente al titular.
@@ -1074,22 +706,12 @@ Estado:
 
 ##### Periodo
 
-
-
 Valores permitidos:
 
 * Arrastre
-
-
 * Actual
-
-
 * Futuro
-
-
 * Fuera de Período
-
-
 
 Implementación:
 
@@ -1104,31 +726,19 @@ Observación:
 Las compensaciones utilizan exclusivamente:
 
 * Arrastre
-
-
 * Actual
-
-
 
 ---
 
 # E. ENTIDADES BUSINESS RULES
 
-
-
 ## business_rules_repository.py
 
-
-
 ### Estado
-
-
 
 ✅ Implementado
 
 ### Responsabilidad
-
-
 
 Servicios compartidos reutilizables.
 
@@ -1136,11 +746,7 @@ Servicios compartidos reutilizables.
 
 ## business_rules_kilos.py
 
-
-
 ### Estado
-
-
 
 ✅ Implementado
 
@@ -1150,33 +756,17 @@ Servicios compartidos reutilizables.
 
 ### Dominio Funcional
 
-
-
 Kilos
 
 ### Responsabilidades
 
-
-
 * Matriz comercial de Kilos
-
-
 * Objetivos
-
-
 * Clasificación operativa
-
-
 * Integración con CORE
-
-
 * Consumo de reemplazos
 
-
-
 ### Consumidores
-
-
 
 rep_kilos_core.py
 
@@ -1184,11 +774,7 @@ rep_kilos_core.py
 
 ## business_rules_mn.py
 
-
-
 ### Estado
-
-
 
 ✅ Implementado
 
@@ -1198,48 +784,22 @@ rep_kilos_core.py
 
 ### Dominio Funcional
 
-
-
 MiNegocio
 
 ### Responsabilidades
 
-
-
 * Ventas Totales
-
-
 * Ventas MiNegocio
-
-
 * Pct_MiNegocio
-
-
 * Clasificación Digital
-
-
 * No Digital
-
-
 * Híbrido
-
-
 * Fully Digital
-
-
 * Minimo_Facturacion_70
-
-
 * Adopción Digital
-
-
 * Matriz Comercial de Cliente
 
-
-
 ### Validación Institucional
-
-
 
 ✅ TOTAL CARTERA = 5617
 
@@ -1247,13 +807,9 @@ MiNegocio
 
 ### Consumidores
 
-
-
 rep_MN_core.py
 
 ### Consumidores Futuros Aprobados
-
-
 
 rep_gerencial.py
 
@@ -1261,11 +817,7 @@ rep_gerencial.py
 
 ## business_rules_ccc.py
 
-
-
 ### Estado
-
-
 
 ✅ Implementada
 
@@ -1275,26 +827,14 @@ rep_gerencial.py
 
 ### Dominio Funcional
 
-
-
 CCC
 
 ### Responsabilidades
 
-
-
 * Reglas comerciales de CCC
-
-
 * Integración con CORE y UNIVERSO
-
-
 * Procesamiento analítico de cartera CCC
 
-
-
 ### Consumidores
-
-
 
 rep_ccc_core.py

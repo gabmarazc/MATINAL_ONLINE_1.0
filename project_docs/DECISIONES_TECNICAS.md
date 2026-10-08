@@ -565,6 +565,85 @@ objetivos_vendedores
 
 ---
 
+## DT.41A: Universo Vigente como Fuente Oficial de Elegibilidad para Objetivos
+
+### Fecha
+
+06/10/2026
+
+### Estado
+
+Vigente ✅
+
+### Decisión
+
+Se establece formalmente que toda distribución de objetivos cliente deberá realizarse exclusivamente sobre clientes pertenecientes al Universo vigente.
+
+### Fuente Oficial
+
+universo
+Consulta institucional de referencia:
+SELECT Codigo FROM universo
+
+### Principio Institucional
+
+La elegibilidad de clientes para distribución de objetivos se determina exclusivamente mediante el Universo vigente.
+Los clientes que no pertenezcan al Universo vigente no podrán participar en:
+
+* ParticipacionMarcaSegmento
+* ParticipacionClienteDentroSegmento
+* ObjetivoClienteKg
+
+### Orden Institucional Obligatorio
+
+Universo vigente
+↓
+Población elegible
+↓
+ParticipacionMarcaSegmento
+↓
+ParticipacionClienteDentroSegmento
+↓
+ObjetivoClienteKg
+
+### Contexto
+
+Durante la Auditoría Forense de Distribución de Objetivos de Octubre 2026 se detectó que clientes externos al Universo vigente seguían participando indevidamente en la distribución debido a que la población proveniente de:
+core_potencial_cliente_segmento
+no era validada previamente contra el padrón vigente.
+
+### Hallazgos Validados
+
+* 93 clientes fuera de Universo participaban en la distribución.
+* Generaban 71,647538 kg de objetivo huérfano.
+* Se observó inconsistencia entre Objetivos y Universo Comercial.
+
+### Corrección Institucional
+
+Se incorporó validación obligatoria de elegibilidad utilizando:
+SELECT Codigo FROM universo
+antes del cálculo de:
+
+* ParticipacionMarcaSegmento
+* ParticipacionClienteDentroSegmento
+* ObjetivoClienteKg
+
+### Resultado Validado
+
+✅ Distribución validada sobre Universo vigente.
+✅ 93 clientes fuera de Universo excluidos de la distribución.
+✅ 71,647538 kg redistribuidos correctamente.
+✅ Conservación de masa validada.
+✅ SUM ObjetivoClienteKg = 61.300 kg.
+✅ Universo vigente oficializado como padrón institucional de elegibilidad para objetivos.
+
+### Consecuencia
+
+Toda futura implementación de objetivos deberá respetar este orden de validación.
+Ninguna distribución de objetivos podrá calcular participaciones utilizando clientes externos al Universo vigente.
+
+---
+
 ## DT.42: Desacoplamiento de Reportes
 
 ### Fecha

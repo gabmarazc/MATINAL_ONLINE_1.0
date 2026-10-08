@@ -77,6 +77,7 @@ WARNING | matinal.database |
 La tabla consultada no existe en el catálogo de SQLite.
 SELECT * FROM parametros_marcas
 
+
 ```
 
 ## Acción Realizada
@@ -274,6 +275,7 @@ obtener_staging_ausencias        0.0087 s
 procesar_ausencias_y_reemplazos  0.7176 s
 obtener_core_operacion          13.4367 s
 obtener_matriz_kilos_comercial  14.6438 s
+
 
 ```
 
@@ -921,7 +923,7 @@ Se verificó:
 
 ✅ preparado para futuras auditorías de cartera
 
-✅ preparado para análisis futuro del Caso ID2
+✅ preparado för análisis futuro del Caso ID2
 
 #### Estado
 
@@ -1195,3 +1197,119 @@ No se encontró evidencia suficiente para afirmar la existencia de un bug en:
 calcular_compensaciones_reemplazos()
 
 La investigación continúa abierta hasta identificar el primer punto exacto de divergencia entre la auditoría de origen y la matriz comercial final.
+
+---
+
+# INC-2026-10-06-001
+
+## Título
+
+Auditoría Forense de Distribución de Objetivos sobre Universo Vigente
+
+## Fecha de Apertura
+
+06/10/2026
+
+## Fecha de Cierre
+
+06/10/2026
+
+## Contexto
+
+Durante la validación funcional del módulo de Objetivos se detectó una diferencia entre:
+Objetivo Corporativo:
+61.300 kg
+Objetivo Visible:
+61.227,37 kg
+Diferencia:
+72,630941 kg
+Se inició una auditoría forense completa utilizando exclusivamente evidencia observable.
+
+## Componentes Auditados
+
+CORE
+
+* core_potencial_cliente_segmento.py
+BUSINESS RULES
+* business_rules_objetivo_clientes.py
+* business_rules_objetivo_carteras.py
+* business_rules_objetivo_segmentos.py
+
+## Hallazgos Confirmados
+
+* 93 clientes fuera de Universo participaban en la distribución.
+* Generaban 71,647538 kg.
+* Clasificación:
+CLIENTE_SIN_CARTERA
+
+## Composición auditada
+
+CLIENTE_SIN_CARTERA:
+71,647538 kg
+VENDEDOR_NO_ASIGNADO:
+0,983403 kg
+TOTAL:
+72,630941 kg
+
+## Causa Raíz
+
+business_rules_objetivo_clientes utilizaba la población proveniente de core_potencial_cliente_segmento sin filtrado previo contra el universo vigente.
+
+## Corrección Implementada
+
+Filtrado obligatorio mediante:
+SELECT Codigo FROM universo
+antes del cálculo de:
+
+* ParticipacionMarcaSegmento
+* ParticipacionClienteDentroSegmento
+* ObjetivoClienteKg
+
+## Validaciones Ejecutadas
+
+✅ Auditoría de población.
+✅ Auditoría de universo vigente.
+✅ Validación matemática de conservación de masa.
+✅ Validación de distribución de objetivos.
+✅ Identificación de diferencias residuales.
+
+## Resultado
+
+SUM ObjetivoClienteKg:
+61.300 kg
+Resultado visible posterior:
+61.299,02 kg
+Diferencia residual:
+0,983403 kg
+
+## Auditoría Residual
+
+Cliente:
+46987
+Razon Social:
+LAURA
+Hallazgos:
+✅ Existe en Universo.
+❌ Sin codven.
+❌ Sin Ruta.
+Resultado:
+Clasificación:
+VENDEDOR_NO_ASIGNADO
+Objetivo:
+0,983403 kg
+
+## Resultado Institucional
+
+✅ Distribución validada sobre universo vigente.
+✅ Clientes fuera de universo excluidos de la distribución.
+✅ Conservación de masa validada.
+✅ Identificación completa de la diferencia residual.
+
+## Conclusión
+
+Los 71,647538 kg asociados a clientes fuera de universo quedaron eliminados de la distribución.
+La diferencia residual restante corresponde exclusivamente a datos maestros incompletos del cliente 46987 y no a una falla del algoritmo.
+
+## Estado
+
+CERRADO
