@@ -6,7 +6,7 @@ import hashlib
 from datetime import datetime
 from modules.logger import get_logger
 
-# Inicialización del logger institucional para la capa de acceso a datos
+# Initialization of the institutional logger for the data access layer
 logger = get_logger("database")
 
 DB_PATH = "data/matinal.db"
@@ -33,9 +33,10 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_vta_fechaentrega ON vta(FechaEntrega);"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_marca ON vta(Marca);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_hash ON vta(HASH_VTA);")
         conn.commit()
         logger.info(
-            "Índices de rendimiento de la tabla vta verificados/creados correctamente en SQLite."
+            "Índices de rendimiento y hash de vta verificados/creados correctamente en SQLite."
         )
     except Exception:
         logger.exception(
@@ -260,6 +261,265 @@ def guardar_snapshot_universo_si_cambio(conn, df_universo: pd.DataFrame):
         )
 
 
+def calcular_hash_fila_vta(row) -> str:
+    """Calcula el HASH_VTA institucional para una fila de ventas utilizando las 6 columnas clave."""
+    partes = [
+        str(row.get("NroComprobante", "")).strip(),
+        str(row.get("Codigo", "")).strip(),
+        str(row.get("CantBase", "")).strip(),
+        str(row.get("ImporteNetoItem", "")).strip(),
+        str(row.get("ComprobanteReferencia", "")).strip(),
+        str(row.get("ComboCodigo", "")).strip(),
+    ]
+    raw_str = "|".join(partes)
+    return hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
+
+
+def asegurar_tabla_vta(conn, df_muestra: pd.DataFrame):
+    """
+    Detecta si la tabla 'vta' existe. Si no existe, utiliza df.head(0).to_sql
+    únicamente para el bootstrap inicial preservando los tipos de datos originales.
+    Garantiza la presencia de la columna HASH_VTA.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name) = 'vta';"
+    )
+    tabla_existe = cursor.fetchone() is not None
+
+    if not tabla_existe:
+        df_muestra.head(0).to_sql("vta", conn, if_exists="append", index=False)
+        logger.info(
+            "Estructura VTA creada mediante bootstrap inicial con preservación de tipos."
+        )
+
+    cursor.execute("PRAGMA table_info(vta);")
+    columnas_vta = [row[1] for row in cursor.fetchall()]
+    if "HASH_VTA" not in columnas_vta:
+        cursor.execute("ALTER TABLE vta ADD COLUMN HASH_VTA TEXT;")
+        logger.info("Columna HASH_VTA añadida a la tabla vta existente.")
+
+
+def migrar_hash_vta_si_corresponde(conn):
+    """
+    Verifica mediante la tabla de control persistente 'schema_version' si la migración histórica
+    de HASH_VTA ya se ejecutó. Si no se ha ejecutado, procesa el relleno histórico paginado una única vez
+    y registra el estado de completitud. Participa completamente de la transacción abierta por la función contenedora
+    sin emitir commits ni rollbacks propios.
+    """
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            MigrationKey TEXT PRIMARY KEY,
+            CompletedAt TEXT
+        );
+    """)
+
+    cursor.execute(
+        "SELECT 1 FROM schema_version WHERE MigrationKey = 'MIGRACION_HASH_VTA_COMPLETADA';"
+    )
+    if cursor.fetchone() is not None:
+        return
+
+    batch_size = 50000
+    while True:
+        cursor.execute(
+            "SELECT rowid, NroComprobante, Codigo, CantBase, ImporteNetoItem, ComprobanteReferencia, ComboCodigo "
+            "FROM vta WHERE HASH_VTA IS NULL OR HASH_VTA = '' LIMIT ?;",
+            (batch_size,),
+        )
+        registros_antiguos = cursor.fetchall()
+        if not registros_antiguos:
+            break
+
+        updates = []
+        for reg in registros_antiguos:
+            row_dict = {
+                "NroComprobante": reg[1],
+                "Codigo": reg[2],
+                "CantBase": reg[3],
+                "ImporteNetoItem": reg[4],
+                "ComprobanteReferencia": reg[5],
+                "ComboCodigo": reg[6],
+            }
+            h = calcular_hash_fila_vta(row_dict)
+            updates.append((h, reg[0]))
+
+        cursor.executemany("UPDATE vta SET HASH_VTA = ? WHERE rowid = ?;", updates)
+        logger.info(
+            f"Relleno histórico paginado HASH_VTA: Procesados {len(updates)} registros."
+        )
+
+    cursor.execute(
+        "INSERT OR IGNORE INTO schema_version (MigrationKey, CompletedAt) VALUES ('MIGRACION_HASH_VTA_COMPLETADA', ?);",
+        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
+    )
+    logger.info(
+        "Migración histórica HASH_VTA marcada como completada permanentemente en schema_version."
+    )
+
+
+def guardar_vta_incremental_sql(conn, df_vta: pd.DataFrame):
+    """
+    Persiste la tabla VTA en modelo histórico acumulativo permanente de forma escalable.
+    Sincroniza columnas, ejecuta migración histórica, staging temporal e inserción basada en clave de negocio única en transacción única.
+    """
+    if df_vta is None or df_vta.empty:
+        return
+
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("BEGIN TRANSACTION;")
+
+        # 1. Asegurar la existencia de la tabla vta y la columna HASH_VTA
+        asegurar_tabla_vta(conn, df_vta)
+
+        # 2. Ejecutar migración histórica persistente de registros antiguos una sola vez
+        migrar_hash_vta_si_corresponde(conn)
+
+        # Asegurar columna CLAVE_NEGOCIO en vta
+        cursor.execute("PRAGMA table_info(vta);")
+        columnas_vta = [row[1] for row in cursor.fetchall()]
+        if "CLAVE_NEGOCIO" not in columnas_vta:
+            cursor.execute("ALTER TABLE vta ADD COLUMN CLAVE_NEGOCIO TEXT;")
+            logger.info("Columna CLAVE_NEGOCIO añadida a la tabla vta existente.")
+
+        cursor.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_vta_clave_negocio
+            ON vta(CLAVE_NEGOCIO);
+        """)
+
+        # Función local interna de normalización canónica simétrica
+        def normalizar_valor(val):
+            if val is None:
+                return ""
+            s = str(val).strip()
+            if s in ["nan", "None", "<NA>", ""]:
+                return ""
+            if s.endswith(".0"):
+                s = s[:-2]
+            return s
+
+        cols_clave = [
+            "NroComprobante",
+            "Codigo",
+            "CantBase",
+            "ImporteNetoItem",
+            "ComprobanteReferencia",
+            "ComboCodigo",
+        ]
+
+        def construir_clave_row(row):
+            partes = []
+            for col in cols_clave:
+                val = row.get(col, "")
+                partes.append(normalizar_valor(val))
+            return "|".join(partes)
+
+        # 3. Backfill / actualización de CLAVE_NEGOCIO para registros históricos en vta que no la tengan
+        cursor.execute(
+            "SELECT rowid, NroComprobante, Codigo, CantBase, ImporteNetoItem, ComprobanteReferencia, ComboCodigo "
+            "FROM vta WHERE CLAVE_NEGOCIO IS NULL OR CLAVE_NEGOCIO = '';"
+        )
+        historicos = cursor.fetchall()
+        if historicos:
+            updates_hist = []
+            for reg in historicos:
+                row_dict = {
+                    "NroComprobante": reg[1],
+                    "Codigo": reg[2],
+                    "CantBase": reg[3],
+                    "ImporteNetoItem": reg[4],
+                    "ComprobanteReferencia": reg[5],
+                    "ComboCodigo": reg[6],
+                }
+                clave = construir_clave_row(row_dict)
+                updates_hist.append((clave, reg[0]))
+            cursor.executemany(
+                "UPDATE vta SET CLAVE_NEGOCIO = ? WHERE rowid = ?;", updates_hist
+            )
+            logger.info(
+                f"Backfill CLAVE_NEGOCIO histórico: Procesados {len(updates_hist)} registros."
+            )
+
+        # 4. Preparar el DataFrame entrante: construir CLAVE_NEGOCIO, calcular HASH_VTA y eliminar duplicados internos por CLAVE_NEGOCIO
+        df = df_vta.copy()
+
+        df["CLAVE_NEGOCIO"] = df.apply(construir_clave_row, axis=1)
+
+        if "HASH_VTA" not in df.columns:
+            df["HASH_VTA"] = df.apply(calcular_hash_fila_vta, axis=1)
+
+        df = df.drop_duplicates(subset=["CLAVE_NEGOCIO"]).copy()
+
+        # 5. Sincronización de esquema: Agregar columnas faltantes en vta si existen en el DataFrame entrante
+        cursor.execute("PRAGMA table_info(vta);")
+        columnas_tabla_vta = [row[1] for row in cursor.fetchall()]
+
+        for col in df.columns:
+            if col not in columnas_tabla_vta:
+                cursor.execute(f'ALTER TABLE vta ADD COLUMN "{col}" TEXT;')
+                logger.info(
+                    f"Sincronización de esquema VTA: Columna faltante '{col}' añadida mediante ALTER TABLE."
+                )
+
+        # Recargar esquema sincronizado
+        cursor.execute("PRAGMA table_info(vta);")
+        columnas_tabla_vta = [row[1] for row in cursor.fetchall()]
+
+        for col in columnas_tabla_vta:
+            if col not in df.columns:
+                df[col] = None
+
+        df = df[columnas_tabla_vta]
+
+        # 6. Crear tabla temporal SQLite (staging_vta) con la estructura sincronizada
+        cursor.execute("DROP TABLE IF EXISTS staging_vta;")
+        cursor.execute(
+            "CREATE TEMPORARY TABLE staging_vta AS SELECT * FROM vta WHERE 1=0;"
+        )
+
+        # 7. Volcar el DataFrame normalizado a staging_vta por lotes (chunks)
+        chunk_size = 10000
+        total_registros = len(df)
+        cols = list(df.columns)
+
+        for start_idx in range(0, total_registros, chunk_size):
+            chunk_df = df.iloc[start_idx : start_idx + chunk_size]
+            chunk_df.to_sql(
+                "staging_vta", conn, if_exists="append", index=False, chunksize=10000
+            )
+
+        # 8. Inserción basada exclusivamente en CLAVE_NEGOCIO
+        cols_str = ", ".join(cols)
+        sql_insert_set_based = f"""
+            INSERT INTO vta ({cols_str})
+            SELECT {cols_str} FROM staging_vta
+            WHERE NOT EXISTS (
+                SELECT 1 FROM vta
+                WHERE vta.CLAVE_NEGOCIO = staging_vta.CLAVE_NEGOCIO
+            )
+        """
+        cursor.execute(sql_insert_set_based)
+        filas_insertadas = cursor.rowcount
+
+        # 9. Limpiar tabla temporal y confirmar la transacción atómica única
+        cursor.execute("DROP TABLE IF EXISTS staging_vta;")
+        conn.commit()
+
+        logger.info(
+            f"VTA INCREMENTAL SET-BASED: Se procesaron {total_registros} registros entrantes (nuevos insertados: {filas_insertadas})."
+        )
+
+    except Exception as e:
+        conn.rollback()
+        logger.exception(
+            "Error crítico durante la transacción de VTA incremental. Rollback ejecutado."
+        )
+        raise e
+
+
 def inicializar_bd_desde_excel(archivos_dict):
     """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte multi-solapa para Altas."""
     conn = obtener_conexion()
@@ -414,7 +674,9 @@ def inicializar_bd_desde_excel(archivos_dict):
                             )
                         df[col] = dt.dt.strftime("%Y-%m-%d")
 
-                if nombre_tabla.lower() == "universo":
+                if nombre_tabla.lower() == "vta":
+                    guardar_vta_incremental_sql(conn, df)
+                elif nombre_tabla.lower() == "universo":
                     guardar_snapshot_universo_si_cambio(conn, df)
                     df.to_sql(
                         "universo",
@@ -441,6 +703,7 @@ def inicializar_bd_desde_excel(archivos_dict):
             "CREATE INDEX IF NOT EXISTS idx_vta_fechaentrega ON vta(FechaEntrega);"
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_marca ON vta(Marca);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_hash ON vta(HASH_VTA);")
         conn.commit()
     finally:
         conn.close()
@@ -634,30 +897,26 @@ def guardar_innovaciones_desde_excel(file_buffer_or_path, anio, mes):
     try:
         cursor = conn.cursor()
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS objetivos_vendedores (
+            CREATE TABLE IF NOT EXISTS maestro_innovaciones (
                 Anio INTEGER,
                 Mes INTEGER,
-                CodVendedor INTEGER,
-                Nombre TEXT,
-                Supervisor TEXT,
-                SEGMENTO TEXT,
-                Kilos_Mes_Anterior REAL,
-                Objetivo_Mes_Anterior_Kg REAL,
-                Logro_Anterior_Pct REAL,
-                Obj_Sugerido_Kg REAL,
-                PRIMARY KEY (Anio, Mes, CodVendedor, SEGMENTO)
+                Codigo INTEGER,
+                Articulo TEXT,
+                Innovacion TEXT,
+                Condicion_Vta INTEGER,
+                PRIMARY KEY (Anio, Mes, Codigo)
             )
         """)
         conn.commit()
 
         cursor.execute(
-            "DELETE FROM objetivos_vendedores WHERE Anio = ? AND Mes = ?",
+            "DELETE FROM maestro_innovaciones WHERE Anio = ? AND Mes = ?",
             (anio_int, mes_int),
         )
         conn.commit()
 
         df_subida.to_sql(
-            "objetivos_vendedores",
+            "maestro_innovaciones",
             conn,
             if_exists="append",
             index=False,
@@ -668,5 +927,5 @@ def guardar_innovaciones_desde_excel(file_buffer_or_path, anio, mes):
 
     return (
         True,
-        f"¡Objetivos del período {mes_int:02d}/{anio_int} cargados y versionados con éxito en la base de datos!",
+        f"¡Innovaciones del período {mes_int:02d}/{anio_int} cargadas y versionados con éxito en la base de datos!",
     )

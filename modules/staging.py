@@ -16,7 +16,35 @@ def obtener_staging_vta():
     """
     t0 = time.perf_counter()
     try:
-        df_raw = db.cargar_tabla_sql("SELECT * FROM vta")
+        df_raw = db.cargar_tabla_sql("""
+            SELECT
+                Cliente,
+                Direccion,
+                FechaEntrega,
+                FechaCarga,
+                FechaLiquidacion,
+                TipoDeVenta,
+                Codigo,
+                CantBase,
+                ImporteNetoItem,
+                NetoItem,
+                CodVendedor,
+                Vendedor,
+                Articulo,
+                Proveedor,
+                PesoKg,
+                Marca,
+                Rubro,
+                Ramo,
+                Subramo,
+                Taxonomia,
+                SegmentoRentabilidad,
+                RazonSocial,
+                Origen,
+                HASH_VTA,
+                Pendiente
+            FROM vta
+        """)
     except Exception:
         df_raw = pd.DataFrame()
 

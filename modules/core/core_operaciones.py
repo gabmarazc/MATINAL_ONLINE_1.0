@@ -361,10 +361,19 @@ def obtener_core_operacion(
         else pd.DataFrame()
     )
 
-    df_vta_procesada = procesar_ausencias_y_reemplazos(df_vta, df_ausencias)
-    df_vta_temporal = calcular_ritmo_operativo(
-        df_vta_procesada, anio_op, mes_op, dia_matinal
-    )
+    # REORDENAMIENTO DE PIPELINE DE PERFORMANCE:
+    # 1. Ejecutar calcular_ritmo_operativo inmediatamente después de staging
+    df_vta_temporal = calcular_ritmo_operativo(df_vta, anio_op, mes_op, dia_matinal)
+
+    # 2. Filtrar y eliminar Fuera de Periodo para reducir volumen de datos procesados
+    if not df_vta_temporal.empty and "Periodo" in df_vta_temporal.columns:
+        df_vta_temporal = df_vta_temporal[
+            df_vta_temporal["Periodo"] != "Fuera de Periodo"
+        ].copy()
+
+    # 3. Procesar ausencias y reemplazos sobre el dataframe ya reducido
+    df_vta_procesada = procesar_ausencias_y_reemplazos(df_vta_temporal, df_ausencias)
+    df_vta_temporal = df_vta_procesada
 
     # POC: Enriquecimiento con CodVendedorVigente desde UNIVERSO (staging_clientes)
     if df_clientes is not None and not df_clientes.empty and not df_vta_temporal.empty:

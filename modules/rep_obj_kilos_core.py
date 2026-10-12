@@ -185,10 +185,29 @@ def render_fragmento_interactivo_obj_kilos_core(
 
     st.divider()
 
-    # Funcionalidad de descarga a Excel exportando el dataset consolidado con el ObjetivoKg ya ajustado
+    # Funcionalidad de descarga a Excel adaptada al formato de carga de Parámetros
     df_export = df_view.copy()
-    df_export["ObjetivoKg"] = df_export["ObjetivoKg_Ajustado"]
-    df_export = df_export[["codven", "Vendedor", "SEGMENTO", "ObjetivoKg"]]
+    df_export["Anio"] = int(anio_op)
+    df_export["Mes"] = int(mes_op)
+    df_export["Supervisor"] = None
+    df_export = df_export.rename(
+        columns={
+            "codven": "CodVendedor",
+            "Vendedor": "Nombre",
+            "ObjetivoKg_Ajustado": "Obj_Sugerido_Kg",
+        }
+    )
+    df_export = df_export[
+        [
+            "Anio",
+            "Mes",
+            "CodVendedor",
+            "Nombre",
+            "Supervisor",
+            "SEGMENTO",
+            "Obj_Sugerido_Kg",
+        ]
+    ]
 
     buffer_excel = io.BytesIO()
     with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:

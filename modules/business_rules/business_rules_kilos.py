@@ -599,26 +599,15 @@ def obtener_matriz_kilos_comercial(
             df_vta_op["CodVendedor"], errors="coerce"
         ).astype("Int64")
 
-    # Alineación de titularidad comercial con CodVendedorVigente (preservando comodines 99 / 99)
+    # Alineación de titularidad comercial con CodVendedorVigente
     codigos_validos = set(padron_vend["CodVendedor"].dropna().tolist())
     if "CodVendedorVigente" in df_vta_op.columns:
         cod_vig = pd.to_numeric(df_vta_op["CodVendedorVigente"], errors="coerce")
         cod_tit_orig = pd.to_numeric(df_vta_op["CodVendedor"], errors="coerce")
-        cod_op = pd.to_numeric(df_vta_op.get("CodVendedorOperativo"), errors="coerce")
-        reemp = df_vta_op.get("Reemplazo", pd.Series(pd.NA, index=df_vta_op.index))
-
-        is_special = ((reemp == 99) | (cod_op == 99) | (cod_tit_orig == 99)).fillna(
-            False
+        df_vta_op["CodVendedor"] = np.where(
+            cod_vig.isin(codigos_validos).fillna(False), cod_vig, cod_tit_orig
         )
-
-        df_vta_op["CodVendedor"] = np.select(
-            [is_special, cod_vig.isin(codigos_validos).fillna(False)],
-            [99, cod_vig.fillna(-999).astype(int)],
-            default=cod_tit_orig.fillna(-999).astype(int),
-        )
-        df_vta_op["CodVendedor"] = (
-            pd.Series(df_vta_op["CodVendedor"]).replace(-999, pd.NA).astype("Int64")
-        )
+        df_vta_op["CodVendedor"] = pd.Series(df_vta_op["CodVendedor"]).astype("Int64")
 
     # Filtrado por período comercial operativo (Arrastre y Actual)
     df_periodo = df_vta_op[
