@@ -7,31 +7,16 @@ from data_loader import cargar_todas_las_bases
 from modules.parametros import (
     render_parametros_view,
     es_entorno_local,
-    obtener_tabla_parametros,
 )
-from modules.rep_kilos import render_rep_kilos
 from modules.rep_kilos_core import render_rep_kilos_core
-from modules.rep_obj_kilos import render_rep_obj_kilos
 from modules.rep_obj_kilos_core import render_rep_obj_kilos_core
-from modules.rep_ccc import render_rep_ccc
 from modules.rep_ccc_core import render_rep_ccc_core
-from modules.rep_MN import render_rep_mn
+from modules.rep_cobertura_core import render_rep_cobertura_core
 from modules.rep_MN_core import render_rep_mn_core
-from modules.rep_cob_marca import (
-    generar_reporte_cobertura_marca,
-    dibujar_pestana_cobertura_marca,
-)
-from modules.rep_cob_innovacion import (
-    generar_reporte_cobertura_innovacion,
-    dibujar_pestana_cobertura_innovacion,
-)
-from modules.rep_gerencial import render_rep_gerencial
-from modules.rep_vespertina import render_rep_vespertina
-from modules.rep_tp import render_rep_tp
+from modules.rep_gerencial_core import render_rep_gerencial_core
 from modules.rep_tp_core import render_rep_tp_core
 from modules import database as db
 from modules.core.core_validacion_periodo import validar_integridad_periodo_operativo
-from modules.feature_flags import ff  # FEATURE_FLAG
 
 st.set_page_config(
     page_title="Sistema de Gestión de Ventas - MABELHERDI S.A",
@@ -348,430 +333,194 @@ def main():
             f"Diríjase a Parámetros para completar la carga."
         )
 
-    sup_sel_efectivo = (
-        supervisores_disponibles[1:]
-        if filtros_globales["supervisor"] == "TODOS"
-        else [filtros_globales["supervisor"]]
-    )
-
     es_local = es_entorno_local()
 
-    # FEATURE_FLAG: Construcción dinámica de nombres de pestañas y mapeo de descriptores activos (Incluyendo Legacy)
+    # Construcción dinámica oficial: Simetría absoluta por nivel de usuario (Navegación Unificada)
     titulos_tabs_maestro = []
     claves_tabs_maestro = []
 
-    if ff("GERENCIAL_UI"):
+    # Tablero Gerencial (Nivel 1 y Nivel 2)
+    if "Nivel 1" in nivel_actual or "Nivel 2" in nivel_actual:
         titulos_tabs_maestro.append("📈 Tablero Gerencial")
         claves_tabs_maestro.append("GERENCIAL")
 
-    if ff("KILOS_LEGACY_UI"):  # FEATURE_FLAG
-        titulos_tabs_maestro.append("📊 Avance Kilos")
-        claves_tabs_maestro.append("KILOS")
+    # Avance Kilos (Todos los niveles)
+    titulos_tabs_maestro.append("📊 Avance Kilos")
+    claves_tabs_maestro.append("KILOS")
 
-    if ff("CCC_LEGACY_UI"):  # FEATURE_FLAG
-        titulos_tabs_maestro.append("📈 Avance CCC")
-        claves_tabs_maestro.append("CCC")
+    # Composición Objetivos Kilos (Nivel 1 y Nivel 2 exclusivamente)
+    if "Nivel 1" in nivel_actual or "Nivel 2" in nivel_actual:
+        titulos_tabs_maestro.append("📦 Composición Obj Kilos")
+        claves_tabs_maestro.append("OBJ_KILOS")
 
-    if ff("COB_MARCA_UI"):
-        titulos_tabs_maestro.append("🎯 Cobertura Marca")
-        claves_tabs_maestro.append("COB_MARCA")
+    # Avance CCC (Todos los niveles)
+    titulos_tabs_maestro.append("📈 Avance CCC")
+    claves_tabs_maestro.append("CCC")
 
-    if ff("COB_INNOV_UI"):
-        titulos_tabs_maestro.append("🚀 Cobertura Innovación")
-        claves_tabs_maestro.append("COB_INNOV")
+    # Cobertura (Todos los niveles)
+    titulos_tabs_maestro.append("🎯 Cobertura")
+    claves_tabs_maestro.append("COBERTURA")
 
-    if ff("MN_LEGACY_UI"):  # FEATURE_FLAG
-        titulos_tabs_maestro.append("📱 Adopción MiNegocio")
-        claves_tabs_maestro.append("MN")
+    # Adopción MiNegocio (Todos los niveles)
+    titulos_tabs_maestro.append("📱 Adopción MiNegocio")
+    claves_tabs_maestro.append("MN")
 
-    if ff("VESPERTINA_UI"):
-        titulos_tabs_maestro.append("🌙 Vespertina")
-        claves_tabs_maestro.append("VESPERTINA")
+    # Tienda Perfecta (Todos los niveles)
+    titulos_tabs_maestro.append("⭐ Tienda Perfecta")
+    claves_tabs_maestro.append("TP")
 
-    if ff("TP_LEGACY_UI"):  # FEATURE_FLAG
-        titulos_tabs_maestro.append("⭐ Tienda Perfecta")
-        claves_tabs_maestro.append("TP")
-
+    # Parámetros (Exclusivo Administrador en entorno local)
     if "Nivel 1" in nivel_actual and es_local:
         titulos_tabs_maestro.append("⚙️ Parámetros")
         claves_tabs_maestro.append("PARAMETROS")
 
-    if ff("OBJ_KILOS_LEGACY_UI"):  # FEATURE_FLAG
-        titulos_tabs_maestro.append("📦 Composición Obj Kilos")
-        claves_tabs_maestro.append("OBJ_KILOS")
-
-    titulos_tabs_maestro.extend(
-        [
-            "🧪 Avance Kilos CORE",
-            "🎯 Obj Kilos CORE",
-            "📈 Avance CCC CORE",
-            "📱 Adopción MiNegocio CORE",
-            "⭐ Tienda Perfecta CORE",
-        ]
-    )
-    claves_tabs_maestro.extend(
-        ["KILOS_CORE", "OBJ_KILOS_CORE", "CCC_CORE", "MN_CORE", "TP_CORE"]
-    )
-
-    # Desempaquetado dinámico exacto de st.tabs según FEATURE_FLAGS vigentes
+    # Desempaquetado dinámico exacto de st.tabs
     objetos_tabs = st.tabs(titulos_tabs_maestro)
     mapping_tabs = dict(zip(claves_tabs_maestro, objetos_tabs))
 
-    df_vend_maestro = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
-    df_marcas_maestro = pd.DataFrame()
-
-    # Telemetría por etapas [PERF_STAGE] y control de ejecución condicional de motores
-    if ff("COB_MARCA_ENGINE"):  # FEATURE_FLAG
-        t0_m = time.perf_counter()
-        rep_cob, marcas_lst, mapa_obj = generar_reporte_cobertura_marca(
-            df_vta, df_universo, df_vend_maestro, df_marcas_maestro, filtros_globales
-        )
-        print(
-            f"[PERF_STAGE] generar_reporte_cobertura_marca = {time.perf_counter() - t0_m:.2f} s"
-        )
-    else:
-        rep_cob, marcas_lst, mapa_obj = (
-            None,
-            [],
-            {},
-        )  # FEATURE_FLAG: Valores dummy seguros
-        print(
-            "[PERF_STAGE] generar_reporte_cobertura_marca = OMITIDO (Engine Off)"
-        )  # FEATURE_FLAG
-
-    if ff("COB_INNOV_ENGINE"):  # FEATURE_FLAG
-        t0_i = time.perf_counter()
-        rep_innov, innovaciones_lst, df_innov_master = (
-            generar_reporte_cobertura_innovacion(
-                df_vta, df_universo, df_vend_maestro, filtros_globales
-            )
-        )
-        print(
-            f"[PERF_STAGE] generar_reporte_cobertura_innovacion = {time.perf_counter() - t0_i:.2f} s"
-        )
-    else:
-        rep_innov, innovaciones_lst, df_innov_master = (
-            None,
-            [],
-            pd.DataFrame(),
-        )  # FEATURE_FLAG: Valores dummy seguros
-        print(
-            "[PERF_STAGE] generar_reporte_cobertura_innovacion = OMITIDO (Engine Off)"
-        )  # FEATURE_FLAG
-
-    # Renderizado de pestañas acorde al perfil activo protegido por Feature Flags (Incluyendo validación de ENGINE Legacy)
+    # Renderizado oficial de módulos según perfil
     if "Nivel 1" in nivel_actual:
         if "GERENCIAL" in mapping_tabs:
             with mapping_tabs["GERENCIAL"]:
-                if ff("GERENCIAL_ENGINE"):  # FEATURE_FLAG
-                    t0_g = time.perf_counter()
-                    render_rep_gerencial(
-                        df_vta, df_universo, df_rutas, df_ausencias, filtros_globales
-                    )
-                    print(
-                        f"[PERF_STAGE] render_rep_gerencial = {time.perf_counter() - t0_g:.2f} s"
-                    )
-                else:
-                    st.info(
-                        "Módulo temporalmente deshabilitado."
-                    )  # FEATURE_FLAG: Mensaje robusto UI sin engine
-        if "KILOS" in mapping_tabs:  # FEATURE_FLAG
+                t0_gc = time.perf_counter()
+                render_rep_gerencial_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_gerencial_core: {time.perf_counter() - t0_gc:.2f} s"
+                )
+        if "KILOS" in mapping_tabs:
             with mapping_tabs["KILOS"]:
-                if ff("KILOS_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_k = time.perf_counter()
-                    render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
-                    print(
-                        f"[PERF] render_rep_kilos: {time.perf_counter() - t0_k:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "CCC" in mapping_tabs:  # FEATURE_FLAG
+                t0_kc = time.perf_counter()
+                render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
+                print(
+                    f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s"
+                )
+        if "OBJ_KILOS" in mapping_tabs:
+            with mapping_tabs["OBJ_KILOS"]:
+                t0_okc = time.perf_counter()
+                render_rep_obj_kilos_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_obj_kilos_core: {time.perf_counter() - t0_okc:.2f} s"
+                )
+        if "CCC" in mapping_tabs:
             with mapping_tabs["CCC"]:
-                if ff("CCC_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_c = time.perf_counter()
-                    render_rep_ccc(df_vta, df_universo, filtros_globales)
-                    print(f"[PERF] render_rep_ccc: {time.perf_counter() - t0_c:.2f} s")
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "COB_MARCA" in mapping_tabs:
-            with mapping_tabs["COB_MARCA"]:
-                if ff("COB_MARCA_ENGINE"):  # FEATURE_FLAG
-                    dibujar_pestana_cobertura_marca(
-                        rep_cob,
-                        marcas_lst,
-                        mapa_obj,
-                        sup_sel_efectivo,
-                        df_vta,
-                        df_universo,
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "COB_INNOV" in mapping_tabs:
-            with mapping_tabs["COB_INNOV"]:
-                if ff("COB_INNOV_ENGINE"):  # FEATURE_FLAG
-                    dibujar_pestana_cobertura_innovacion(
-                        rep_innov, innovaciones_lst, df_innov_master, sup_sel_efectivo
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "MN" in mapping_tabs:  # FEATURE_FLAG
+                t0_cccc = time.perf_counter()
+                render_rep_ccc_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s"
+                )
+        if "COBERTURA" in mapping_tabs:
+            with mapping_tabs["COBERTURA"]:
+                t0_cob = time.perf_counter()
+                render_rep_cobertura_core()
+                print(
+                    f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
+                )
+        if "MN" in mapping_tabs:
             with mapping_tabs["MN"]:
-                if ff("MN_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_mn = time.perf_counter()
-                    render_rep_mn(df_vta, df_universo, filtros_globales)
-                    print(
-                        f"[PERF_STAGE] render_rep_mn = {time.perf_counter() - t0_mn:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "VESPERTINA" in mapping_tabs:
-            with mapping_tabs["VESPERTINA"]:
-                if ff("VESPERTINA_ENGINE"):  # FEATURE_FLAG
-                    t0_v = time.perf_counter()
-                    render_rep_vespertina(df_vta, df_universo, filtros_globales)
-                    print(
-                        f"[PERF_STAGE] render_rep_vespertina = {time.perf_counter() - t0_v:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "TP" in mapping_tabs:  # FEATURE_FLAG
+                t0_mnc = time.perf_counter()
+                render_rep_mn_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s"
+                )
+        if "TP" in mapping_tabs:
             with mapping_tabs["TP"]:
-                if ff("TP_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_tp = time.perf_counter()
-                    render_rep_tp(datos)
-                    print(f"[PERF] render_rep_tp: {time.perf_counter() - t0_tp:.2f} s")
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
+                t0_tpc = time.perf_counter()
+                render_rep_tp_core(filtros_globales=filtros_globales)
+                print(
+                    f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s"
+                )
         if "PARAMETROS" in mapping_tabs:
             with mapping_tabs["PARAMETROS"]:
                 render_parametros_view(filtros_globales)
-        if "OBJ_KILOS" in mapping_tabs:  # FEATURE_FLAG
-            with mapping_tabs["OBJ_KILOS"]:
-                if ff("OBJ_KILOS_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    render_rep_obj_kilos(df_vta, filtros_globales)
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        with mapping_tabs["KILOS_CORE"]:
-            t0_kc = time.perf_counter()
-            render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
-            print(f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s")
-        with mapping_tabs["OBJ_KILOS_CORE"]:
-            t0_okc = time.perf_counter()
-            render_rep_obj_kilos_core(filtros_globales)
-            print(
-                f"[PERF] render_rep_obj_kilos_core: {time.perf_counter() - t0_okc:.2f} s"
-            )
-        with mapping_tabs["CCC_CORE"]:
-            t0_cccc = time.perf_counter()
-            render_rep_ccc_core(filtros_globales)
-            print(f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s")
-        with mapping_tabs["MN_CORE"]:
-            t0_mnc = time.perf_counter()
-            render_rep_mn_core(filtros_globales)
-            print(f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s")
-        with mapping_tabs["TP_CORE"]:
-            t0_tpc = time.perf_counter()
-            render_rep_tp_core(filtros_globales=filtros_globales)
-            print(f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s")
+
     elif "Nivel 2" in nivel_actual:
         if "GERENCIAL" in mapping_tabs:
             with mapping_tabs["GERENCIAL"]:
-                if ff("GERENCIAL_ENGINE"):  # FEATURE_FLAG
-                    t0_g = time.perf_counter()
-                    render_rep_gerencial(
-                        df_vta, df_universo, df_rutas, df_ausencias, filtros_globales
-                    )
-                    print(
-                        f"[PERF_STAGE] render_rep_gerencial = {time.perf_counter() - t0_g:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "KILOS" in mapping_tabs:  # FEATURE_FLAG
+                t0_gc = time.perf_counter()
+                render_rep_gerencial_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_gerencial_core: {time.perf_counter() - t0_gc:.2f} s"
+                )
+        if "KILOS" in mapping_tabs:
             with mapping_tabs["KILOS"]:
-                if ff("KILOS_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_k = time.perf_counter()
-                    render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
-                    print(
-                        f"[PERF] render_rep_kilos: {time.perf_counter() - t0_k:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "CCC" in mapping_tabs:  # FEATURE_FLAG
-            with mapping_tabs["CCC"]:
-                if ff("CCC_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_c = time.perf_counter()
-                    render_rep_ccc(df_vta, df_universo, filtros_globales)
-                    print(f"[PERF] render_rep_ccc: {time.perf_counter() - t0_c:.2f} s")
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "COB_MARCA" in mapping_tabs:
-            with mapping_tabs["COB_MARCA"]:
-                if ff("COB_MARCA_ENGINE"):  # FEATURE_FLAG
-                    dibujar_pestana_cobertura_marca(
-                        rep_cob,
-                        marcas_lst,
-                        mapa_obj,
-                        sup_sel_efectivo,
-                        df_vta,
-                        df_universo,
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "COB_INNOV" in mapping_tabs:
-            with mapping_tabs["COB_INNOV"]:
-                if ff("COB_INNOV_ENGINE"):  # FEATURE_FLAG
-                    dibujar_pestana_cobertura_innovacion(
-                        rep_innov, innovaciones_lst, df_innov_master, sup_sel_efectivo
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "MN" in mapping_tabs:  # FEATURE_FLAG
-            with mapping_tabs["MN"]:
-                if ff("MN_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_mn = time.perf_counter()
-                    render_rep_mn(df_vta, df_universo, filtros_globales)
-                    print(
-                        f"[PERF_STAGE] render_rep_mn = {time.perf_counter() - t0_mn:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "VESPERTINA" in mapping_tabs:
-            with mapping_tabs["VESPERTINA"]:
-                if ff("VESPERTINA_ENGINE"):  # FEATURE_FLAG
-                    t0_v = time.perf_counter()
-                    render_rep_vespertina(df_vta, df_universo, filtros_globales)
-                    print(
-                        f"[PERF_STAGE] render_rep_vespertina = {time.perf_counter() - t0_v:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "TP" in mapping_tabs:  # FEATURE_FLAG
-            with mapping_tabs["TP"]:
-                if ff("TP_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_tp = time.perf_counter()
-                    render_rep_tp(datos)
-                    print(f"[PERF] render_rep_tp: {time.perf_counter() - t0_tp:.2f} s")
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "OBJ_KILOS" in mapping_tabs:  # FEATURE_FLAG
+                t0_kc = time.perf_counter()
+                render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
+                print(
+                    f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s"
+                )
+        if "OBJ_KILOS" in mapping_tabs:
             with mapping_tabs["OBJ_KILOS"]:
-                if ff("OBJ_KILOS_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    render_rep_obj_kilos(df_vta, filtros_globales)
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        with mapping_tabs["KILOS_CORE"]:
-            t0_kc = time.perf_counter()
-            render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
-            print(f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s")
-        with mapping_tabs["OBJ_KILOS_CORE"]:
-            t0_okc = time.perf_counter()
-            render_rep_obj_kilos_core(filtros_globales)
-            print(
-                f"[PERF] render_rep_obj_kilos_core: {time.perf_counter() - t0_okc:.2f} s"
-            )
-        with mapping_tabs["CCC_CORE"]:
-            t0_cccc = time.perf_counter()
-            render_rep_ccc_core(filtros_globales)
-            print(f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s")
-        with mapping_tabs["MN_CORE"]:
-            t0_mnc = time.perf_counter()
-            render_rep_mn_core(filtros_globales)
-            print(f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s")
-        with mapping_tabs["TP_CORE"]:
-            t0_tpc = time.perf_counter()
-            render_rep_tp_core(filtros_globales=filtros_globales)
-            print(f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s")
-    else:
-        # Nivel 3: Supervisión
-        if "KILOS" in mapping_tabs:  # FEATURE_FLAG
-            with mapping_tabs["KILOS"]:
-                if ff("KILOS_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_k = time.perf_counter()
-                    render_rep_kilos(df_vta, df_rutas, df_ausencias, filtros_globales)
-                    print(
-                        f"[PERF] render_rep_kilos: {time.perf_counter() - t0_k:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "CCC" in mapping_tabs:  # FEATURE_FLAG
+                t0_okc = time.perf_counter()
+                render_rep_obj_kilos_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_obj_kilos_core: {time.perf_counter() - t0_okc:.2f} s"
+                )
+        if "CCC" in mapping_tabs:
             with mapping_tabs["CCC"]:
-                if ff("CCC_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_c = time.perf_counter()
-                    render_rep_ccc(df_vta, df_universo, filtros_globales)
-                    print(f"[PERF] render_rep_ccc: {time.perf_counter() - t0_c:.2f} s")
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "COB_MARCA" in mapping_tabs:
-            with mapping_tabs["COB_MARCA"]:
-                if ff("COB_MARCA_ENGINE"):  # FEATURE_FLAG
-                    dibujar_pestana_cobertura_marca(
-                        rep_cob,
-                        marcas_lst,
-                        mapa_obj,
-                        sup_sel_efectivo,
-                        df_vta,
-                        df_universo,
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "COB_INNOV" in mapping_tabs:
-            with mapping_tabs["COB_INNOV"]:
-                if ff("COB_INNOV_ENGINE"):  # FEATURE_FLAG
-                    dibujar_pestana_cobertura_innovacion(
-                        rep_innov, innovaciones_lst, df_innov_master, sup_sel_efectivo
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "MN" in mapping_tabs:  # FEATURE_FLAG
+                t0_cccc = time.perf_counter()
+                render_rep_ccc_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s"
+                )
+        if "COBERTURA" in mapping_tabs:
+            with mapping_tabs["COBERTURA"]:
+                t0_cob = time.perf_counter()
+                render_rep_cobertura_core()
+                print(
+                    f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
+                )
+        if "MN" in mapping_tabs:
             with mapping_tabs["MN"]:
-                if ff("MN_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_mn = time.perf_counter()
-                    render_rep_mn(df_vta, df_universo, filtros_globales)
-                    print(
-                        f"[PERF_STAGE] render_rep_mn = {time.perf_counter() - t0_mn:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "VESPERTINA" in mapping_tabs:
-            with mapping_tabs["VESPERTINA"]:
-                if ff("VESPERTINA_ENGINE"):  # FEATURE_FLAG
-                    t0_v = time.perf_counter()
-                    render_rep_vespertina(df_vta, df_universo, filtros_globales)
-                    print(
-                        f"[PERF_STAGE] render_rep_vespertina = {time.perf_counter() - t0_v:.2f} s"
-                    )
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        if "TP" in mapping_tabs:  # FEATURE_FLAG
+                t0_mnc = time.perf_counter()
+                render_rep_mn_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s"
+                )
+        if "TP" in mapping_tabs:
             with mapping_tabs["TP"]:
-                if ff("TP_LEGACY_ENGINE"):  # FEATURE_FLAG
-                    t0_tp = time.perf_counter()
-                    render_rep_tp(datos)
-                    print(f"[PERF] render_rep_tp: {time.perf_counter() - t0_tp:.2f} s")
-                else:
-                    st.info("Módulo temporalmente deshabilitado.")  # FEATURE_FLAG
-        with mapping_tabs["KILOS_CORE"]:
-            t0_kc = time.perf_counter()
-            render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
-            print(f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s")
-        with mapping_tabs["OBJ_KILOS_CORE"]:
-            t0_okc = time.perf_counter()
-            render_rep_obj_kilos_core(filtros_globales)
-            print(
-                f"[PERF] render_rep_obj_kilos_core: {time.perf_counter() - t0_okc:.2f} s"
-            )
-        with mapping_tabs["CCC_CORE"]:
-            t0_cccc = time.perf_counter()
-            render_rep_ccc_core(filtros_globales)
-            print(f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s")
-        with mapping_tabs["MN_CORE"]:
-            t0_mnc = time.perf_counter()
-            render_rep_mn_core(filtros_globales)
-            print(f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s")
-        with mapping_tabs["TP_CORE"]:
-            t0_tpc = time.perf_counter()
-            render_rep_tp_core(filtros_globales=filtros_globales)
-            print(f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s")
+                t0_tpc = time.perf_counter()
+                render_rep_tp_core(filtros_globales=filtros_globales)
+                print(
+                    f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s"
+                )
+
+    else:
+        # Nivel 3: Supervisión (Simétrico: sin tabs huérfanas ni vacías)
+        if "KILOS" in mapping_tabs:
+            with mapping_tabs["KILOS"]:
+                t0_kc = time.perf_counter()
+                render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
+                print(
+                    f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s"
+                )
+        if "CCC" in mapping_tabs:
+            with mapping_tabs["CCC"]:
+                t0_cccc = time.perf_counter()
+                render_rep_ccc_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s"
+                )
+        if "COBERTURA" in mapping_tabs:
+            with mapping_tabs["COBERTURA"]:
+                t0_cob = time.perf_counter()
+                render_rep_cobertura_core()
+                print(
+                    f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
+                )
+        if "MN" in mapping_tabs:
+            with mapping_tabs["MN"]:
+                t0_mnc = time.perf_counter()
+                render_rep_mn_core(filtros_globales)
+                print(
+                    f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s"
+                )
+        if "TP" in mapping_tabs:
+            with mapping_tabs["TP"]:
+                t0_tpc = time.perf_counter()
+                render_rep_tp_core(filtros_globales=filtros_globales)
+                print(
+                    f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s"
+                )
 
     t_rerun_total = time.perf_counter() - t_rerun_start
     print(

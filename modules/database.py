@@ -20,27 +20,57 @@ def obtener_conexion():
     return conn
 
 
+def recrear_indices_vta_defensivos(conn):
+    """
+    Verifica la existencia de la tabla 'vta' y crea de manera defensiva sus índices
+    institucionales consultando el esquema real persistido mediante PRAGMA table_info(vta).
+    Si una columna no existe, omite la creación del índice y emite una advertencia sin lanzar excepción.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name) = 'vta';"
+    )
+    if not cursor.fetchone():
+        logger.info(
+            "Tabla 'vta' no encontrada en SQLite. Creación defensiva de índices omitida."
+        )
+        return
+
+    cursor.execute("PRAGMA table_info(vta);")
+    columnas_reales = [row[1] for row in cursor.fetchall()]
+
+    indices_esperados = [
+        ("idx_vta_vendedor", "CodVendedor"),
+        ("idx_vta_cliente", "Cliente"),
+        ("idx_vta_fechacarga", "FechaCarga"),
+        ("idx_vta_fechaentrega", "FechaEntrega"),
+        ("idx_vta_marca", "Marca"),
+    ]
+
+    for nombre_idx, columna in indices_esperados:
+        if columna in columnas_reales:
+            conn.execute(
+                f'CREATE INDEX IF NOT EXISTS {nombre_idx} ON vta("{columna}");'
+            )
+            logger.info(
+                f"Índice institucional '{nombre_idx}' sobre columna '{columna}' verificado/creado exitosamente."
+            )
+        else:
+            logger.warning(
+                f"Índice institucional '{nombre_idx}' omitido: la columna '{columna}' no existe en el esquema persistido de 'vta'."
+            )
+
+
 def init_db():
-    """Inicializa la estructura básica y asegura índices de rendimiento."""
+    """Inicializa la estructura básica y asegura índices de rendimiento defensivos."""
     conn = obtener_conexion()
     try:
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_vendedor ON vta(CodVendedor);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_cliente ON vta(Cliente);")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_vta_fechacarga ON vta(FechaCarga);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_vta_fechaentrega ON vta(FechaEntrega);"
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_marca ON vta(Marca);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_hash ON vta(HASH_VTA);")
+        recrear_indices_vta_defensivos(conn)
         conn.commit()
-        logger.info(
-            "Índices de rendimiento y hash de vta verificados/creados correctamente en SQLite."
-        )
+        logger.info("Verificación defensiva de índices de inicio en SQLite finalizada.")
     except Exception:
         logger.exception(
-            "Error crítico al intentar crear los índices de rendimiento para la tabla vta."
+            "Error crítico al intentar crear los índices de rendimiento para la tabla vta en init_db."
         )
     finally:
         conn.close()
@@ -520,6 +550,47 @@ def guardar_vta_incremental_sql(conn, df_vta: pd.DataFrame):
         raise e
 
 
+def cargar_vta_desde_directorio(ruta_directorio: str) -> pd.DataFrame:
+    """
+    Carga y concatena verticalmente todos los archivos Excel (*.xlsx) contenidos en el directorio
+    especificado, ordenados alfabéticamente de forma estable. No agrega columnas auxiliares.
+    """
+    if not os.path.exists(ruta_directorio) or not os.path.isdir(ruta_directorio):
+        logger.warning(
+            f"El directorio especificado para VTA particionado no existe o no es válido: {ruta_directorio}"
+        )
+        return pd.DataFrame()
+
+    archivos = [
+        f
+        for f in os.listdir(ruta_directorio)
+        if f.lower().endswith(".xlsx")
+        and not f.startswith("~$")
+        and os.path.isfile(os.path.join(ruta_directorio, f))
+    ]
+
+    archivos.sort()
+
+    if not archivos:
+        logger.warning(
+            f"No se encontraron archivos *.xlsx en el directorio de ventas: {ruta_directorio}"
+        )
+        return pd.DataFrame()
+
+    dfs = []
+    for arch in archivos:
+        ruta_archivo = os.path.join(ruta_directorio, arch)
+        logger.info(f"Cargando archivo particionado de VTA: {ruta_archivo}")
+        df_mes = pd.read_excel(ruta_archivo)
+        dfs.append(df_mes)
+
+    df_consolidado = pd.concat(dfs, ignore_index=True)
+    logger.info(
+        f"Consolidación de VTA desde directorio finalizada. Total de archivos procesados: {len(dfs)}, registros: {len(df_consolidado)}."
+    )
+    return df_consolidado
+
+
 def inicializar_bd_desde_excel(archivos_dict):
     """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte multi-solapa para Altas."""
     conn = obtener_conexion()
@@ -589,6 +660,11 @@ def inicializar_bd_desde_excel(archivos_dict):
                     raise ValueError("No se encontró Cliente_id en TP.xlsx")
                 df = pd.read_excel(archivo, header=header_row)
                 df.columns = [str(c).strip() for c in df.columns]
+            elif nombre_tabla.lower() == "vta":
+                if os.path.isdir(archivo):
+                    df = cargar_vta_desde_directorio(archivo)
+                else:
+                    df = pd.read_excel(archivo)
             else:
                 df = pd.read_excel(archivo)
 
@@ -675,7 +751,16 @@ def inicializar_bd_desde_excel(archivos_dict):
                         df[col] = dt.dt.strftime("%Y-%m-%d")
 
                 if nombre_tabla.lower() == "vta":
-                    guardar_vta_incremental_sql(conn, df)
+                    df.to_sql(
+                        "vta",
+                        conn,
+                        if_exists="replace",
+                        index=False,
+                        chunksize=10000,
+                    )
+                    logger.info(
+                        f"Tabla 'vta' reconstruida completamente por reemplazo directo ({len(df)} registros)."
+                    )
                 elif nombre_tabla.lower() == "universo":
                     guardar_snapshot_universo_si_cambio(conn, df)
                     df.to_sql(
@@ -694,17 +779,12 @@ def inicializar_bd_desde_excel(archivos_dict):
                         chunksize=10000,
                     )
 
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_vendedor ON vta(CodVendedor);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_cliente ON vta(Cliente);")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_vta_fechacarga ON vta(FechaCarga);"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_vta_fechaentrega ON vta(FechaEntrega);"
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_marca ON vta(Marca);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_vta_hash ON vta(HASH_VTA);")
+        # Recreación defensiva institucional de índices sobre vta validada contra esquema real
+        recrear_indices_vta_defensivos(conn)
         conn.commit()
+        logger.info(
+            "Sincronización finalizada: verificación e indexación defensiva completada en SQLite."
+        )
     finally:
         conn.close()
 

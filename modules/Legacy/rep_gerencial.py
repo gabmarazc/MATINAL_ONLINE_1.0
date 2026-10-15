@@ -362,7 +362,7 @@ def _calcular_minegocio_taxonomia_detallado(
     except Exception:
         df_ausencias = pd.DataFrame()
 
-    from modules.rep_MN import preparar_ventas_mn
+    from modules.Legacy.rep_MN import preparar_ventas_mn
 
     t_s2 = time.perf_counter()
     df_vta_mn = preparar_ventas_mn(
@@ -1128,7 +1128,7 @@ def _calcular_motor_gerencial_global(
     }
 
     t_s10 = time.perf_counter()
-    from modules.rep_MN import generar_reporte_mn_taxonomia
+    from modules.Legacy.rep_MN import generar_reporte_mn_taxonomia
 
     rep_mn_global = generar_reporte_mn_taxonomia(
         df_vta, df_universo, maestro_v, filtros_globales_base

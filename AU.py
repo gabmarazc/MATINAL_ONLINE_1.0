@@ -1,15 +1,19 @@
 import sqlite3
 import pandas as pd
 
-con = sqlite3.connect("data/matinal.db")
+conn = sqlite3.connect("data/matinal.db")
 
-sql = """
+query = """
 SELECT
-    COUNT(*) filas,
-    SUM(PesoKg) kg
-FROM vta_limpia
-WHERE FechaCarga='2026-09-30'
-  AND FechaEntrega >= '2026-10-01'
+    substr(FechaCarga,1,7) mes,
+    COUNT(DISTINCT CLAVE_NEGOCIO) claves
+FROM vta
+GROUP BY mes
+ORDER BY mes DESC
 """
 
-print(pd.read_sql(sql, con))
+df = pd.read_sql(query, conn)
+
+conn.close()
+
+print(df.to_string(index=False))

@@ -1,11 +1,11 @@
 # data_loader.py
+import io
 import os
+import urllib.request
 import config as cfg
 from modules import database as db
 import pandas as pd
 import streamlit as st
-import urllib.request
-import io
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -62,6 +62,23 @@ def sincronizar_archivos_excel_locales(forzar=False):
         "maestro_innovaciones": ["innovacion", "innovaciones", "maestro_innovaciones"],
         "tp": ["tp", "tienda_perfecta", "tienda perfecta"],
     }
+
+    # =========================================================================
+    # DETECCIÓN Y PRIORIZACIÓN DE VENTAS PARTICIONADAS (data/VTA/)
+    # =========================================================================
+    # 1. Prioridad de data/VTA:
+    #    Si existe el directorio 'data/VTA', se registra prioritariamente como origen
+    #    físico para la transición hacia el esquema de ventas particionado por período.
+    # 2. Ignorado de VTA.xlsx ante concurrencia:
+    #    Al asignarse 'vta' previamente en archivos_encontrados, el bucle tradicional
+    #    de detección ignorará cualquier 'VTA.xlsx' existente en 'data/' o '.'.
+    # 3. Compatibilidad con VTA.xlsx (Modo Legacy):
+    #    Si 'data/VTA' no existe o no es directorio, el flujo legacy continúa intacto
+    #    detectando y utilizando el archivo tradicional 'VTA.xlsx'.
+    # =========================================================================
+    ruta_vta_dir = os.path.join("data", "VTA")
+    if os.path.exists(ruta_vta_dir) and os.path.isdir(ruta_vta_dir):
+        archivos_encontrados["vta"] = "data/VTA"
 
     for d in posibles_rutas:
         if not os.path.exists(d):

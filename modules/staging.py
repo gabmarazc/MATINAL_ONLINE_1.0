@@ -41,7 +41,6 @@ def obtener_staging_vta():
                 SegmentoRentabilidad,
                 RazonSocial,
                 Origen,
-                HASH_VTA,
                 Pendiente
             FROM vta
         """)

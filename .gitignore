@@ -1,9 +1,13 @@
 __pycache__/
 .venv/
 venv/
+
 data/*.db
 data/*.xlsx
 data/*.parquet
-.DS_Store
+data/VTA/
+
 Backup/
 logs/*.log
+
+.DS_Store
