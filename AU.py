@@ -1,19 +1,37 @@
+# au.py
+
 import sqlite3
+from pathlib import Path
 import pandas as pd
 
-conn = sqlite3.connect("data/matinal.db")
 
-query = """
-SELECT
-    substr(FechaCarga,1,7) mes,
-    COUNT(DISTINCT CLAVE_NEGOCIO) claves
-FROM vta
-GROUP BY mes
-ORDER BY mes DESC
-"""
+def encontrar_db():
 
-df = pd.read_sql(query, conn)
+    candidatos = list(Path(".").rglob("*.db"))
 
-conn.close()
+    if not candidatos:
+        raise FileNotFoundError("No se encontró ninguna base SQLite.")
 
-print(df.to_string(index=False))
+    return sorted(candidatos, key=lambda x: x.stat().st_size, reverse=True)[0]
+
+
+db_path = encontrar_db()
+
+conn = sqlite3.connect(db_path)
+
+try:
+    df = pd.read_sql_query(
+        """
+        SELECT DISTINCT
+            FechaEntrega
+        FROM vta
+        ORDER BY FechaEntrega
+        LIMIT 100
+        """,
+        conn,
+    )
+
+    print(df.to_string(index=False))
+
+finally:
+    conn.close()

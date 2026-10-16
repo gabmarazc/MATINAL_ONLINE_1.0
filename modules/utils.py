@@ -2,6 +2,7 @@
 import pandas as pd
 import unicodedata
 
+
 def parsear_fecha_robusta(serie):
     """Estandariza parseo de fechas considerando formatos ISO y DD/MM/YYYY sin advertencias en consola."""
     if serie is None or (isinstance(serie, pd.Series) and serie.empty):
@@ -9,27 +10,55 @@ def parsear_fecha_robusta(serie):
     if not isinstance(serie, pd.Series):
         serie = pd.Series([serie])
     s = serie.astype(str).str.strip().str.replace(" 00:00:00", "", regex=False)
-    
+
     dt_iso = pd.to_datetime(s, format="%Y-%m-%d", errors="coerce")
     dt_lat = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce", dayfirst=True)
-    
+
     return dt_iso.combine_first(dt_lat)
+
+
+def parsear_decimal_robusto(serie_o_valor, default: float = 0.0) -> pd.Series:
+    """
+    Convierte series o valores con formato decimal en texto (incluyendo coma decimal)
+    a valores numéricos de coma flotante (float64) de manera robusta.
+    Ejemplos: '2,75000000' -> 2.75, '0,48000000' -> 0.48, '5,00' -> 5.0
+    """
+    if serie_o_valor is None:
+        return pd.Series([default], dtype="float64")
+    if not isinstance(serie_o_valor, pd.Series):
+        serie_o_valor = pd.Series([serie_o_valor])
+    s_limpia = (
+        serie_o_valor.fillna(default)
+        .astype(str)
+        .str.strip()
+        .str.replace(",", ".", regex=False)
+    )
+    return pd.to_numeric(s_limpia, errors="coerce").fillna(default).astype("float64")
+
 
 def extraer_dia_de_ruta(val):
     """Extrae y normaliza el día de visita a partir del texto de la ruta."""
     if pd.isna(val):
         return "SIN DÍA"
-    nfkd = unicodedata.normalize('NFKD', str(val))
+    nfkd = unicodedata.normalize("NFKD", str(val))
     val_clean = "".join([c for c in nfkd if not unicodedata.combining(c)]).upper()
-    
-    if "LUN" in val_clean: return "LUNES"
-    if "MAR" in val_clean: return "MARTES"
-    if "MIE" in val_clean: return "MIERCOLES"
-    if "JUE" in val_clean: return "JUEVES"
-    if "VIE" in val_clean: return "VIERNES"
-    if "SAB" in val_clean: return "SABADO"
-    if "DOM" in val_clean: return "DOMINGO"
+
+    if "LUN" in val_clean:
+        return "LUNES"
+    if "MAR" in val_clean:
+        return "MARTES"
+    if "MIE" in val_clean:
+        return "MIERCOLES"
+    if "JUE" in val_clean:
+        return "JUEVES"
+    if "VIE" in val_clean:
+        return "VIERNES"
+    if "SAB" in val_clean:
+        return "SABADO"
+    if "DOM" in val_clean:
+        return "DOMINGO"
     return "SIN DÍA"
+
 
 def extraer_dia_de_ruta_vectorial(serie):
     """Normalización y extracción vectorial rápida de días de visita sin bucles en Python."""
@@ -46,7 +75,15 @@ def extraer_dia_de_ruta_vectorial(serie):
     dias_map[s_upper.str.contains("DOM", na=False)] = "DOMINGO"
     return dias_map
 
-def tarjeta_metrica_html(label, valor, border_color="#475569", font_val="1.4rem", font_lbl="0.75rem", color_valor="#f8fafc"):
+
+def tarjeta_metrica_html(
+    label,
+    valor,
+    border_color="#475569",
+    font_val="1.4rem",
+    font_lbl="0.75rem",
+    color_valor="#f8fafc",
+):
     """Genera contenedores HTML unificados para tarjetas de métricas con soporte de color dinámico para el valor."""
     return f"""
     <div style="

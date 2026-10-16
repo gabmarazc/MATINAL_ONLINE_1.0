@@ -1,8 +1,8 @@
-# modules/database.py
 import sqlite3
 import pandas as pd
 import os
 import hashlib
+import time
 from datetime import datetime
 from modules.logger import get_logger
 
@@ -291,308 +291,196 @@ def guardar_snapshot_universo_si_cambio(conn, df_universo: pd.DataFrame):
         )
 
 
-def calcular_hash_fila_vta(row) -> str:
-    """Calcula el HASH_VTA institucional para una fila de ventas utilizando las 6 columnas clave."""
-    partes = [
-        str(row.get("NroComprobante", "")).strip(),
-        str(row.get("Codigo", "")).strip(),
-        str(row.get("CantBase", "")).strip(),
-        str(row.get("ImporteNetoItem", "")).strip(),
-        str(row.get("ComprobanteReferencia", "")).strip(),
-        str(row.get("ComboCodigo", "")).strip(),
-    ]
-    raw_str = "|".join(partes)
-    return hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
-
-
-def asegurar_tabla_vta(conn, df_muestra: pd.DataFrame):
-    """
-    Detecta si la tabla 'vta' existe. Si no existe, utiliza df.head(0).to_sql
-    únicamente para el bootstrap inicial preservando los tipos de datos originales.
-    Garantiza la presencia de la columna HASH_VTA.
-    """
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name) = 'vta';"
-    )
-    tabla_existe = cursor.fetchone() is not None
-
-    if not tabla_existe:
-        df_muestra.head(0).to_sql("vta", conn, if_exists="append", index=False)
-        logger.info(
-            "Estructura VTA creada mediante bootstrap inicial con preservación de tipos."
-        )
-
-    cursor.execute("PRAGMA table_info(vta);")
-    columnas_vta = [row[1] for row in cursor.fetchall()]
-    if "HASH_VTA" not in columnas_vta:
-        cursor.execute("ALTER TABLE vta ADD COLUMN HASH_VTA TEXT;")
-        logger.info("Columna HASH_VTA añadida a la tabla vta existente.")
-
-
-def migrar_hash_vta_si_corresponde(conn):
-    """
-    Verifica mediante la tabla de control persistente 'schema_version' si la migración histórica
-    de HASH_VTA ya se ejecutó. Si no se ha ejecutado, procesa el relleno histórico paginado una única vez
-    y registra el estado de completitud. Participa completamente de la transacción abierta por la función contenedora
-    sin emitir commits ni rollbacks propios.
-    """
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS schema_version (
-            MigrationKey TEXT PRIMARY KEY,
-            CompletedAt TEXT
-        );
-    """)
-
-    cursor.execute(
-        "SELECT 1 FROM schema_version WHERE MigrationKey = 'MIGRACION_HASH_VTA_COMPLETADA';"
-    )
-    if cursor.fetchone() is not None:
-        return
-
-    batch_size = 50000
-    while True:
-        cursor.execute(
-            "SELECT rowid, NroComprobante, Codigo, CantBase, ImporteNetoItem, ComprobanteReferencia, ComboCodigo "
-            "FROM vta WHERE HASH_VTA IS NULL OR HASH_VTA = '' LIMIT ?;",
-            (batch_size,),
-        )
-        registros_antiguos = cursor.fetchall()
-        if not registros_antiguos:
-            break
-
-        updates = []
-        for reg in registros_antiguos:
-            row_dict = {
-                "NroComprobante": reg[1],
-                "Codigo": reg[2],
-                "CantBase": reg[3],
-                "ImporteNetoItem": reg[4],
-                "ComprobanteReferencia": reg[5],
-                "ComboCodigo": reg[6],
-            }
-            h = calcular_hash_fila_vta(row_dict)
-            updates.append((h, reg[0]))
-
-        cursor.executemany("UPDATE vta SET HASH_VTA = ? WHERE rowid = ?;", updates)
-        logger.info(
-            f"Relleno histórico paginado HASH_VTA: Procesados {len(updates)} registros."
-        )
-
-    cursor.execute(
-        "INSERT OR IGNORE INTO schema_version (MigrationKey, CompletedAt) VALUES ('MIGRACION_HASH_VTA_COMPLETADA', ?);",
-        (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
-    )
-    logger.info(
-        "Migración histórica HASH_VTA marcada como completada permanentemente en schema_version."
-    )
-
-
-def guardar_vta_incremental_sql(conn, df_vta: pd.DataFrame):
-    """
-    Persiste la tabla VTA en modelo histórico acumulativo permanente de forma escalable.
-    Sincroniza columnas, ejecuta migración histórica, staging temporal e inserción basada en clave de negocio única en transacción única.
-    """
-    if df_vta is None or df_vta.empty:
-        return
-
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute("BEGIN TRANSACTION;")
-
-        # 1. Asegurar la existencia de la tabla vta y la columna HASH_VTA
-        asegurar_tabla_vta(conn, df_vta)
-
-        # 2. Ejecutar migración histórica persistente de registros antiguos una sola vez
-        migrar_hash_vta_si_corresponde(conn)
-
-        # Asegurar columna CLAVE_NEGOCIO en vta
-        cursor.execute("PRAGMA table_info(vta);")
-        columnas_vta = [row[1] for row in cursor.fetchall()]
-        if "CLAVE_NEGOCIO" not in columnas_vta:
-            cursor.execute("ALTER TABLE vta ADD COLUMN CLAVE_NEGOCIO TEXT;")
-            logger.info("Columna CLAVE_NEGOCIO añadida a la tabla vta existente.")
-
-        cursor.execute("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_vta_clave_negocio
-            ON vta(CLAVE_NEGOCIO);
-        """)
-
-        # Función local interna de normalización canónica simétrica
-        def normalizar_valor(val):
-            if val is None:
-                return ""
-            s = str(val).strip()
-            if s in ["nan", "None", "<NA>", ""]:
-                return ""
-            if s.endswith(".0"):
-                s = s[:-2]
-            return s
-
-        cols_clave = [
-            "NroComprobante",
-            "Codigo",
-            "CantBase",
-            "ImporteNetoItem",
-            "ComprobanteReferencia",
-            "ComboCodigo",
-        ]
-
-        def construir_clave_row(row):
-            partes = []
-            for col in cols_clave:
-                val = row.get(col, "")
-                partes.append(normalizar_valor(val))
-            return "|".join(partes)
-
-        # 3. Backfill / actualización de CLAVE_NEGOCIO para registros históricos en vta que no la tengan
-        cursor.execute(
-            "SELECT rowid, NroComprobante, Codigo, CantBase, ImporteNetoItem, ComprobanteReferencia, ComboCodigo "
-            "FROM vta WHERE CLAVE_NEGOCIO IS NULL OR CLAVE_NEGOCIO = '';"
-        )
-        historicos = cursor.fetchall()
-        if historicos:
-            updates_hist = []
-            for reg in historicos:
-                row_dict = {
-                    "NroComprobante": reg[1],
-                    "Codigo": reg[2],
-                    "CantBase": reg[3],
-                    "ImporteNetoItem": reg[4],
-                    "ComprobanteReferencia": reg[5],
-                    "ComboCodigo": reg[6],
-                }
-                clave = construir_clave_row(row_dict)
-                updates_hist.append((clave, reg[0]))
-            cursor.executemany(
-                "UPDATE vta SET CLAVE_NEGOCIO = ? WHERE rowid = ?;", updates_hist
-            )
-            logger.info(
-                f"Backfill CLAVE_NEGOCIO histórico: Procesados {len(updates_hist)} registros."
-            )
-
-        # 4. Preparar el DataFrame entrante: construir CLAVE_NEGOCIO, calcular HASH_VTA y eliminar duplicados internos por CLAVE_NEGOCIO
-        df = df_vta.copy()
-
-        df["CLAVE_NEGOCIO"] = df.apply(construir_clave_row, axis=1)
-
-        if "HASH_VTA" not in df.columns:
-            df["HASH_VTA"] = df.apply(calcular_hash_fila_vta, axis=1)
-
-        df = df.drop_duplicates(subset=["CLAVE_NEGOCIO"]).copy()
-
-        # 5. Sincronización de esquema: Agregar columnas faltantes en vta si existen en el DataFrame entrante
-        cursor.execute("PRAGMA table_info(vta);")
-        columnas_tabla_vta = [row[1] for row in cursor.fetchall()]
-
-        for col in df.columns:
-            if col not in columnas_tabla_vta:
-                cursor.execute(f'ALTER TABLE vta ADD COLUMN "{col}" TEXT;')
-                logger.info(
-                    f"Sincronización de esquema VTA: Columna faltante '{col}' añadida mediante ALTER TABLE."
-                )
-
-        # Recargar esquema sincronizado
-        cursor.execute("PRAGMA table_info(vta);")
-        columnas_tabla_vta = [row[1] for row in cursor.fetchall()]
-
-        for col in columnas_tabla_vta:
-            if col not in df.columns:
-                df[col] = None
-
-        df = df[columnas_tabla_vta]
-
-        # 6. Crear tabla temporal SQLite (staging_vta) con la estructura sincronizada
-        cursor.execute("DROP TABLE IF EXISTS staging_vta;")
-        cursor.execute(
-            "CREATE TEMPORARY TABLE staging_vta AS SELECT * FROM vta WHERE 1=0;"
-        )
-
-        # 7. Volcar el DataFrame normalizado a staging_vta por lotes (chunks)
-        chunk_size = 10000
-        total_registros = len(df)
-        cols = list(df.columns)
-
-        for start_idx in range(0, total_registros, chunk_size):
-            chunk_df = df.iloc[start_idx : start_idx + chunk_size]
-            chunk_df.to_sql(
-                "staging_vta", conn, if_exists="append", index=False, chunksize=10000
-            )
-
-        # 8. Inserción basada exclusivamente en CLAVE_NEGOCIO
-        cols_str = ", ".join(cols)
-        sql_insert_set_based = f"""
-            INSERT INTO vta ({cols_str})
-            SELECT {cols_str} FROM staging_vta
-            WHERE NOT EXISTS (
-                SELECT 1 FROM vta
-                WHERE vta.CLAVE_NEGOCIO = staging_vta.CLAVE_NEGOCIO
-            )
-        """
-        cursor.execute(sql_insert_set_based)
-        filas_insertadas = cursor.rowcount
-
-        # 9. Limpiar tabla temporal y confirmar la transacción atómica única
-        cursor.execute("DROP TABLE IF EXISTS staging_vta;")
-        conn.commit()
-
-        logger.info(
-            f"VTA INCREMENTAL SET-BASED: Se procesaron {total_registros} registros entrantes (nuevos insertados: {filas_insertadas})."
-        )
-
-    except Exception as e:
-        conn.rollback()
-        logger.exception(
-            "Error crítico durante la transacción de VTA incremental. Rollback ejecutado."
-        )
-        raise e
-
-
 def cargar_vta_desde_directorio(ruta_directorio: str) -> pd.DataFrame:
     """
-    Carga y concatena verticalmente todos los archivos Excel (*.xlsx) contenidos en el directorio
-    especificado, ordenados alfabéticamente de forma estable. No agrega columnas auxiliares.
+    Carga y consolida verticalmente las transacciones particionadas de ventas desde el directorio Gescom.
+
+    Flujo técnico:
+    1. Evalúa si 'VTA_CONSOLIDADO.parquet' existe en el directorio y si está vigente
+       respecto al mtime más reciente de los archivos CSV fuente.
+    2. Si está vigente, lee directamente desde Parquet con manejo defensivo contra archivos corruptos.
+    3. Si no existe o se detectaron CSVs más recientes, lee los CSV con pd.read_csv(sep=';', encoding='latin1', engine='c', dtype=str),
+       los concatena y genera 'VTA_CONSOLIDADO.parquet' con compresión 'snappy'.
+    4. Mantiene fallback defensivo para directorios históricos con archivos *.xlsx.
     """
+    t_inicio_directorio = time.perf_counter()
+
     if not os.path.exists(ruta_directorio) or not os.path.isdir(ruta_directorio):
         logger.warning(
             f"El directorio especificado para VTA particionado no existe o no es válido: {ruta_directorio}"
         )
         return pd.DataFrame()
 
-    archivos = [
+    ruta_parquet = os.path.join(ruta_directorio, "VTA_CONSOLIDADO.parquet")
+
+    # Identificar archivos fuente CSV (excluyendo archivos temporales)
+    archivos_csv = [
+        f
+        for f in os.listdir(ruta_directorio)
+        if f.lower().endswith(".csv")
+        and not f.startswith("~$")
+        and os.path.isfile(os.path.join(ruta_directorio, f))
+    ]
+    archivos_csv.sort()
+
+    # Si hay archivos CSV, procesamos bajo la regla institucional Parquet / CSV Gescom
+    if archivos_csv:
+        rutas_csv = [os.path.join(ruta_directorio, f) for f in archivos_csv]
+        mtime_fuentes_max = max(os.path.getmtime(r) for r in rutas_csv)
+
+        # 1. Leer parquet si está vigente
+        if os.path.exists(ruta_parquet):
+            try:
+                mtime_parquet = os.path.getmtime(ruta_parquet)
+                if mtime_parquet >= mtime_fuentes_max:
+                    t_inicio_parquet = time.perf_counter()
+                    df_consolidado = pd.read_parquet(ruta_parquet)
+                    t_duracion_parquet = time.perf_counter() - t_inicio_parquet
+
+                    msg_perf_parquet = (
+                        f"[PERF_VTA] CACHE PARQUET VIGENTE -> {t_duracion_parquet:.2f} s | "
+                        f"filas={len(df_consolidado)}"
+                    )
+                    print(msg_perf_parquet)
+                    logger.info(msg_perf_parquet)
+                    return df_consolidado
+            except Exception:
+                logger.warning(
+                    f"[PERF_VTA] Caché Parquet '{ruta_parquet}' corrupto o ilegible. Reconstruyendo desde CSVs de origen."
+                )
+                try:
+                    os.remove(ruta_parquet)
+                except OSError:
+                    pass
+
+        # 2. Leer CSV Gescom con configuración obligatoria
+        dfs = []
+        for arch in archivos_csv:
+            ruta_archivo = os.path.join(ruta_directorio, arch)
+            t_inicio_archivo = time.perf_counter()
+            try:
+                # Verificación defensiva contra archivos CSV vacíos (0 bytes)
+                if os.path.getsize(ruta_archivo) == 0:
+                    logger.warning(
+                        f"[PERF_VTA] Archivo CSV vacío (0 bytes) ignorado: {arch}"
+                    )
+                    continue
+
+                df_item = pd.read_csv(
+                    ruta_archivo,
+                    sep=";",
+                    encoding="latin1",
+                    engine="c",
+                    dtype=str,
+                )
+                t_duracion_archivo = time.perf_counter() - t_inicio_archivo
+
+                cant_filas = len(df_item)
+                msg_perf_archivo = f"[PERF_VTA] {arch} (CSV Gescom) -> {t_duracion_archivo:.2f} s | filas={cant_filas}"
+                print(msg_perf_archivo)
+                logger.info(msg_perf_archivo)
+                dfs.append(df_item)
+            except pd.errors.EmptyDataError:
+                logger.warning(f"[PERF_VTA] Archivo CSV sin datos ignorado: {arch}")
+            except Exception:
+                logger.exception(f"[PERF_VTA] Error al procesar archivo CSV: {arch}")
+                raise
+
+        if not dfs:
+            logger.warning(
+                f"No se pudieron cargar datos válidos desde los CSVs en: {ruta_directorio}"
+            )
+            return pd.DataFrame()
+
+        t_inicio_concat = time.perf_counter()
+        df_consolidado = pd.concat(dfs, ignore_index=True)
+        t_duracion_concat = time.perf_counter() - t_inicio_concat
+
+        msg_perf_concat = f"[PERF_VTA] CONCAT CSV -> {t_duracion_concat:.2f} s"
+        print(msg_perf_concat)
+        logger.info(msg_perf_concat)
+
+        # 3. Generar VTA_CONSOLIDADO.parquet con compresión snappy
+        try:
+            df_consolidado.to_parquet(ruta_parquet, index=False, compression="snappy")
+            logger.info(
+                f"[PERF_VTA] Archivo '{ruta_parquet}' generado y actualizado exitosamente (compresión: snappy)."
+            )
+        except Exception:
+            logger.exception(
+                f"[PERF_VTA] Error al intentar generar '{ruta_parquet}'. Se continuará con el DataFrame en memoria."
+            )
+
+        t_duracion_directorio = time.perf_counter() - t_inicio_directorio
+        msg_perf_total_dir = (
+            f"[PERF_VTA] TOTAL LECTURA DIRECTORIO -> {t_duracion_directorio:.2f} s"
+        )
+        print(msg_perf_total_dir)
+        logger.info(msg_perf_total_dir)
+
+        return df_consolidado
+
+    # Fallback defensivo para directorios históricos con archivos *.xlsx
+    archivos_xlsx = [
         f
         for f in os.listdir(ruta_directorio)
         if f.lower().endswith(".xlsx")
         and not f.startswith("~$")
         and os.path.isfile(os.path.join(ruta_directorio, f))
     ]
+    archivos_xlsx.sort()
 
-    archivos.sort()
-
-    if not archivos:
+    if not archivos_xlsx:
         logger.warning(
-            f"No se encontraron archivos *.xlsx en el directorio de ventas: {ruta_directorio}"
+            f"No se encontraron archivos *.csv ni *.xlsx en el directorio de ventas: {ruta_directorio}"
         )
         return pd.DataFrame()
 
     dfs = []
-    for arch in archivos:
+    for arch in archivos_xlsx:
         ruta_archivo = os.path.join(ruta_directorio, arch)
-        logger.info(f"Cargando archivo particionado de VTA: {ruta_archivo}")
-        df_mes = pd.read_excel(ruta_archivo)
-        dfs.append(df_mes)
+        t_inicio_archivo = time.perf_counter()
+        try:
+            df_mes = pd.read_excel(ruta_archivo)
+            t_duracion_archivo = time.perf_counter() - t_inicio_archivo
 
+            cant_filas = len(df_mes)
+            msg_perf_archivo = f"[PERF_VTA] {arch} (Excel) -> {t_duracion_archivo:.2f} s | filas={cant_filas}"
+            print(msg_perf_archivo)
+            logger.info(msg_perf_archivo)
+            dfs.append(df_mes)
+        except Exception:
+            logger.exception(f"[PERF_VTA] Error al leer archivo Excel: {arch}")
+
+    if not dfs:
+        return pd.DataFrame()
+
+    t_inicio_concat = time.perf_counter()
     df_consolidado = pd.concat(dfs, ignore_index=True)
-    logger.info(
-        f"Consolidación de VTA desde directorio finalizada. Total de archivos procesados: {len(dfs)}, registros: {len(df_consolidado)}."
+    t_duracion_concat = time.perf_counter() - t_inicio_concat
+
+    msg_perf_concat = f"[PERF_VTA] CONCAT EXCEL -> {t_duracion_concat:.2f} s"
+    print(msg_perf_concat)
+    logger.info(msg_perf_concat)
+
+    # Generar parquet consolidado si aplica
+    try:
+        df_consolidado.to_parquet(ruta_parquet, index=False, compression="snappy")
+    except Exception:
+        logger.exception("Error al generar parquet desde archivos Excel.")
+
+    t_duracion_directorio = time.perf_counter() - t_inicio_directorio
+    msg_perf_total_dir = (
+        f"[PERF_VTA] TOTAL DIRECTORIO EXCEL -> {t_duracion_directorio:.2f} s"
     )
+    print(msg_perf_total_dir)
+    logger.info(msg_perf_total_dir)
+
     return df_consolidado
 
 
 def inicializar_bd_desde_excel(archivos_dict):
-    """Lee los archivos Excel interpretando fechas y estructurando tablas con soporte multi-solapa para Altas."""
+    """Lee los archivos interpretando fechas y estructurando tablas con soporte multi-solapa para Altas."""
     conn = obtener_conexion()
     try:
         for nombre_tabla, archivo in archivos_dict.items():
@@ -661,10 +549,26 @@ def inicializar_bd_desde_excel(archivos_dict):
                 df = pd.read_excel(archivo, header=header_row)
                 df.columns = [str(c).strip() for c in df.columns]
             elif nombre_tabla.lower() == "vta":
+                # RAMA VTA: Lectura optimizada (Directorio CSV/Parquet o Archivo único)
+                t_inicio_lectura_vta = time.perf_counter()
                 if os.path.isdir(archivo):
                     df = cargar_vta_desde_directorio(archivo)
+                elif str(archivo).lower().endswith(".parquet"):
+                    df = pd.read_parquet(archivo)
+                elif str(archivo).lower().endswith(".csv"):
+                    df = pd.read_csv(
+                        archivo,
+                        sep=";",
+                        encoding="latin1",
+                        engine="c",
+                        dtype=str,
+                    )
                 else:
                     df = pd.read_excel(archivo)
+                t_duracion_lectura_vta = time.perf_counter() - t_inicio_lectura_vta
+                msg_perf_lectura = f"[PERF_VTA] LECTURA VTA -> {t_duracion_lectura_vta:.2f} s | filas={len(df)}"
+                print(msg_perf_lectura)
+                logger.info(msg_perf_lectura)
             else:
                 df = pd.read_excel(archivo)
 
@@ -751,6 +655,8 @@ def inicializar_bd_desde_excel(archivos_dict):
                         df[col] = dt.dt.strftime("%Y-%m-%d")
 
                 if nombre_tabla.lower() == "vta":
+                    # Mantiene exactamente el mismo replace actual de SQLite
+                    t_inicio_replace_vta = time.perf_counter()
                     df.to_sql(
                         "vta",
                         conn,
@@ -758,6 +664,12 @@ def inicializar_bd_desde_excel(archivos_dict):
                         index=False,
                         chunksize=10000,
                     )
+                    t_duracion_replace_vta = time.perf_counter() - t_inicio_replace_vta
+                    msg_perf_replace = (
+                        f"[PERF_VTA] SQLITE REPLACE -> {t_duracion_replace_vta:.2f} s"
+                    )
+                    print(msg_perf_replace)
+                    logger.info(msg_perf_replace)
                     logger.info(
                         f"Tabla 'vta' reconstruida completamente por reemplazo directo ({len(df)} registros)."
                     )

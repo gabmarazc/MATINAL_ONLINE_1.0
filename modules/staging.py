@@ -4,7 +4,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from modules import database as db
-from modules.utils import parsear_fecha_robusta
+from modules.utils import (
+    parsear_fecha_robusta,
+    parsear_decimal_robusto,
+)
 
 
 @st.cache_data(show_spinner=False)
@@ -55,8 +58,8 @@ def obtener_staging_vta():
 
     df = df_raw.copy()
 
-    # Normalización tipográfica estricta
-    df["PesoKg"] = pd.to_numeric(df.get("PesoKg", 0), errors="coerce").fillna(0.0)
+    # Normalización tipográfica estricta con soporte robusto de coma decimal
+    df["PesoKg"] = parsear_decimal_robusto(df.get("PesoKg", 0.0), default=0.0)
 
     col_pesos = next(
         (
@@ -67,7 +70,7 @@ def obtener_staging_vta():
         None,
     )
     df["ImporteNetoItem"] = (
-        pd.to_numeric(df[col_pesos], errors="coerce").fillna(0.0) if col_pesos else 0.0
+        parsear_decimal_robusto(df[col_pesos], default=0.0) if col_pesos else 0.0
     )
 
     col_cant = next(
@@ -85,7 +88,7 @@ def obtener_staging_vta():
         ),
         df.columns[0],
     )
-    df["CantBase"] = pd.to_numeric(df[col_cant], errors="coerce").fillna(0.0)
+    df["CantBase"] = parsear_decimal_robusto(df[col_cant], default=0.0)
 
     # Parseo de fechas robusto unificado
     df["FechaCarga_dt"] = parsear_fecha_robusta(df.get("FechaCarga"))
@@ -123,6 +126,8 @@ def obtener_staging_vta():
         if col_m
         else "SIN MARCA"
     )
+
+    print("[AUDIT] STAGING PesoKg Total:", df["PesoKg"].sum())
 
     print(f"[PERF_CORE] 1) obtener_staging_vta -> {time.perf_counter() - t0:.4f} s")
     return df
