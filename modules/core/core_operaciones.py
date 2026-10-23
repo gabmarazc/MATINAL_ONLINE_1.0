@@ -346,7 +346,7 @@ def obtener_core_operacion(
     """
     Capa CORE (Función Orquestadora Pública): Retorna un diccionario consolidado con todas las métricas
     y asignaciones operativas procesadas por CORE_OPERACION, manteniendo compatibilidad hacia atrás
-    y agregando nuevas claves de forma segura.
+    y agregando las vistas 'df_vta_operativa' y 'df_vta_titular' de forma segura.
     """
     t0 = time.perf_counter()
     df_vta = obtener_staging_vta()
@@ -371,7 +371,10 @@ def obtener_core_operacion(
             df_vta_temporal["Periodo"] != "Fuera de Periodo"
         ].copy()
 
-    # 3. Procesar ausencias y reemplazos sobre el dataframe ya reducido
+    # Definición de la vista titular (preserva titularidad inmutable tras filtrado de periodo)
+    df_vta_titular = df_vta_temporal.copy()
+
+    # 3. Procesar ausencias y reemplazos sobre el dataframe operativo
     df_vta_procesada = procesar_ausencias_y_reemplazos(df_vta_temporal, df_ausencias)
     df_vta_temporal = df_vta_procesada
 
@@ -441,6 +444,7 @@ def obtener_core_operacion(
     print(f"[PERF_CORE] 7) obtener_core_operacion -> {time.perf_counter() - t0:.4f} s")
     return {
         "df_vta_operativa": df_vta_temporal,
+        "df_vta_titular": df_vta_titular,
         "dias_pasados_map": dias_pasados,
         "dias_restantes_map": dias_restantes,
         "rutas_totales_map": rutas_totales,

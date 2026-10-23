@@ -1,25 +1,21 @@
 # modules/core/core_vendedores.py
 import streamlit as st
 import pandas as pd
-
 from modules import database as db
 
 
-@st.cache_data(show_spinner=False)
-def obtener_core_vendedores():
+def _cargar_y_normalizar_vendedores() -> pd.DataFrame:
     """
-    CORE_VENDEDORES V2
+    CORE_VENDEDORES - Función Interna Privada
 
     Responsabilidades:
-    - Cargar maestro_vendedores
+    - Cargar maestro_vendedores desde SQLite
     - Normalizar CodVendedor
-    - Mantener Nombre
-    - Mantener SUP
+    - Mantener Nombre y SUP
     - Extraer Ajuste_Entrega y Rutas_Ajustadas
-    - Excluir vendedor 20
     - Eliminar duplicados
+    - Ordenar por CodVendedor
     """
-
     try:
         df = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
     except Exception:
@@ -93,11 +89,28 @@ def obtener_core_vendedores():
         core["Rutas_Ajustadas"] = 0
 
     core = core[core["CodVendedor"].notna()].copy()
-
-    core = core[core["CodVendedor"] != 20].copy()
-
     core = core.drop_duplicates(subset=["CodVendedor"])
-
     core = core.sort_values("CodVendedor").reset_index(drop=True)
 
     return core
+
+
+@st.cache_data(show_spinner=False)
+def obtener_core_vendedores(incluir_vendedor_20: bool = False) -> pd.DataFrame:
+    """
+    CORE_VENDEDORES V3 (Punto de Entrada Único)
+
+    Responsabilidades:
+    - Cargar maestro_vendedores normalizado mediante función privada.
+    - Excluir por defecto al vendedor 20 (comportamiento histórico preservado).
+    - Permitir opcionalmente incluir al vendedor 20 mediante el parámetro incluir_vendedor_20=True (uso gerencial).
+    - Eliminar duplicados y ordenar de forma ascendente.
+    """
+    core = _cargar_y_normalizar_vendedores()
+    if core.empty:
+        return core
+
+    if not incluir_vendedor_20:
+        core = core[core["CodVendedor"] != 20].copy()
+
+    return core.reset_index(drop=True)

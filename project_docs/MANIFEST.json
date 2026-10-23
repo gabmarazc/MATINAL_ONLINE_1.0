@@ -1,0 +1,24 @@
+{
+  "package": "MATINAL_DOCUMENTACION_DEFINITIVA_V4",
+  "version": "4.0",
+  "generated_on": "2026-10-23",
+  "document_count": 10,
+  "replacement_scope": "Reemplazo total del corpus documental legacy y del paquete de onboarding V1",
+  "files": [
+    "01_ESTADO_ACTUAL_Y_ALCANCE.md",
+    "02_ARQUITECTURA_OBJETIVO_Y_REAL.md",
+    "03_MODELO_DE_DATOS_Y_PERSISTENCIA.md",
+    "04_INVENTARIO_TECNICO_Y_DEPENDENCIAS.md",
+    "05_REGLAS_FUNCIONALES_Y_DOMINIOS.md",
+    "06_CONTRATOS_CORE_Y_BUSINESS_RULES.md",
+    "07_GOBIERNO_TECNICO_Y_AUDITORIA.md",
+    "08_DEUDA_TECNICA_RIESGOS_Y_DECISIONES.md",
+    "09_PLAYBOOKS_OPERATIVOS.md",
+    "10_AGENTE_IA_Y_PROMPT_OFICIAL.md"
+  ],
+  "source_groups": [
+    "Documentación legacy relevada",
+    "Código vivo relevado",
+    "Paquete de agente V1"
+  ]
+}
