@@ -298,13 +298,18 @@ def main():
     )
 
     filtros_globales = {
-        "anio": int(anio_operativo),
-        "mes": int(mes_operativo),
+        "anio": int(sel_dia_venta.year),
+        "mes": int(sel_dia_venta.month),
         "supervisor": sel_supervisor,
         "dia_matinal": sel_dia_matinal.strftime("%d/%m/%Y"),
         "dia_venta": sel_dia_venta.strftime("%d/%m/%Y"),
         "dia_anterior": sel_dia_anterior.strftime("%d/%m/%Y"),
     }
+
+    try:
+        db.sincronizar_parametros_desde_filtros(filtros_globales)
+    except Exception as e:
+        st.sidebar.error(f"Error al sincronizar parámetros globales con SQLite: {e}")
 
     # Integración de la validación de integridad del período operativo
     estado_periodo = validar_integridad_periodo_operativo(

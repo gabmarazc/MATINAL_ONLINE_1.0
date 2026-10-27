@@ -423,6 +423,98 @@ def render_fragmento_interactivo_ccc_core(
     st.divider()
 
     # --------------------------------------------------
+    # AUDITORÍA ALTAS DEL PERÍODO
+    # --------------------------------------------------
+    with st.expander("🔍 Auditoría Altas del Período", expanded=False):
+        if (
+            not df_detalle_filtrado.empty
+            and "Es_Alta_Periodo" in df_detalle_filtrado.columns
+        ):
+            df_altas_aud = df_detalle_filtrado[
+                df_detalle_filtrado["Es_Alta_Periodo"] == True
+            ].copy()
+        else:
+            df_altas_aud = pd.DataFrame()
+
+        if not df_altas_aud.empty:
+            if "Es_CCC_Gerencia" in df_altas_aud.columns:
+                df_altas_aud["Estado_Alta"] = np.where(
+                    df_altas_aud["Es_CCC_Gerencia"] == True, "✅ CCC", "❌ NC"
+                )
+            else:
+                df_altas_aud["Estado_Alta"] = "❌ NC"
+
+            altas_totales = len(df_altas_aud)
+            altas_con_ccc = int((df_altas_aud["Estado_Alta"] == "✅ CCC").sum())
+            altas_sin_ccc = int((df_altas_aud["Estado_Alta"] == "❌ NC").sum())
+
+            col_aud1, col_aud2, col_aud3 = st.columns(3)
+            with col_aud1:
+                st.markdown(
+                    _tarjeta_metrica_compacta_html(
+                        "Altas Totales", f"{altas_totales:,.0f}", "#38bdf8", "1px"
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with col_aud2:
+                st.markdown(
+                    _tarjeta_metrica_compacta_html(
+                        "Altas con CCC", f"{altas_con_ccc:,.0f}", "#22c55e", "1px"
+                    ),
+                    unsafe_allow_html=True,
+                )
+            with col_aud3:
+                st.markdown(
+                    _tarjeta_metrica_compacta_html(
+                        "Altas sin CCC", f"{altas_sin_ccc:,.0f}", "#ef4444", "1px"
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("")
+
+            cols_altas_requeridas = [
+                "Cliente",
+                "NombreCliente",
+                "CodVendedor_Titular",
+                "Nombre",
+                "SUP",
+                "Taxonomia",
+                "DiaVisita",
+                "Estado_Alta",
+            ]
+            df_altas_view = pd.DataFrame()
+            for c in cols_altas_requeridas:
+                if c in df_altas_aud.columns:
+                    df_altas_view[c] = df_altas_aud[c]
+                else:
+                    df_altas_view[c] = pd.Series(dtype=object)
+
+            gb_altas = GridOptionsBuilder.from_dataframe(df_altas_view)
+            gb_altas.configure_default_column(
+                filterable=True, sortable=True, resizable=True, minWidth=110
+            )
+            gb_altas.configure_pagination(
+                paginationAutoPageSize=False, paginationPageSize=15
+            )
+            grid_opts_altas = gb_altas.build()
+
+            AgGrid(
+                df_altas_view,
+                gridOptions=grid_opts_altas,
+                height=350,
+                width="100%",
+                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                update_mode=GridUpdateMode.MODEL_CHANGED,
+                theme="streamlit",
+                fit_columns_on_grid_load=False,
+            )
+        else:
+            st.info("No existen altas del período para los filtros seleccionados.")
+
+    st.divider()
+
+    # --------------------------------------------------
     # EXPORTACIÓN
     # --------------------------------------------------
     col_dl1, col_dl2 = st.columns(2)

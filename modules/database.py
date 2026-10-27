@@ -1,6 +1,7 @@
 import sqlite3
 import pandas as pd
 import os
+import re
 import hashlib
 import time
 from datetime import datetime
@@ -11,6 +12,11 @@ logger = get_logger("database")
 
 DB_PATH = "data/matinal.db"
 
+# VTA se sincroniza automáticamente por versión de archivo.
+# Cada AAAA-MM.csv representa la foto completa vigente de ese período físico.
+# Si el archivo es nuevo o cambió, el período correspondiente se reemplaza
+# íntegramente dentro de una transacción SQLite y se valida antes del COMMIT.
+
 
 def obtener_conexion():
     """Crea una conexión a SQLite con timeout y modo WAL activado para concurrencia segura."""
@@ -18,6 +24,161 @@ def obtener_conexion():
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL;")
     return conn
+
+
+def sincronizar_parametros_desde_filtros(filtros_globales: dict) -> dict:
+    """
+    Sincroniza en SQLite.parametros las fechas seleccionadas en los filtros
+    globales de Streamlit.
+
+    Fuente de verdad temporal:
+    - Dia Matinal: filtros_globales["dia_matinal"]
+    - Dia Venta: filtros_globales["dia_venta"]
+    - Dia Anterior: filtros_globales["dia_anterior"]
+    - Año y Mes: se derivan exclusivamente de Dia Venta.
+
+    La funcion actualiza solo las cinco claves anteriores. Compara primero los
+    valores vigentes y no escribe si no existen cambios. La persistencia se
+    ejecuta dentro de una unica transaccion SQLite.
+    """
+    if not isinstance(filtros_globales, dict):
+        raise TypeError("filtros_globales debe ser un diccionario.")
+
+    claves_requeridas = ["dia_matinal", "dia_venta", "dia_anterior"]
+    faltantes = [
+        clave
+        for clave in claves_requeridas
+        if clave not in filtros_globales
+        or filtros_globales[clave] is None
+        or str(filtros_globales[clave]).strip() == ""
+    ]
+    if faltantes:
+        raise ValueError(
+            "No se pueden sincronizar PARAMETROS. Faltan filtros globales: "
+            + ", ".join(faltantes)
+        )
+
+    def normalizar_fecha(valor, nombre_campo: str):
+        if isinstance(valor, datetime):
+            fecha = valor
+        else:
+            fecha = pd.to_datetime(valor, dayfirst=True, errors="coerce")
+        if pd.isna(fecha):
+            raise ValueError(
+                f"Fecha invalida para {nombre_campo}: {valor!r}. "
+                "Se esperaba una fecha o un texto DD/MM/AAAA."
+            )
+        return fecha
+
+    fecha_matinal = normalizar_fecha(filtros_globales["dia_matinal"], "dia_matinal")
+    fecha_venta = normalizar_fecha(filtros_globales["dia_venta"], "dia_venta")
+    fecha_anterior = normalizar_fecha(filtros_globales["dia_anterior"], "dia_anterior")
+
+    valores_objetivo = {
+        "Año": str(int(fecha_venta.year)),
+        "Mes": str(int(fecha_venta.month)),
+        "Dia Matinal": fecha_matinal.strftime("%d/%m/%Y"),
+        "Dia Venta": fecha_venta.strftime("%d/%m/%Y"),
+        "Dia Anterior": fecha_anterior.strftime("%d/%m/%Y"),
+    }
+
+    conn = obtener_conexion()
+    try:
+        cursor = conn.cursor()
+        tabla_existe = cursor.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type='table' AND LOWER(name)='parametros'
+            LIMIT 1;
+            """
+        ).fetchone()
+
+        if tabla_existe is None:
+            cursor.execute(
+                """
+                CREATE TABLE parametros (
+                    PARAMETRO TEXT PRIMARY KEY,
+                    VALOR TEXT
+                );
+                """
+            )
+        else:
+            columnas = [
+                str(fila[1]).strip().upper()
+                for fila in cursor.execute("PRAGMA table_info(parametros);").fetchall()
+            ]
+            requeridas = {"PARAMETRO", "VALOR"}
+            if not requeridas.issubset(set(columnas)):
+                raise ValueError(
+                    "La tabla parametros no cumple el contrato requerido. "
+                    f"Columnas encontradas: {columnas}."
+                )
+
+        filas_actuales = cursor.execute(
+            "SELECT PARAMETRO, VALOR FROM parametros;"
+        ).fetchall()
+        valores_actuales = {
+            str(parametro).strip(): "" if valor is None else str(valor).strip()
+            for parametro, valor in filas_actuales
+        }
+
+        cambios = {
+            parametro: {
+                "anterior": valores_actuales.get(parametro),
+                "nuevo": valor,
+            }
+            for parametro, valor in valores_objetivo.items()
+            if valores_actuales.get(parametro) != valor
+        }
+
+        if not cambios:
+            logger.info(
+                "PARAMETROS: los filtros globales coinciden con SQLite. "
+                "No se realizaron escrituras."
+            )
+            return {
+                "actualizado": False,
+                "cambios": {},
+                "valores": valores_objetivo,
+            }
+
+        try:
+            cursor.execute("BEGIN IMMEDIATE;")
+            for parametro, valor in valores_objetivo.items():
+                cursor.execute(
+                    "UPDATE parametros SET VALOR=? WHERE PARAMETRO=?;",
+                    (valor, parametro),
+                )
+                if cursor.rowcount == 0:
+                    cursor.execute(
+                        "INSERT INTO parametros (PARAMETRO, VALOR) VALUES (?, ?);",
+                        (parametro, valor),
+                    )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        logger.info(
+            "PARAMETROS sincronizados desde filtros globales: "
+            + ", ".join(
+                f"{parametro}={detalle['nuevo']}"
+                for parametro, detalle in cambios.items()
+            )
+        )
+        return {
+            "actualizado": True,
+            "cambios": cambios,
+            "valores": valores_objetivo,
+        }
+    except Exception:
+        logger.exception(
+            "Error al sincronizar la tabla parametros desde filtros globales."
+        )
+        raise
+    finally:
+        conn.close()
 
 
 def recrear_indices_vta_defensivos(conn):
@@ -45,6 +206,7 @@ def recrear_indices_vta_defensivos(conn):
         ("idx_vta_fechacarga", "FechaCarga"),
         ("idx_vta_fechaentrega", "FechaEntrega"),
         ("idx_vta_marca", "Marca"),
+        ("idx_vta_periodo_archivo", "PeriodoArchivo"),
     ]
 
     for nombre_idx, columna in indices_esperados:
@@ -291,6 +453,477 @@ def guardar_snapshot_universo_si_cambio(conn, df_universo: pd.DataFrame):
         )
 
 
+def _normalizar_fechas_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza columnas de fecha con el mismo contrato usado por SQLite."""
+    resultado = df.copy()
+    for col in resultado.columns:
+        col_l = str(col).strip().lower()
+        if any(k in col_l for k in ["fecha", "dia", "date"]):
+            s = (
+                resultado[col]
+                .astype(str)
+                .str.strip()
+                .str.replace(" 00:00:00", "", regex=False)
+            )
+            dt = pd.to_datetime(s, format="%d/%m/%Y", errors="coerce")
+            mask_na = dt.isna()
+            if mask_na.any():
+                dt.loc[mask_na] = pd.to_datetime(
+                    s[mask_na], format="%d-%m-%Y", errors="coerce"
+                )
+            mask_na = dt.isna()
+            if mask_na.any():
+                dt.loc[mask_na] = pd.to_datetime(
+                    s[mask_na], format="%Y-%m-%d", errors="coerce"
+                )
+            mask_na = dt.isna()
+            if mask_na.any():
+                dt.loc[mask_na] = pd.to_datetime(s[mask_na], errors="coerce")
+            resultado[col] = dt.dt.strftime("%Y-%m-%d")
+    return resultado
+
+
+def _periodo_desde_nombre_csv(nombre_archivo: str) -> str:
+    """Extrae AAAA-MM de un archivo mensual llamado AAAA-MM.csv."""
+    nombre = os.path.basename(str(nombre_archivo)).strip()
+    coincidencia = re.fullmatch(
+        r"(\d{4}-(?:0[1-9]|1[0-2]))\.csv", nombre, re.IGNORECASE
+    )
+    if coincidencia is None:
+        raise ValueError(
+            "Archivo VTA mensual inválido. Se esperaba AAAA-MM.csv y se recibió: "
+            f"{nombre}."
+        )
+    return coincidencia.group(1)
+
+
+def _listar_csv_vta(ruta_directorio: str) -> dict:
+    """Devuelve {periodo: ruta} y rechaza nombres o períodos duplicados."""
+    archivos = {}
+    for nombre in sorted(os.listdir(ruta_directorio)):
+        ruta = os.path.join(ruta_directorio, nombre)
+        if (
+            not nombre.lower().endswith(".csv")
+            or nombre.startswith("~$")
+            or not os.path.isfile(ruta)
+        ):
+            continue
+        periodo = _periodo_desde_nombre_csv(nombre)
+        if periodo in archivos:
+            raise ValueError(f"Existe más de un CSV de VTA para el período {periodo}.")
+        archivos[periodo] = ruta
+    return archivos
+
+
+def _leer_csv_vta_mensual(ruta_archivo: str, periodo: str) -> pd.DataFrame:
+    """Lee un CSV mensual Gescom y agrega su período físico de procedencia."""
+    if os.path.getsize(ruta_archivo) == 0:
+        raise ValueError(f"El archivo VTA está vacío: {ruta_archivo}")
+    df = pd.read_csv(
+        ruta_archivo,
+        sep=";",
+        encoding="latin1",
+        engine="c",
+        dtype=str,
+    )
+    df.columns = [str(col).strip() for col in df.columns]
+    if "PeriodoArchivo" in df.columns:
+        df = df.drop(columns=["PeriodoArchivo"])
+    df["PeriodoArchivo"] = periodo
+    return _normalizar_fechas_dataframe(df)
+
+
+def _tabla_vta_tiene_periodo_archivo(conn) -> bool:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND LOWER(name)='vta';"
+    )
+    if cursor.fetchone() is None:
+        return False
+    cursor.execute("PRAGMA table_info(vta);")
+    return "PeriodoArchivo" in [fila[1] for fila in cursor.fetchall()]
+
+
+def _validar_esquema_vta_incremental(conn, df: pd.DataFrame):
+    """Exige igualdad exacta entre CSV mensual y tabla vta persistida."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(vta);")
+    columnas_sql = [fila[1] for fila in cursor.fetchall()]
+    columnas_df = list(df.columns)
+    faltantes = [col for col in columnas_sql if col not in columnas_df]
+    extras = [col for col in columnas_df if col not in columnas_sql]
+    if faltantes or extras:
+        raise ValueError(
+            "El esquema del CSV mensual no coincide con SQLite.vta. "
+            f"Faltantes en CSV: {faltantes}. Extras en CSV: {extras}."
+        )
+    return columnas_sql
+
+
+def _hash_archivo_sha256(ruta_archivo: str, bloque: int = 1024 * 1024) -> str:
+    """Calcula SHA-256 del archivo físico sin cargarlo completo en memoria."""
+    digest = hashlib.sha256()
+    with open(ruta_archivo, "rb") as archivo:
+        while True:
+            contenido = archivo.read(bloque)
+            if not contenido:
+                break
+            digest.update(contenido)
+    return digest.hexdigest()
+
+
+def _crear_control_versiones_vta(conn):
+    """Crea el catálogo técnico de versiones físicas de los CSV mensuales."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS vta_periodos_control (
+            PeriodoArchivo TEXT PRIMARY KEY,
+            NombreArchivo TEXT NOT NULL,
+            RutaArchivo TEXT NOT NULL,
+            FechaModificacionNs INTEGER NOT NULL,
+            TamanoBytes INTEGER NOT NULL,
+            HashArchivo TEXT NOT NULL,
+            CantidadFilas INTEGER NOT NULL,
+            PesoKgTotal REAL NOT NULL,
+            FechaCargaSistema TEXT NOT NULL
+        );
+        """
+    )
+
+
+def _version_archivo_vta(ruta_archivo: str) -> dict:
+    """Obtiene metadatos baratos de un CSV mensual."""
+    stat = os.stat(ruta_archivo)
+    return {
+        "nombre": os.path.basename(ruta_archivo),
+        "ruta": os.path.abspath(ruta_archivo),
+        "mtime_ns": int(stat.st_mtime_ns),
+        "tamano": int(stat.st_size),
+    }
+
+
+def _peso_total_vta(df: pd.DataFrame) -> float:
+    """Normaliza PesoKg solo para conciliación técnica de la carga mensual."""
+    if df is None or df.empty or "PesoKg" not in df.columns:
+        return 0.0
+    serie = (
+        df["PesoKg"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.replace(" ", "", regex=False)
+    )
+    ambos = serie.str.contains(",", regex=False) & serie.str.contains(".", regex=False)
+    serie = serie.where(
+        ~ambos,
+        serie.str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+    )
+    solo_coma = serie.str.contains(",", regex=False) & ~serie.str.contains(
+        ".", regex=False
+    )
+    serie = serie.where(~solo_coma, serie.str.replace(",", ".", regex=False))
+    return float(pd.to_numeric(serie, errors="coerce").fillna(0.0).sum())
+
+
+def _detectar_periodos_vta_modificados(conn, archivos_por_periodo: dict) -> list:
+    """
+    Detecta archivos nuevos o modificados.
+
+    Primero compara mtime en nanosegundos y tamaño. Solo calcula SHA-256 si esos
+    metadatos cambiaron o si el período todavía no posee control persistido.
+    """
+    _crear_control_versiones_vta(conn)
+    controles = {
+        fila[0]: {
+            "mtime_ns": int(fila[1]),
+            "tamano": int(fila[2]),
+            "hash": str(fila[3]),
+        }
+        for fila in conn.execute(
+            """
+            SELECT PeriodoArchivo, FechaModificacionNs, TamanoBytes, HashArchivo
+            FROM vta_periodos_control;
+            """
+        ).fetchall()
+    }
+    modificados = []
+    for periodo, ruta in archivos_por_periodo.items():
+        version = _version_archivo_vta(ruta)
+        control = controles.get(periodo)
+        if control is None:
+            version["hash"] = _hash_archivo_sha256(ruta)
+            modificados.append((periodo, ruta, version, "SIN_CONTROL"))
+            continue
+        mismos_metadatos = (
+            control["mtime_ns"] == version["mtime_ns"]
+            and control["tamano"] == version["tamano"]
+        )
+        if mismos_metadatos:
+            continue
+        version["hash"] = _hash_archivo_sha256(ruta)
+        if version["hash"] != control["hash"]:
+            modificados.append((periodo, ruta, version, "CONTENIDO_MODIFICADO"))
+        else:
+            # El contenido es idéntico. Se actualizan únicamente mtime/ruta/tamaño.
+            conn.execute(
+                """
+                UPDATE vta_periodos_control
+                SET NombreArchivo=?, RutaArchivo=?, FechaModificacionNs=?, TamanoBytes=?
+                WHERE PeriodoArchivo=?;
+                """,
+                (
+                    version["nombre"],
+                    version["ruta"],
+                    version["mtime_ns"],
+                    version["tamano"],
+                    periodo,
+                ),
+            )
+            logger.info(
+                f"[VTA_INCREMENTAL] {periodo}: cambió el metadato físico, "
+                "pero el hash es idéntico. No se recarga."
+            )
+    conn.commit()
+    return modificados
+
+
+def sincronizar_vta_incremental(
+    conn,
+    ruta_directorio: str,
+    periodos_actualizar=None,
+) -> dict:
+    """
+    Sincroniza automáticamente VTA por versión física de cada AAAA-MM.csv.
+
+    Reglas:
+    - Cada CSV mensual es la foto completa vigente de su PeriodoArchivo.
+    - Los archivos sin cambios no se leen ni se escriben nuevamente.
+    - Un archivo nuevo o modificado reemplaza íntegramente su período.
+    - La sustitución se valida por filas y PesoKg antes del COMMIT.
+    - periodos_actualizar se conserva solo por compatibilidad y se ignora.
+    """
+    if not os.path.isdir(ruta_directorio):
+        raise ValueError(
+            f"El directorio de VTA no existe o no es válido: {ruta_directorio}"
+        )
+    archivos_por_periodo = _listar_csv_vta(ruta_directorio)
+    if not archivos_por_periodo:
+        raise ValueError(
+            f"No se encontraron CSV mensuales de VTA en: {ruta_directorio}"
+        )
+    if periodos_actualizar:
+        logger.warning(
+            "[VTA_INCREMENTAL] El parámetro periodos_actualizar está obsoleto y "
+            "se ignora. La detección de versiones es automática."
+        )
+
+    carga_inicial = not _tabla_vta_tiene_periodo_archivo(conn)
+    if carga_inicial:
+        t0 = time.perf_counter()
+        logger.warning(
+            "[VTA_INCREMENTAL] Inicialización completa requerida. "
+            "Se cargarán todos los CSV y se incorporará PeriodoArchivo."
+        )
+        bloques = []
+        versiones = {}
+        for periodo, ruta in archivos_por_periodo.items():
+            df_mes = _leer_csv_vta_mensual(ruta, periodo)
+            bloques.append(df_mes)
+            version = _version_archivo_vta(ruta)
+            version["hash"] = _hash_archivo_sha256(ruta)
+            version["filas"] = int(len(df_mes))
+            version["peso"] = _peso_total_vta(df_mes)
+            versiones[periodo] = version
+            logger.info(
+                f"[VTA_INCREMENTAL] Inicialización {periodo}: "
+                f"{len(df_mes)} filas leídas."
+            )
+        df_total = pd.concat(bloques, ignore_index=True)
+        df_total.to_sql("vta", conn, if_exists="replace", index=False, chunksize=10000)
+        _crear_control_versiones_vta(conn)
+        ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for periodo, version in versiones.items():
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO vta_periodos_control (
+                    PeriodoArchivo, NombreArchivo, RutaArchivo,
+                    FechaModificacionNs, TamanoBytes, HashArchivo,
+                    CantidadFilas, PesoKgTotal, FechaCargaSistema
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    periodo,
+                    version["nombre"],
+                    version["ruta"],
+                    version["mtime_ns"],
+                    version["tamano"],
+                    version["hash"],
+                    version["filas"],
+                    version["peso"],
+                    ahora,
+                ),
+            )
+        recrear_indices_vta_defensivos(conn)
+        conn.commit()
+        total = int(len(df_total))
+        logger.info(
+            f"[VTA_INCREMENTAL] Inicialización completa finalizada: "
+            f"{total} filas, {len(archivos_por_periodo)} períodos, "
+            f"{time.perf_counter() - t0:.2f} s."
+        )
+        return {
+            "modo": "INICIAL_COMPLETA",
+            "periodos": list(archivos_por_periodo),
+            "filas_insertadas": total,
+            "filas_eliminadas": 0,
+            "total_final": total,
+        }
+
+    modificados = _detectar_periodos_vta_modificados(conn, archivos_por_periodo)
+    if not modificados:
+        total = int(conn.execute("SELECT COUNT(*) FROM vta;").fetchone()[0])
+        logger.info(
+            "[VTA_INCREMENTAL] Ningún CSV mensual cambió. SQLite.vta no fue "
+            f"modificada. Total vigente: {total} filas."
+        )
+        return {
+            "modo": "SIN_CAMBIOS",
+            "periodos": [],
+            "filas_insertadas": 0,
+            "filas_eliminadas": 0,
+            "total_final": total,
+        }
+
+    datos_periodos = {}
+    versiones = {}
+    columnas_sql = None
+    for periodo, ruta, version, motivo in modificados:
+        df_mes = _leer_csv_vta_mensual(ruta, periodo)
+        columnas_actuales = _validar_esquema_vta_incremental(conn, df_mes)
+        if columnas_sql is None:
+            columnas_sql = columnas_actuales
+        datos_periodos[periodo] = df_mes[columnas_sql].copy()
+        version["filas"] = int(len(df_mes))
+        version["peso"] = _peso_total_vta(df_mes)
+        versiones[periodo] = version
+        logger.info(
+            f"[VTA_INCREMENTAL] Detectado {periodo}: {motivo} | "
+            f"filas={version['filas']} | PesoKg={version['peso']:.6f}."
+        )
+
+    tabla_temporal = "vta_actualizacion_tmp"
+    conn.execute(f'DROP TABLE IF EXISTS "{tabla_temporal}";')
+    df_actualizacion = pd.concat(
+        [datos_periodos[periodo] for periodo in datos_periodos],
+        ignore_index=True,
+    )
+    df_actualizacion.to_sql(
+        tabla_temporal, conn, if_exists="replace", index=False, chunksize=10000
+    )
+    periodos = list(datos_periodos)
+    placeholders = ", ".join("?" for _ in periodos)
+    columnas_sql_quoted = ", ".join(
+        f'"{col.replace(chr(34), chr(34) * 2)}"' for col in columnas_sql
+    )
+    filas_antes = {
+        periodo: int(
+            conn.execute(
+                "SELECT COUNT(*) FROM vta WHERE PeriodoArchivo = ?;", (periodo,)
+            ).fetchone()[0]
+        )
+        for periodo in periodos
+    }
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn.execute("BEGIN IMMEDIATE;")
+        conn.execute(
+            f"DELETE FROM vta WHERE PeriodoArchivo IN ({placeholders});",
+            tuple(periodos),
+        )
+        conn.execute(
+            f"INSERT INTO vta ({columnas_sql_quoted}) "
+            f'SELECT {columnas_sql_quoted} FROM "{tabla_temporal}";'
+        )
+
+        for periodo in periodos:
+            filas_sql = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM vta WHERE PeriodoArchivo=?;", (periodo,)
+                ).fetchone()[0]
+            )
+            df_validacion = pd.read_sql_query(
+                "SELECT PesoKg FROM vta WHERE PeriodoArchivo=?;",
+                conn,
+                params=(periodo,),
+            )
+            peso_sql = _peso_total_vta(df_validacion)
+            filas_origen = versiones[periodo]["filas"]
+            peso_origen = versiones[periodo]["peso"]
+            if filas_sql != filas_origen or abs(peso_sql - peso_origen) >= 1e-6:
+                raise AssertionError(
+                    f"Conciliación VTA fallida para {periodo}: "
+                    f"origen filas={filas_origen}, SQL filas={filas_sql}; "
+                    f"origen PesoKg={peso_origen:.6f}, SQL PesoKg={peso_sql:.6f}."
+                )
+            version = versiones[periodo]
+            conn.execute(
+                """
+                INSERT INTO vta_periodos_control (
+                    PeriodoArchivo, NombreArchivo, RutaArchivo,
+                    FechaModificacionNs, TamanoBytes, HashArchivo,
+                    CantidadFilas, PesoKgTotal, FechaCargaSistema
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(PeriodoArchivo) DO UPDATE SET
+                    NombreArchivo=excluded.NombreArchivo,
+                    RutaArchivo=excluded.RutaArchivo,
+                    FechaModificacionNs=excluded.FechaModificacionNs,
+                    TamanoBytes=excluded.TamanoBytes,
+                    HashArchivo=excluded.HashArchivo,
+                    CantidadFilas=excluded.CantidadFilas,
+                    PesoKgTotal=excluded.PesoKgTotal,
+                    FechaCargaSistema=excluded.FechaCargaSistema;
+                """,
+                (
+                    periodo,
+                    version["nombre"],
+                    version["ruta"],
+                    version["mtime_ns"],
+                    version["tamano"],
+                    version["hash"],
+                    version["filas"],
+                    version["peso"],
+                    ahora,
+                ),
+            )
+            logger.info(
+                f"[VTA_INCREMENTAL] Conciliación aprobada {periodo}: "
+                f"filas={filas_sql} | PesoKg={peso_sql:.6f}."
+            )
+        conn.execute(f'DROP TABLE "{tabla_temporal}";')
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.execute(f'DROP TABLE IF EXISTS "{tabla_temporal}";')
+        conn.commit()
+        raise
+
+    filas_eliminadas = int(sum(filas_antes.values()))
+    filas_insertadas = int(len(df_actualizacion))
+    total_final = int(conn.execute("SELECT COUNT(*) FROM vta;").fetchone()[0])
+    logger.info(
+        f"[VTA_INCREMENTAL] Períodos reemplazados automáticamente: "
+        f"{', '.join(periodos)} | eliminadas={filas_eliminadas} | "
+        f"insertadas={filas_insertadas} | total_final={total_final}."
+    )
+    return {
+        "modo": "ACTUALIZACION_AUTOMATICA",
+        "periodos": periodos,
+        "filas_insertadas": filas_insertadas,
+        "filas_eliminadas": filas_eliminadas,
+        "total_final": total_final,
+    }
+
+
 def cargar_vta_desde_directorio(ruta_directorio: str) -> pd.DataFrame:
     """
     Carga y consolida verticalmente las transacciones particionadas de ventas desde el directorio Gescom.
@@ -479,6 +1112,703 @@ def cargar_vta_desde_directorio(ruta_directorio: str) -> pd.DataFrame:
     return df_consolidado
 
 
+def _tabla_sql_existe(conn, nombre_tabla: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?;",
+            (nombre_tabla,),
+        ).fetchone()
+        is not None
+    )
+
+
+def _columnas_tabla_sql(conn, nombre_tabla: str) -> list:
+    nombre_seguro = str(nombre_tabla).replace('"', '""')
+    return [
+        fila[1]
+        for fila in conn.execute(f'PRAGMA table_info("{nombre_seguro}");').fetchall()
+    ]
+
+
+def _columnas_sql_quoted(columnas: list) -> str:
+    return ", ".join(
+        f'"{columna.replace(chr(34), chr(34) * 2)}"' for columna in columnas
+    )
+
+
+def _crear_control_tp(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tp_periodo_control (
+            ControlID INTEGER PRIMARY KEY CHECK (ControlID = 1),
+            PeriodoTP TEXT NOT NULL,
+            FechaUltimaCarga TEXT NOT NULL,
+            HashUltimaCarga TEXT NOT NULL,
+            CantidadRegistros INTEGER NOT NULL,
+            CantidadTP INTEGER NOT NULL
+        );
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tp_versiones_mensuales (
+            PeriodoTP TEXT PRIMARY KEY,
+            FechaSnapshot TEXT NOT NULL,
+            FechaCierreSistema TEXT NOT NULL,
+            HashSnapshot TEXT NOT NULL,
+            CantidadRegistros INTEGER NOT NULL,
+            CantidadTP INTEGER NOT NULL
+        );
+        """
+    )
+    conn.commit()
+
+
+def _validar_foto_tp(df_tp: pd.DataFrame):
+    if df_tp is None or df_tp.empty:
+        raise ValueError("No se puede procesar una foto TP vacia.")
+    requeridas = ["Cliente_id", "CumpleTiendaPerfecta"]
+    faltantes = [col for col in requeridas if col not in df_tp.columns]
+    if faltantes:
+        raise ValueError(
+            "TP no cumple el contrato para versionado. Faltan: " + ", ".join(faltantes)
+        )
+    if df_tp["Cliente_id"].isna().any():
+        raise ValueError("TP contiene Cliente_id nulos.")
+    if df_tp["Cliente_id"].duplicated().any():
+        duplicados = int(df_tp["Cliente_id"].duplicated().sum())
+        raise ValueError(f"TP contiene {duplicados} Cliente_id duplicados.")
+
+
+def _metricas_foto_tp(df_tp: pd.DataFrame) -> tuple:
+    _validar_foto_tp(df_tp)
+    hash_tp = obtener_hash_dataframe(df_tp)
+    registros = int(len(df_tp))
+    cantidad_tp = int(
+        pd.to_numeric(df_tp["CumpleTiendaPerfecta"], errors="coerce")
+        .fillna(0)
+        .eq(1)
+        .sum()
+    )
+    return hash_tp, registros, cantidad_tp
+
+
+def _guardar_snapshot_diario_tp(conn, df_tp: pd.DataFrame, fecha_carga) -> dict:
+    """Guarda o reemplaza una unica foto completa por dia del mes vigente."""
+    hash_tp, registros, cantidad_tp = _metricas_foto_tp(df_tp)
+    periodo = fecha_carga.strftime("%Y-%m")
+    fecha_snapshot = fecha_carga.strftime("%Y-%m-%d")
+    fecha_sistema = fecha_carga.strftime("%Y-%m-%d %H:%M:%S")
+
+    foto = df_tp.copy()
+    foto["PeriodoTP"] = periodo
+    foto["FechaSnapshot"] = fecha_snapshot
+    foto["FechaCargaSistema"] = fecha_sistema
+    foto["HashSnapshot"] = hash_tp
+
+    tabla_tmp = "tp_snapshot_periodo_tmp"
+    foto.to_sql(tabla_tmp, conn, if_exists="replace", index=False, chunksize=10000)
+
+    if not _tabla_sql_existe(conn, "tp_snapshot_periodo"):
+        foto.head(0).to_sql(
+            "tp_snapshot_periodo",
+            conn,
+            if_exists="replace",
+            index=False,
+        )
+
+    columnas_destino = _columnas_tabla_sql(conn, "tp_snapshot_periodo")
+    columnas_tmp = _columnas_tabla_sql(conn, tabla_tmp)
+    if columnas_destino != columnas_tmp:
+        conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
+        conn.commit()
+        raise ValueError(
+            "Cambio de esquema TP detectado en snapshots diarios. "
+            f"Destino={columnas_destino}; carga={columnas_tmp}."
+        )
+
+    columnas_sql = _columnas_sql_quoted(columnas_destino)
+    try:
+        conn.execute("BEGIN IMMEDIATE;")
+        conn.execute(
+            "DELETE FROM tp_snapshot_periodo WHERE FechaSnapshot = ?;",
+            (fecha_snapshot,),
+        )
+        conn.execute(
+            f"INSERT INTO tp_snapshot_periodo ({columnas_sql}) "
+            f'SELECT {columnas_sql} FROM "{tabla_tmp}";'
+        )
+        conn.execute(f'DROP TABLE "{tabla_tmp}";')
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
+        conn.commit()
+        raise
+
+    guardadas = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM tp_snapshot_periodo WHERE FechaSnapshot=?;",
+            (fecha_snapshot,),
+        ).fetchone()[0]
+    )
+    if guardadas != registros:
+        raise AssertionError(
+            f"Conciliacion snapshot diario TP fallida para {fecha_snapshot}: "
+            f"origen={registros}, guardadas={guardadas}."
+        )
+
+    logger.info(
+        f"TP_DIARIO: fecha={fecha_snapshot} | periodo={periodo} | "
+        f"registros={registros} | TP={cantidad_tp}."
+    )
+    return {
+        "periodo": periodo,
+        "fecha_snapshot": fecha_snapshot,
+        "registros": registros,
+        "tp": cantidad_tp,
+        "hash": hash_tp,
+    }
+
+
+def _cerrar_periodo_tp_si_corresponde(conn, periodo_nuevo: str, fecha_carga) -> dict:
+    """
+    Al comenzar un mes nuevo conserva solo la ultima foto del mes cerrado y
+    elimina del area diaria todas las fotos de ese mes.
+    """
+    _crear_control_tp(conn)
+    control = conn.execute(
+        """
+        SELECT PeriodoTP, FechaUltimaCarga, HashUltimaCarga,
+               CantidadRegistros, CantidadTP
+        FROM tp_periodo_control
+        WHERE ControlID=1;
+        """
+    ).fetchone()
+
+    if control is None:
+        return {"accion": "PRIMER_PERIODO", "periodo_nuevo": periodo_nuevo}
+
+    periodo_anterior = str(control[0])
+    if periodo_anterior == periodo_nuevo:
+        return {"accion": "MISMO_PERIODO", "periodo": periodo_nuevo}
+    if periodo_nuevo < periodo_anterior:
+        raise ValueError(
+            "No se permite retroceder el periodo TP. "
+            f"Control={periodo_anterior}; carga={periodo_nuevo}."
+        )
+    if not _tabla_sql_existe(conn, "tp_snapshot_periodo"):
+        raise ValueError(
+            f"No existen snapshots diarios para cerrar {periodo_anterior}."
+        )
+
+    ultima_fecha = conn.execute(
+        """
+        SELECT MAX(FechaSnapshot)
+        FROM tp_snapshot_periodo
+        WHERE PeriodoTP=?;
+        """,
+        (periodo_anterior,),
+    ).fetchone()[0]
+    if not ultima_fecha:
+        raise ValueError(
+            f"No se encontro una foto diaria para cerrar {periodo_anterior}."
+        )
+
+    df_cierre = pd.read_sql(
+        """
+        SELECT *
+        FROM tp_snapshot_periodo
+        WHERE PeriodoTP=? AND FechaSnapshot=?;
+        """,
+        conn,
+        params=(periodo_anterior, ultima_fecha),
+    )
+    if df_cierre.empty:
+        raise ValueError(f"La ultima foto de {periodo_anterior} esta vacia.")
+
+    hash_cierre = str(df_cierre["HashSnapshot"].iloc[0])
+    registros = int(len(df_cierre))
+    cantidad_tp = int(
+        pd.to_numeric(df_cierre["CumpleTiendaPerfecta"], errors="coerce")
+        .fillna(0)
+        .eq(1)
+        .sum()
+    )
+    df_cierre["FechaCierreSistema"] = fecha_carga.strftime("%Y-%m-%d %H:%M:%S")
+
+    tabla_tmp = "tp_snapshot_mensual_tmp"
+    df_cierre.to_sql(tabla_tmp, conn, if_exists="replace", index=False, chunksize=10000)
+    if not _tabla_sql_existe(conn, "tp_snapshot_mensual"):
+        df_cierre.head(0).to_sql(
+            "tp_snapshot_mensual",
+            conn,
+            if_exists="replace",
+            index=False,
+        )
+
+    columnas_destino = _columnas_tabla_sql(conn, "tp_snapshot_mensual")
+    columnas_tmp = _columnas_tabla_sql(conn, tabla_tmp)
+    if columnas_destino != columnas_tmp:
+        conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
+        conn.commit()
+        raise ValueError(
+            "Cambio de esquema TP detectado en cierres mensuales. "
+            f"Destino={columnas_destino}; cierre={columnas_tmp}."
+        )
+
+    columnas_sql = _columnas_sql_quoted(columnas_destino)
+    try:
+        conn.execute("BEGIN IMMEDIATE;")
+        conn.execute(
+            "DELETE FROM tp_snapshot_mensual WHERE PeriodoTP=?;",
+            (periodo_anterior,),
+        )
+        conn.execute(
+            f"INSERT INTO tp_snapshot_mensual ({columnas_sql}) "
+            f'SELECT {columnas_sql} FROM "{tabla_tmp}";'
+        )
+        conn.execute(
+            "DELETE FROM tp_snapshot_periodo WHERE PeriodoTP=?;",
+            (periodo_anterior,),
+        )
+        conn.execute(
+            """
+            INSERT INTO tp_versiones_mensuales (
+                PeriodoTP, FechaSnapshot, FechaCierreSistema,
+                HashSnapshot, CantidadRegistros, CantidadTP
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(PeriodoTP) DO UPDATE SET
+                FechaSnapshot=excluded.FechaSnapshot,
+                FechaCierreSistema=excluded.FechaCierreSistema,
+                HashSnapshot=excluded.HashSnapshot,
+                CantidadRegistros=excluded.CantidadRegistros,
+                CantidadTP=excluded.CantidadTP;
+            """,
+            (
+                periodo_anterior,
+                ultima_fecha,
+                fecha_carga.strftime("%Y-%m-%d %H:%M:%S"),
+                hash_cierre,
+                registros,
+                cantidad_tp,
+            ),
+        )
+        conn.execute(f'DROP TABLE "{tabla_tmp}";')
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
+        conn.commit()
+        raise
+
+    archivadas = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM tp_snapshot_mensual WHERE PeriodoTP=?;",
+            (periodo_anterior,),
+        ).fetchone()[0]
+    )
+    diarias_restantes = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM tp_snapshot_periodo WHERE PeriodoTP=?;",
+            (periodo_anterior,),
+        ).fetchone()[0]
+    )
+    if archivadas != registros or diarias_restantes != 0:
+        raise AssertionError(
+            f"Cierre TP {periodo_anterior} inconsistente: "
+            f"archivadas={archivadas}, esperadas={registros}, "
+            f"diarias_restantes={diarias_restantes}."
+        )
+
+    logger.info(
+        f"TP_CIERRE: periodo={periodo_anterior} | ultima_foto={ultima_fecha} | "
+        f"registros={registros} | TP={cantidad_tp} | fotos_diarias_eliminadas."
+    )
+    return {
+        "accion": "PERIODO_CERRADO",
+        "periodo_cerrado": periodo_anterior,
+        "ultima_foto": ultima_fecha,
+        "registros": registros,
+        "tp": cantidad_tp,
+        "periodo_nuevo": periodo_nuevo,
+    }
+
+
+def _registrar_control_tp(conn, snapshot: dict, fecha_carga):
+    _crear_control_tp(conn)
+    conn.execute(
+        """
+        INSERT INTO tp_periodo_control (
+            ControlID, PeriodoTP, FechaUltimaCarga, HashUltimaCarga,
+            CantidadRegistros, CantidadTP
+        )
+        VALUES (1, ?, ?, ?, ?, ?)
+        ON CONFLICT(ControlID) DO UPDATE SET
+            PeriodoTP=excluded.PeriodoTP,
+            FechaUltimaCarga=excluded.FechaUltimaCarga,
+            HashUltimaCarga=excluded.HashUltimaCarga,
+            CantidadRegistros=excluded.CantidadRegistros,
+            CantidadTP=excluded.CantidadTP;
+        """,
+        (
+            snapshot["periodo"],
+            fecha_carga.strftime("%Y-%m-%d %H:%M:%S"),
+            snapshot["hash"],
+            snapshot["registros"],
+            snapshot["tp"],
+        ),
+    )
+    conn.commit()
+
+
+def persistir_tp_con_ciclo_snapshots(
+    conn, df_tp: pd.DataFrame, fecha_carga=None
+) -> dict:
+    """
+    Flujo TP completo:
+    1. Cierra el mes anterior si cambio el periodo.
+    2. Reemplaza la foto operativa tp.
+    3. Guarda/reemplaza la foto diaria del mes vigente.
+    4. Actualiza el control del periodo.
+    """
+    _validar_foto_tp(df_tp)
+    ahora = fecha_carga or datetime.now()
+    periodo_nuevo = ahora.strftime("%Y-%m")
+    cierre = _cerrar_periodo_tp_si_corresponde(conn, periodo_nuevo, ahora)
+
+    df_tp.to_sql(
+        "tp",
+        conn,
+        if_exists="replace",
+        index=False,
+        chunksize=10000,
+    )
+    snapshot = _guardar_snapshot_diario_tp(conn, df_tp, ahora)
+    _registrar_control_tp(conn, snapshot, ahora)
+
+    logger.info(
+        f"TP_CICLO: periodo={periodo_nuevo} | fecha={snapshot['fecha_snapshot']} | "
+        f"cierre={cierre['accion']} | registros={snapshot['registros']} | "
+        f"TP={snapshot['tp']}."
+    )
+    return {"cierre": cierre, "snapshot": snapshot}
+
+
+def _cargar_tp_desde_excel(archivo) -> pd.DataFrame:
+    """Carga exclusivamente TP_DIA_VENTA y adapta el contrato para core_tp."""
+    xls = pd.ExcelFile(archivo)
+    hoja_detectada = None
+    fila_encabezado = None
+
+    for hoja in xls.sheet_names:
+        muestra = pd.read_excel(
+            archivo,
+            sheet_name=hoja,
+            header=None,
+            nrows=50,
+        )
+        for indice, fila in muestra.iterrows():
+            encabezados = {
+                str(valor).strip() for valor in fila.tolist() if pd.notna(valor)
+            }
+            if {"Cliente", "CumpleTiendaPerfecta"}.issubset(encabezados):
+                hoja_detectada = hoja
+                fila_encabezado = indice
+                break
+        if hoja_detectada is not None:
+            break
+
+    if hoja_detectada is None:
+        raise ValueError(
+            "No se reconoció el contrato de TP_DIA_VENTA. "
+            "El archivo debe contener Cliente y CumpleTiendaPerfecta."
+        )
+
+    df_origen = pd.read_excel(
+        archivo,
+        sheet_name=hoja_detectada,
+        header=fila_encabezado,
+    )
+    df_origen.columns = [str(columna).strip() for columna in df_origen.columns]
+
+    columnas_requeridas = [
+        "Cliente",
+        "Razon_Social",
+        "Direccion",
+        "Vendedor_ID",
+        "Tipologia",
+        "SubCanal",
+        "Segmento",
+        "porcentajePortafolio",
+        "CumplimientoEstandar",
+        "rackadecuado",
+        "rackposicion",
+        "planograma",
+        "preciosvisibles",
+        "rotacionpreventiva",
+        "Puntuacion",
+        "TiendaPerfecta",
+        "SupOk",
+        "ultimafechacenso",
+        "frecuencia",
+        "SubCanalTiendaPerfecta",
+        "FechaUltimaValidacionSupervisorJDRPromotor",
+        "Usuario",
+        "EstandarSOD",
+        "PuntajeSOD",
+        "CumpleTiendaPerfecta",
+    ]
+    faltantes = [
+        columna for columna in columnas_requeridas if columna not in df_origen.columns
+    ]
+    if faltantes:
+        raise ValueError(
+            "TP_DIA_VENTA no cumple el contrato requerido. "
+            "Faltan columnas: " + ", ".join(faltantes)
+        )
+
+    cumple_tp = (
+        pd.to_numeric(df_origen["CumpleTiendaPerfecta"], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+
+    valores_invalidos = sorted(set(cumple_tp.unique().tolist()) - {0, 1})
+    if valores_invalidos:
+        raise ValueError(
+            "CumpleTiendaPerfecta solo admite 0 o 1. "
+            f"Valores inválidos: {valores_invalidos}."
+        )
+
+    df = pd.DataFrame(
+        {
+            "Cliente_id": df_origen["Cliente"],
+            "Vendedor": df_origen["Vendedor_ID"],
+            "Razon Social": df_origen["Razon_Social"],
+            "Direccion": df_origen["Direccion"],
+            "Tipología": df_origen["Tipologia"],
+            "SubCanal": df_origen["SubCanal"],
+            "Taxonomía": df_origen["Segmento"],
+            "% De cumplimiento de surtido ideal": df_origen["porcentajePortafolio"],
+            "Cumplimiento    \nEstandar": df_origen["CumplimientoEstandar"],
+            "Rack Adecuado": df_origen["rackadecuado"],
+            "Rack en Posicion Correcta": df_origen["rackposicion"],
+            "Planograma": df_origen["planograma"],
+            "Precios visibles y correctos": df_origen["preciosvisibles"],
+            "Rotación\nPreventiva": df_origen["rotacionpreventiva"],
+            "Puntuación": df_origen["Puntuacion"],
+            "Tienda \nPerfecta": cumple_tp.map({1: "SI", 0: "NO"}),
+            "Sup\nok": df_origen["SupOk"],
+            "Ult Fecha Censo": df_origen["ultimafechacenso"],
+            "Frecuencia": df_origen["frecuencia"],
+            "Subcanal Tienda Perfecta": df_origen["SubCanalTiendaPerfecta"],
+            "Fecha Ultima Validacion Supervisor/JDR/Promotor": df_origen[
+                "FechaUltimaValidacionSupervisorJDRPromotor"
+            ],
+            "Usuario": df_origen["Usuario"],
+            "Estandar \nSOD": df_origen["EstandarSOD"],
+            "Puntaje \nSOD": df_origen["PuntajeSOD"],
+            "TiendaPerfecta_Tecnica": df_origen["TiendaPerfecta"],
+            "CumpleTiendaPerfecta": cumple_tp,
+        }
+    )
+
+    df["Cliente_id"] = pd.to_numeric(df["Cliente_id"], errors="coerce").astype("Int64")
+    df["Vendedor"] = pd.to_numeric(df["Vendedor"], errors="coerce").astype("Int64")
+    df["Puntuación"] = pd.to_numeric(df["Puntuación"], errors="coerce").fillna(0.0)
+
+    if df["Cliente_id"].isna().any():
+        cantidad_invalidos = int(df["Cliente_id"].isna().sum())
+        raise ValueError(
+            "TP_DIA_VENTA contiene clientes sin identificador numérico válido: "
+            f"{cantidad_invalidos} filas."
+        )
+    if df["Cliente_id"].duplicated().any():
+        cantidad_duplicados = int(df["Cliente_id"].duplicated().sum())
+        raise ValueError(
+            "TP_DIA_VENTA contiene Cliente_id duplicados: "
+            f"{cantidad_duplicados} filas duplicadas."
+        )
+
+    logger.info(
+        f"TP_DIA_VENTA cargada desde hoja '{hoja_detectada}' "
+        f"({len(df)} registros; TP validadas={int(cumple_tp.sum())})."
+    )
+    return df
+
+
+CHKIN_COLUMNAS = [
+    "Codigo Cliente",
+    "Cliente",
+    "Codigo Empleado",
+    "Supervisor",
+    "Coordenadas Check-in",
+    "Coordenadas Check-out",
+    "Fecha Check-in",
+    "Fecha Check-out",
+    "Motivo Invalidez Check-in",
+    "Motivo Invalidez Check-out",
+    "Existe Carga",
+    "Tiempo en PDV",
+    "Valido",
+]
+
+
+def _normalizar_timestamp_chkin(serie: pd.Series, nombre_columna: str) -> pd.Series:
+    """Normaliza un timestamp CHKIN conservando microsegundos para la clave natural."""
+    fechas = pd.to_datetime(serie, dayfirst=True, errors="coerce")
+    invalidas = fechas.isna()
+    if invalidas.any():
+        ejemplos = serie.loc[invalidas].head(5).tolist()
+        raise ValueError(
+            f"CHKIN contiene {int(invalidas.sum())} valores invalidos en "
+            f"'{nombre_columna}'. Ejemplos: {ejemplos}."
+        )
+    return fechas.dt.strftime("%Y-%m-%d %H:%M:%S.%f")
+
+
+def _leer_chkin_desde_excel(archivo) -> pd.DataFrame:
+    """Lee la hoja Data de CHKIN y valida el contrato RAW antes de persistir."""
+    xls = pd.ExcelFile(archivo)
+    if "Data" not in xls.sheet_names:
+        raise ValueError(
+            "CHKIN.xlsx no contiene la hoja requerida 'Data'. "
+            f"Hojas encontradas: {xls.sheet_names}."
+        )
+    df = pd.read_excel(archivo, sheet_name="Data", dtype=object)
+    df.columns = [str(columna).strip() for columna in df.columns]
+    faltantes = [columna for columna in CHKIN_COLUMNAS if columna not in df.columns]
+    extras = [columna for columna in df.columns if columna not in CHKIN_COLUMNAS]
+    if faltantes or extras:
+        raise ValueError(
+            "CHKIN.xlsx no cumple el contrato de columnas. "
+            f"Faltantes: {faltantes}. Extras: {extras}."
+        )
+    df = df[CHKIN_COLUMNAS].copy()
+    if df.empty:
+        raise ValueError("CHKIN.xlsx no contiene registros para persistir.")
+    for columna in CHKIN_COLUMNAS:
+        if columna not in ("Fecha Check-in", "Fecha Check-out"):
+            df[columna] = df[columna].apply(
+                lambda valor: (
+                    None
+                    if pd.isna(valor) or str(valor).strip() == ""
+                    else str(valor).strip()
+                )
+            )
+    df["Fecha Check-in"] = _normalizar_timestamp_chkin(
+        df["Fecha Check-in"], "Fecha Check-in"
+    )
+    df["Fecha Check-out"] = _normalizar_timestamp_chkin(
+        df["Fecha Check-out"], "Fecha Check-out"
+    )
+    claves_nulas = df["Codigo Cliente"].isna() | df["Fecha Check-in"].isna()
+    if claves_nulas.any():
+        raise ValueError(
+            "CHKIN contiene filas sin Codigo Cliente o Fecha Check-in: "
+            f"{int(claves_nulas.sum())}."
+        )
+    clave = ["Codigo Cliente", "Fecha Check-in"]
+    duplicadas = df.duplicated(subset=clave, keep=False)
+    if duplicadas.any():
+        muestra = df.loc[duplicadas, clave].head(10).to_dict("records")
+        raise ValueError(
+            "CHKIN contiene claves duplicadas para Codigo Cliente + Fecha Check-in. "
+            f"Filas involucradas: {int(duplicadas.sum())}. Muestra: {muestra}."
+        )
+    return df
+
+
+def _crear_tabla_chkin(conn):
+    """Crea la tabla historica CHKIN y su clave natural institucional."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS chkin (
+            "Codigo Cliente" TEXT NOT NULL,
+            "Cliente" TEXT,
+            "Codigo Empleado" TEXT,
+            "Supervisor" TEXT,
+            "Coordenadas Check-in" TEXT,
+            "Coordenadas Check-out" TEXT,
+            "Fecha Check-in" TEXT NOT NULL,
+            "Fecha Check-out" TEXT,
+            "Motivo Invalidez Check-in" TEXT,
+            "Motivo Invalidez Check-out" TEXT,
+            "Existe Carga" TEXT,
+            "Tiempo en PDV" TEXT,
+            "Valido" TEXT,
+            PRIMARY KEY ("Codigo Cliente", "Fecha Check-in")
+        );
+        """
+    )
+    columnas_sql = _columnas_tabla_sql(conn, "chkin")
+    if columnas_sql != CHKIN_COLUMNAS:
+        raise ValueError(
+            "La tabla SQLite.chkin no cumple el contrato institucional. "
+            f"Esperadas={CHKIN_COLUMNAS}; encontradas={columnas_sql}."
+        )
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_chkin_fecha_checkin ON chkin("Fecha Check-in");'
+    )
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_chkin_empleado ON chkin("Codigo Empleado");'
+    )
+
+
+def sincronizar_chkin_incremental(conn, archivo) -> dict:
+    """
+    Incorpora solamente visitas CHKIN ausentes en SQLite.
+
+    La clave natural es Codigo Cliente + Fecha Check-in completa. Las filas ya
+    persistidas no se actualizan ni se eliminan, aunque desaparezcan del Excel.
+    El periodo de la visita no condiciona la carga.
+    """
+    if not os.path.isfile(archivo):
+        raise ValueError(f"El archivo CHKIN no existe o no es valido: {archivo}")
+    t0 = time.perf_counter()
+    df = _leer_chkin_desde_excel(archivo)
+    _crear_tabla_chkin(conn)
+    columnas_sql = _columnas_sql_quoted(CHKIN_COLUMNAS)
+    placeholders = ", ".join("?" for _ in CHKIN_COLUMNAS)
+    sentencia = f"INSERT OR IGNORE INTO chkin ({columnas_sql}) VALUES ({placeholders});"
+    filas = [
+        tuple(None if pd.isna(valor) else valor for valor in fila)
+        for fila in df.itertuples(index=False, name=None)
+    ]
+    total_antes = int(conn.execute("SELECT COUNT(*) FROM chkin;").fetchone()[0])
+    try:
+        conn.execute("BEGIN IMMEDIATE;")
+        conn.executemany(sentencia, filas)
+        total_despues = int(conn.execute("SELECT COUNT(*) FROM chkin;").fetchone()[0])
+        insertadas = total_despues - total_antes
+        if insertadas < 0 or insertadas > len(df):
+            raise AssertionError(
+                "Conciliacion CHKIN invalida: "
+                f"antes={total_antes}, despues={total_despues}, origen={len(df)}."
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    resultado = {
+        "filas_origen": int(len(df)),
+        "filas_insertadas": int(insertadas),
+        "filas_ya_existentes": int(len(df) - insertadas),
+        "total_final": int(total_despues),
+    }
+    logger.info(
+        "[CHKIN_INCREMENTAL] "
+        f"origen={resultado['filas_origen']} | "
+        f"insertadas={resultado['filas_insertadas']} | "
+        f"ya_existentes={resultado['filas_ya_existentes']} | "
+        f"total_final={resultado['total_final']} | "
+        f"duracion={time.perf_counter() - t0:.2f} s."
+    )
+    return resultado
+
+
 def inicializar_bd_desde_excel(archivos_dict):
     """Lee los archivos interpretando fechas y estructurando tablas con soporte multi-solapa para Altas."""
     conn = obtener_conexion()
@@ -536,24 +1866,28 @@ def inicializar_bd_desde_excel(archivos_dict):
                     df_altas_unificado.to_sql(
                         "altas", conn, if_exists="replace", index=False, chunksize=10000
                     )
+            elif nombre_tabla.lower() == "chkin":
+                resultado_chkin = sincronizar_chkin_incremental(conn, archivo)
+                logger.info(
+                    f"[CHKIN_INCREMENTAL] Resultado de sincronizacion: {resultado_chkin}"
+                )
+                continue
             elif nombre_tabla.lower() == "tp":
                 logger.warning(f"DETECTADA CARGA ESPECIAL TP: {nombre_tabla}")
-                df_raw = pd.read_excel(archivo, header=None)
-                header_row = None
-                for i, row in df_raw.iterrows():
-                    if "Cliente_id" in row.astype(str).values:
-                        header_row = i
-                        break
-                if header_row is None:
-                    raise ValueError("No se encontró Cliente_id en TP.xlsx")
-                df = pd.read_excel(archivo, header=header_row)
-                df.columns = [str(c).strip() for c in df.columns]
+                df = _cargar_tp_desde_excel(archivo)
+            elif nombre_tabla.lower() == "vta" and os.path.isdir(archivo):
+                resultado_vta = sincronizar_vta_incremental(
+                    conn,
+                    archivo,
+                )
+                logger.info(
+                    f"[VTA_INCREMENTAL] Resultado de sincronización: {resultado_vta}"
+                )
+                continue
             elif nombre_tabla.lower() == "vta":
-                # RAMA VTA: Lectura optimizada (Directorio CSV/Parquet o Archivo único)
+                # Compatibilidad defensiva para una fuente VTA no particionada.
                 t_inicio_lectura_vta = time.perf_counter()
-                if os.path.isdir(archivo):
-                    df = cargar_vta_desde_directorio(archivo)
-                elif str(archivo).lower().endswith(".parquet"):
+                if str(archivo).lower().endswith(".parquet"):
                     df = pd.read_parquet(archivo)
                 elif str(archivo).lower().endswith(".csv"):
                     df = pd.read_csv(
@@ -682,6 +2016,13 @@ def inicializar_bd_desde_excel(archivos_dict):
                         index=False,
                         chunksize=10000,
                     )
+                elif nombre_tabla.lower() == "tp":
+                    resultado_tp = persistir_tp_con_ciclo_snapshots(
+                        conn,
+                        df,
+                        datetime.now(),
+                    )
+                    logger.info(f"TP_CICLO: resultado {resultado_tp}")
                 else:
                     df.to_sql(
                         nombre_tabla,

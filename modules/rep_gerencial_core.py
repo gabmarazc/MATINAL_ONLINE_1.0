@@ -266,6 +266,10 @@ def construir_bloque_kilos(
         "Cumplimiento_Proyectado_Pct",
         "Promedio_Diario",
         "Media_Necesaria_Diaria",
+        "Kilos_Futuro",
+        "Kilos_Pendientes",
+        "Kilos_Futuro_Necesario",
+        "Kilos_Gap_Post_Futuro",
         "Días Pasados",
         "Rutas",
         "Rutas_Ajustadas",
@@ -285,6 +289,13 @@ def construir_bloque_kilos(
     resultado["Cumplimiento_Proyectado_Pct"] = (
         resultado["Tendencia_Total_Kg"]
         .div(resultado["Objetivo Mes Corriente"].replace(0, pd.NA))
+        .mul(100)
+        .fillna(0.0)
+    )
+    resultado["Cobertura_Gap_Futuro_Kilos_Pct"] = (
+        resultado["Kilos_Futuro"]
+        .div(resultado["Kilos_Pendientes"].replace(0, pd.NA))
+        .clip(upper=1.0)
         .mul(100)
         .fillna(0.0)
     )
@@ -319,6 +330,10 @@ def construir_bloque_gross(
         "Promedio_Diario",
         "Media_Necesaria_Diaria",
         "Gross_Disponible",
+        "Gross_Futuro",
+        "Gross_Pendiente",
+        "Gross_Futuro_Necesario",
+        "Gross_Gap_Post_Futuro",
         "Futuro_A_Incorporar_Gross",
         "Días Pasados",
         "Rutas",
@@ -342,6 +357,13 @@ def construir_bloque_gross(
         .mul(100)
         .fillna(0.0)
     )
+    resultado["Cobertura_Gap_Futuro_Gross_Pct"] = (
+        resultado["Gross_Futuro"]
+        .div(resultado["Gross_Pendiente"].replace(0, pd.NA))
+        .clip(upper=1.0)
+        .mul(100)
+        .fillna(0.0)
+    )
     resultado["Modo_Proyeccion"] = modo_proyeccion
     return resultado
 
@@ -350,18 +372,37 @@ def construir_bloque_gross(
 # CCC Y MI NEGOCIO
 # ==========================================================
 def construir_bloque_ccc(
-    df_ccc: pd.DataFrame,
-    maestro_ccc: pd.DataFrame,
+    df_ccc: pd.DataFrame, maestro_ccc: pd.DataFrame
 ) -> pd.DataFrame:
+    """CCC Gerencial con objetivo corporativo Obj_CCC_Pepsico."""
     if df_ccc is None or df_ccc.empty:
         return pd.DataFrame()
-    return df_ccc.groupby(["Taxonomia"], as_index=False).agg(
-        {
-            "Cartera_Neta": "sum",
-            "CCC_Gerencia": "sum",
-            "Objetivo_CCC": "sum",
-        }
+    if maestro_ccc is None or maestro_ccc.empty:
+        raise ValueError("No hay maestro_ccc para obtener Obj_CCC_Pepsico.")
+    faltantes = [
+        c for c in ["Taxonomia", "Obj_CCC_Pepsico"] if c not in maestro_ccc.columns
+    ]
+    if faltantes:
+        raise ValueError("maestro_ccc no contiene: " + ", ".join(faltantes))
+    resultado = df_ccc.groupby("Taxonomia", as_index=False).agg(
+        Cartera_Neta=("Cartera_Neta", "sum"), CCC_Gerencia=("CCC_Gerencia", "sum")
     )
+    resultado["Taxonomia"] = resultado["Taxonomia"].astype(str).str.strip()
+    objetivos = maestro_ccc[["Taxonomia", "Obj_CCC_Pepsico"]].copy()
+    objetivos["Taxonomia"] = objetivos["Taxonomia"].astype(str).str.strip()
+    objetivos["Obj_CCC_Pepsico"] = pd.to_numeric(
+        objetivos["Obj_CCC_Pepsico"], errors="coerce"
+    ).fillna(0.0)
+    objetivos = objetivos.groupby("Taxonomia", as_index=False)["Obj_CCC_Pepsico"].sum()
+    resultado = resultado.merge(objetivos, on="Taxonomia", how="left")
+    resultado["Obj_CCC_Pepsico"] = resultado["Obj_CCC_Pepsico"].fillna(0.0)
+    resultado["Cumplimiento_CCC_Pct"] = (
+        resultado["CCC_Gerencia"]
+        .div(resultado["Obj_CCC_Pepsico"].replace(0, pd.NA))
+        .mul(100)
+        .fillna(0.0)
+    )
+    return resultado
 
 
 def construir_bloque_mn(df_mn: pd.DataFrame) -> pd.DataFrame:
@@ -503,6 +544,10 @@ def _render_pestana_kilos(df_kilos: pd.DataFrame):
         "Objetivo Mes Corriente",
         "OPERATIVO",
         "Tendencia_Total_Kg",
+        "Kilos_Futuro",
+        "Kilos_Pendientes",
+        "Kilos_Futuro_Necesario",
+        "Kilos_Gap_Post_Futuro",
         "SEGMENTO",
     ]
     if not _validar_columnas_requeridas(df_kilos, requeridas, "Kilos Visual"):
@@ -535,6 +580,15 @@ def _render_pestana_kilos(df_kilos: pd.DataFrame):
         delta_color="normal",
     )
 
+    kilos_futuro = _numero_seguro(df_filtrado["Kilos_Futuro"].sum())
+    kilos_pendientes = _numero_seguro(df_filtrado["Kilos_Pendientes"].sum())
+    kilos_necesarios = min(kilos_futuro, kilos_pendientes)
+    gap_post_futuro = max(kilos_pendientes - kilos_futuro, 0.0)
+    kf1, kf2, kf3, kf4 = st.columns(4)
+    kf1.metric("Kilos Futuro Disponibles", f"{kilos_futuro:,.1f} kg")
+    kf2.metric("Pendiente vs Operativo", f"{kilos_pendientes:,.1f} kg")
+    kf3.metric("Futuro Necesario", f"{kilos_necesarios:,.1f} kg")
+    kf4.metric("Gap después de Futuro", f"{gap_post_futuro:,.1f} kg")
     st.divider()
     st.markdown("### Resumen por segmento")
     segmentos = df_filtrado.groupby("SEGMENTO", as_index=False).agg(
@@ -542,6 +596,10 @@ def _render_pestana_kilos(df_kilos: pd.DataFrame):
             "Objetivo Mes Corriente": "sum",
             "OPERATIVO": "sum",
             "Tendencia_Total_Kg": "sum",
+            "Kilos_Futuro": "sum",
+            "Kilos_Pendientes": "sum",
+            "Kilos_Futuro_Necesario": "sum",
+            "Kilos_Gap_Post_Futuro": "sum",
         }
     )
     segmentos["Cumplimiento"] = (
@@ -560,6 +618,7 @@ def _render_pestana_kilos(df_kilos: pd.DataFrame):
             cumplimiento=registro["Cumplimiento"],
             etiqueta_principal="Operativo",
             tendencia=registro["Tendencia_Total_Kg"],
+            incorporar=registro["Kilos_Futuro_Necesario"],
             es_moneda=False,
         )
 
@@ -579,6 +638,10 @@ def _render_pestana_gross(df_gross: pd.DataFrame):
         "Importe_Operativo_Arg",
         "Gross_Proyectado_Arg",
         "Futuro_A_Incorporar_Gross",
+        "Gross_Futuro",
+        "Gross_Pendiente",
+        "Gross_Futuro_Necesario",
+        "Gross_Gap_Post_Futuro",
         "SEGMENTO",
     ]
     if not _validar_columnas_requeridas(df_gross, requeridas, "Gross Visual"):
@@ -611,6 +674,15 @@ def _render_pestana_gross(df_gross: pd.DataFrame):
         delta_color="normal",
     )
 
+    gross_futuro = _numero_seguro(df_filtrado["Gross_Futuro"].sum())
+    gross_pendiente = _numero_seguro(df_filtrado["Gross_Pendiente"].sum())
+    gross_necesario = min(gross_futuro, gross_pendiente)
+    gross_gap_post = max(gross_pendiente - gross_futuro, 0.0)
+    gf1, gf2, gf3, gf4 = st.columns(4)
+    gf1.metric("Gross Futuro Disponible", f"${gross_futuro:,.0f}")
+    gf2.metric("Pendiente vs Operativo", f"${gross_pendiente:,.0f}")
+    gf3.metric("Futuro Necesario", f"${gross_necesario:,.0f}")
+    gf4.metric("Gap después de Futuro", f"${gross_gap_post:,.0f}")
     st.divider()
     st.markdown("### Resumen por segmento - Gross")
     segmentos = df_filtrado.groupby("SEGMENTO", as_index=False).agg(
@@ -618,6 +690,10 @@ def _render_pestana_gross(df_gross: pd.DataFrame):
             "Objetivo_Importe_Arg": "sum",
             "Gross_Proyectado_Arg": "sum",
             "Futuro_A_Incorporar_Gross": "sum",
+            "Gross_Futuro": "sum",
+            "Gross_Pendiente": "sum",
+            "Gross_Futuro_Necesario": "sum",
+            "Gross_Gap_Post_Futuro": "sum",
         }
     )
     segmentos["Cumplimiento"] = (
@@ -635,7 +711,7 @@ def _render_pestana_gross(df_gross: pd.DataFrame):
             valor_principal=registro["Gross_Proyectado_Arg"],
             cumplimiento=registro["Cumplimiento"],
             etiqueta_principal="Proyección",
-            incorporar=registro["Futuro_A_Incorporar_Gross"],
+            incorporar=registro["Gross_Futuro_Necesario"],
             es_moneda=True,
         )
 
@@ -649,31 +725,36 @@ def _render_pestana_ccc(df_ccc: pd.DataFrame):
     if df_ccc is None or df_ccc.empty:
         st.info("No hay datos de CCC para los filtros seleccionados.")
         return
-
-    requeridas = ["Taxonomia", "Cartera_Neta", "CCC_Gerencia", "Objetivo_CCC"]
+    requeridas = [
+        "Taxonomia",
+        "Cartera_Neta",
+        "CCC_Gerencia",
+        "Obj_CCC_Pepsico",
+        "Cumplimiento_CCC_Pct",
+    ]
     if not _validar_columnas_requeridas(df_ccc, requeridas, "CCC Visual"):
         return
-
     df_filtrado = _seleccion_local(
-        df_ccc,
-        "Taxonomia",
-        "Taxonomías de CCC",
-        "gerencial_filtro_taxonomias_ccc_v2",
+        df_ccc, "Taxonomia", "Taxonomías de CCC", "gerencial_filtro_taxonomias_ccc_v2"
     )
     if df_filtrado.empty:
         st.warning("Seleccioná al menos una taxonomía de CCC.")
         return
-
     cartera = _numero_seguro(df_filtrado["Cartera_Neta"].sum())
     actual = _numero_seguro(df_filtrado["CCC_Gerencia"].sum())
-    objetivo = _numero_seguro(df_filtrado["Objetivo_CCC"].sum())
-
+    objetivo = _numero_seguro(df_filtrado["Obj_CCC_Pepsico"].sum())
+    cumplimiento = actual / objetivo * 100.0 if objetivo > 0 else 0.0
     st.markdown("### KPIs ejecutivos - CCC")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     col1.metric("Cartera Neta Total", f"{cartera:,.0f}")
     col2.metric("CCC Actual", f"{actual:,.0f}")
-    col3.metric("Objetivo CCC", f"{objetivo:,.0f}")
-
+    col3.metric("Objetivo Compañía", f"{objetivo:,.0f}")
+    col4.metric(
+        "% Cumplimiento CCC",
+        f"{cumplimiento:,.2f}%",
+        delta=f"{cumplimiento - 100.0:,.2f} pp vs objetivo",
+        delta_color="normal",
+    )
     with st.expander("Ver detalle completo de CCC", expanded=False):
         st.dataframe(df_filtrado, width="stretch", hide_index=True)
 

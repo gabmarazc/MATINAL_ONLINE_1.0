@@ -8,7 +8,7 @@ import streamlit as st
 
 from modules.core.core_operaciones import obtener_core_operacion
 from modules.core.core_vendedores import obtener_core_vendedores
-from modules.staging import obtener_staging_maestros
+from modules.staging import obtener_staging_maestros, obtener_staging_vta
 
 
 SEGMENTOS_ORDEN = [
@@ -130,6 +130,87 @@ def _obtener_contexto_gerencial(
     ].copy()
 
     return padron, ventas_titular, datos_core
+
+
+def _obtener_futuro_disponible_gerencial(
+    anio: int,
+    mes: int,
+    padron: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Obtiene la disponibilidad futura completa directamente desde STAGING,
+    sin aplicar el corte FechaCarga < DiaMatinal de CORE.
+
+    Contrato Futuro:
+    - FechaCarga pertenece al mes operativo.
+    - FechaEntrega pertenece al mes siguiente.
+    - Portafolio PEPSICO y tipos de venta válidos.
+    - Titular original CodVendedor, padrón Gerencial y SEGMENTO válido.
+    """
+    columnas_salida = [
+        "CodVendedor",
+        "SEGMENTO",
+        "Kilos_Futuro_Completo",
+        "Gross_Futuro_Completo",
+    ]
+    staging = obtener_staging_vta()
+    if staging is None or staging.empty or padron is None or padron.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    requeridas = {
+        "FechaCarga_dt",
+        "FechaEntrega_dt",
+        "CodVendedor",
+        "PesoKg",
+        "ImporteNetoItem",
+    }
+    faltantes = sorted(requeridas - set(staging.columns))
+    if faltantes:
+        raise ValueError(
+            "STAGING VTA no cumple el contrato de Futuro Gerencial. "
+            f"Faltan columnas: {faltantes}."
+        )
+
+    futuro = _filtrar_universo_gerencial(staging)
+    futuro = _asegurar_segmento_gerencial(futuro)
+    fecha_carga = pd.to_datetime(futuro["FechaCarga_dt"], errors="coerce")
+    fecha_entrega = pd.to_datetime(futuro["FechaEntrega_dt"], errors="coerce")
+    siguiente = pd.Timestamp(anio, mes, 1) + pd.offsets.MonthBegin(1)
+
+    futuro = futuro[
+        fecha_carga.dt.year.eq(anio)
+        & fecha_carga.dt.month.eq(mes)
+        & fecha_entrega.dt.year.eq(siguiente.year)
+        & fecha_entrega.dt.month.eq(siguiente.month)
+    ].copy()
+    if futuro.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    futuro["CodVendedor"] = pd.to_numeric(
+        futuro["CodVendedor"], errors="coerce"
+    ).astype("Int64")
+    futuro["PesoKg"] = pd.to_numeric(futuro["PesoKg"], errors="coerce").fillna(0.0)
+    futuro["ImporteNetoItem"] = pd.to_numeric(
+        futuro["ImporteNetoItem"], errors="coerce"
+    ).fillna(0.0)
+    futuro["SEGMENTO"] = futuro["SEGMENTO"].fillna("").astype(str).str.strip()
+
+    codigos_validos = set(
+        pd.to_numeric(padron["CodVendedor"], errors="coerce")
+        .dropna()
+        .astype("Int64")
+        .tolist()
+    )
+    futuro = futuro[
+        futuro["CodVendedor"].isin(codigos_validos) & futuro["SEGMENTO"].ne("")
+    ].copy()
+    if futuro.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    return futuro.groupby(["CodVendedor", "SEGMENTO"], as_index=False).agg(
+        Kilos_Futuro_Completo=("PesoKg", "sum"),
+        Gross_Futuro_Completo=("ImporteNetoItem", "sum"),
+    )[columnas_salida]
 
 
 def _construir_matriz_base(
@@ -510,6 +591,30 @@ def obtener_matriz_gerencial_kilos(
     matriz["Ajuste_Reemp_Actual"] = 0.0
     matriz["Ajuste_Por_Reemp"] = 0.0
     matriz["OPERATIVO"] = matriz["Arrastre"] + matriz["Actual"]
+    futuro_completo = _obtener_futuro_disponible_gerencial(anio, mes, padron)
+    matriz = matriz.merge(
+        futuro_completo[["CodVendedor", "SEGMENTO", "Kilos_Futuro_Completo"]],
+        on=["CodVendedor", "SEGMENTO"],
+        how="left",
+    )
+    matriz["Kilos_Futuro"] = matriz["Kilos_Futuro_Completo"].fillna(0.0)
+    matriz["Futuro"] = matriz["Kilos_Futuro"]
+    matriz["Kilos_Pendientes"] = (
+        matriz["Objetivo Mes Corriente"] - matriz["OPERATIVO"]
+    ).clip(lower=0.0)
+    matriz["Kilos_Futuro_Necesario"] = np.minimum(
+        matriz["Kilos_Futuro"], matriz["Kilos_Pendientes"]
+    )
+    matriz["Kilos_Gap_Post_Futuro"] = (
+        matriz["Kilos_Pendientes"] - matriz["Kilos_Futuro"]
+    ).clip(lower=0.0)
+    matriz["Cobertura_Gap_Futuro_Kilos_Pct"] = (
+        matriz["Kilos_Futuro"]
+        .div(matriz["Kilos_Pendientes"].replace(0, pd.NA))
+        .clip(upper=1.0)
+        .mul(100)
+        .fillna(0.0)
+    )
 
     matriz = _incorporar_calendario(matriz, datos_core)
     matriz = _calcular_escenarios(
@@ -528,6 +633,12 @@ def obtener_matriz_gerencial_kilos(
         "Objetivo Mes Corriente",
         "Arrastre",
         "Actual",
+        "Futuro",
+        "Kilos_Futuro",
+        "Kilos_Pendientes",
+        "Kilos_Futuro_Necesario",
+        "Kilos_Gap_Post_Futuro",
+        "Cobertura_Gap_Futuro_Kilos_Pct",
         "OPERATIVO",
         "Ajuste_Reemp_Arrastre",
         "Ajuste_Reemp_Actual",
@@ -741,18 +852,11 @@ def obtener_matriz_gerencial_gross(
     matriz["Promedio_Diario"] = matriz["Promedio_Diario_AJUSTADO"]
     matriz["Media_Necesaria_Diaria"] = matriz["Media_Necesaria_Diaria_AJUSTADO"]
 
-    futuros = ventas[ventas["Periodo"].eq("Futuro") & ventas["SEGMENTO"].ne("")].copy()
-    if not futuros.empty:
-        futuros["ImporteNetoItem"] = pd.to_numeric(
-            futuros.get("ImporteNetoItem", 0.0), errors="coerce"
-        ).fillna(0.0)
-        gross_disponible = (
-            futuros.groupby(["CodVendedor", "SEGMENTO"], as_index=False)[
-                "ImporteNetoItem"
-            ]
-            .sum()
-            .rename(columns={"ImporteNetoItem": "Gross_Disponible"})
-        )
+    futuro_completo = _obtener_futuro_disponible_gerencial(anio, mes, padron)
+    if not futuro_completo.empty:
+        gross_disponible = futuro_completo[
+            ["CodVendedor", "SEGMENTO", "Gross_Futuro_Completo"]
+        ].rename(columns={"Gross_Futuro_Completo": "Gross_Disponible"})
         matriz = matriz.merge(
             gross_disponible,
             on=["CodVendedor", "SEGMENTO"],
@@ -761,6 +865,23 @@ def obtener_matriz_gerencial_gross(
     matriz["Gross_Disponible"] = matriz.get(
         "Gross_Disponible", pd.Series(0.0, index=matriz.index)
     ).fillna(0.0)
+    matriz["Gross_Futuro"] = matriz["Gross_Disponible"]
+    matriz["Gross_Pendiente"] = (
+        matriz["Objetivo_Importe_Arg"] - matriz["Importe_Operativo_Arg"]
+    ).clip(lower=0.0)
+    matriz["Gross_Futuro_Necesario"] = np.minimum(
+        matriz["Gross_Futuro"], matriz["Gross_Pendiente"]
+    )
+    matriz["Gross_Gap_Post_Futuro"] = (
+        matriz["Gross_Pendiente"] - matriz["Gross_Futuro"]
+    ).clip(lower=0.0)
+    matriz["Cobertura_Gap_Futuro_Gross_Pct"] = (
+        matriz["Gross_Futuro"]
+        .div(matriz["Gross_Pendiente"].replace(0, pd.NA))
+        .clip(upper=1.0)
+        .mul(100)
+        .fillna(0.0)
+    )
 
     for sufijo in ["TODO", "AJUSTADO"]:
         proyeccion = pd.to_numeric(
@@ -807,6 +928,11 @@ def obtener_matriz_gerencial_gross(
         "Media_Necesaria_Diaria_TODO",
         "Media_Necesaria_Diaria_AJUSTADO",
         "Gross_Disponible",
+        "Gross_Futuro",
+        "Gross_Pendiente",
+        "Gross_Futuro_Necesario",
+        "Gross_Gap_Post_Futuro",
+        "Cobertura_Gap_Futuro_Gross_Pct",
         "Futuro_A_Incorporar_Gross",
         "Futuro_A_Incorporar_Gross_TODO",
         "Futuro_A_Incorporar_Gross_AJUSTADO",

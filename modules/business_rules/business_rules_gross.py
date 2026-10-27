@@ -7,7 +7,7 @@ import numpy as np
 # REGLA DE ORO: Consumo exclusivo de la Capa CORE y el Repositorio / Staging Autorizado (Cero acceso a bases de datos o SQL directo)
 from modules.core.core_vendedores import obtener_core_vendedores
 from modules.core.core_operaciones import obtener_core_operacion
-from modules.staging import obtener_staging_maestros
+from modules.staging import obtener_staging_maestros, obtener_staging_vta
 
 
 def _filtrar_universo_comercial_gross(df: pd.DataFrame) -> pd.DataFrame:
@@ -95,6 +95,47 @@ def _asegurar_segmento_comercial(df: pd.DataFrame) -> pd.DataFrame:
         )
 
     return df_trabajo
+
+
+def _obtener_futuro_completo_gross(
+    anio: int, mes: int, padron_vendedores: pd.DataFrame
+) -> pd.DataFrame:
+    """Obtiene Gross Futuro completo desde STAGING, sin corte de Dia Matinal."""
+    columnas = ["CodVendedor", "SEGMENTO", "Gross_Disponible"]
+    futuro = obtener_staging_vta()
+    if futuro is None or futuro.empty or padron_vendedores.empty:
+        return pd.DataFrame(columns=columnas)
+    futuro = _asegurar_segmento_comercial(_filtrar_universo_comercial_gross(futuro))
+    carga = pd.to_datetime(futuro["FechaCarga_dt"], errors="coerce")
+    entrega = pd.to_datetime(futuro["FechaEntrega_dt"], errors="coerce")
+    siguiente = pd.Timestamp(anio, mes, 1) + pd.offsets.MonthBegin(1)
+    futuro = futuro[
+        carga.dt.year.eq(anio)
+        & carga.dt.month.eq(mes)
+        & entrega.dt.year.eq(siguiente.year)
+        & entrega.dt.month.eq(siguiente.month)
+    ].copy()
+    futuro["CodVendedor"] = pd.to_numeric(
+        futuro["CodVendedor"], errors="coerce"
+    ).astype("Int64")
+    futuro["ImporteNetoItem"] = pd.to_numeric(
+        futuro["ImporteNetoItem"], errors="coerce"
+    ).fillna(0.0)
+    futuro["SEGMENTO"] = futuro["SEGMENTO"].fillna("").astype(str).str.strip()
+    validos = set(
+        pd.to_numeric(padron_vendedores["CodVendedor"], errors="coerce")
+        .dropna()
+        .astype("Int64")
+        .tolist()
+    )
+    futuro = futuro[futuro["CodVendedor"].isin(validos) & futuro["SEGMENTO"].ne("")]
+    if futuro.empty:
+        return pd.DataFrame(columns=columnas)
+    return (
+        futuro.groupby(["CodVendedor", "SEGMENTO"], as_index=False)["ImporteNetoItem"]
+        .sum()
+        .rename(columns={"ImporteNetoItem": "Gross_Disponible"})[columnas]
+    )
 
 
 @st.cache_data(show_spinner=False)
@@ -804,31 +845,35 @@ def obtener_matriz_gross_comercial(
         matriz_comercial, df_vta_op, dia_matinal
     )
 
-    # Cálculo de Gross_Disponible a partir del período Futuro utilizando df_vta_op (que ya posee SEGMENTO asegurado)
-    df_futuro = (
-        df_vta_op[
-            df_vta_op["Periodo"].eq("Futuro") & df_vta_op["SEGMENTO"].notna()
-        ].copy()
-        if "Periodo" in df_vta_op.columns
-        else pd.DataFrame()
-    )
-
-    if not df_futuro.empty:
-        fut_agg = (
-            df_futuro.groupby(["CodVendedor", "SEGMENTO"], as_index=False)[
-                "ImporteNetoItem"
-            ]
-            .sum()
-            .rename(columns={"ImporteNetoItem": "Gross_Disponible"})
-        )
+    # Gross Futuro completo: STAGING sin corte de Dia Matinal.
+    fut_agg = _obtener_futuro_completo_gross(anio, mes, padron_vend)
+    if not fut_agg.empty:
         matriz_comercial = matriz_comercial.merge(
             fut_agg, on=["CodVendedor", "SEGMENTO"], how="left"
         )
     matriz_comercial["Gross_Disponible"] = matriz_comercial.get(
         "Gross_Disponible", pd.Series(0.0, index=matriz_comercial.index)
     ).fillna(0.0)
+    matriz_comercial["Gross_Futuro"] = matriz_comercial["Gross_Disponible"]
+    matriz_comercial["Gross_Pendiente"] = (
+        matriz_comercial["Objetivo_Importe_Arg"]
+        - matriz_comercial["Importe_Operativo_Arg"]
+    ).clip(lower=0.0)
+    matriz_comercial["Gross_Futuro_Necesario"] = np.minimum(
+        matriz_comercial["Gross_Futuro"], matriz_comercial["Gross_Pendiente"]
+    )
+    matriz_comercial["Gross_Gap_Post_Futuro"] = (
+        matriz_comercial["Gross_Pendiente"] - matriz_comercial["Gross_Futuro"]
+    ).clip(lower=0.0)
+    matriz_comercial["Cobertura_Gap_Futuro_Gross_Pct"] = (
+        matriz_comercial["Gross_Futuro"]
+        .div(matriz_comercial["Gross_Pendiente"].replace(0, pd.NA))
+        .clip(upper=1.0)
+        .mul(100)
+        .fillna(0.0)
+    )
 
-    # Cálculo de Futuro_A_Incorporar_Gross
+    # Cálculo histórico de Futuro_A_Incorporar_Gross (compatibilidad)
     matriz_comercial["Raw_Bache_Gross"] = (
         matriz_comercial["Objetivo_Importe_Arg"]
         - matriz_comercial["Gross_Proyectado_Arg"]
@@ -886,6 +931,11 @@ def obtener_matriz_gross_comercial(
         "Media_Necesaria_Diaria_TODO",
         "Media_Necesaria_Diaria_AJUSTADO",
         "Gross_Disponible",
+        "Gross_Futuro",
+        "Gross_Pendiente",
+        "Gross_Futuro_Necesario",
+        "Gross_Gap_Post_Futuro",
+        "Cobertura_Gap_Futuro_Gross_Pct",
         "Futuro_A_Incorporar_Gross",
         "Días Pasados",
         "Rutas",
