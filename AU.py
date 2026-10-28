@@ -1,339 +1,480 @@
-# AU_CHKIN_STAGING.py
-# Auditoria independiente y de solo lectura de SQLite.chkin vs STAGING_CHKIN.
-# No modifica matinal.db ni codigo productivo.
+# AU_BUSINESS_RULES_CHECKIN.py
+# Auditoria forense y de solo lectura de BUSINESS_RULES_CHECKIN.
+# Ejecutar desde la raiz de MATINAL ONLINE:
+#     python AU_BUSINESS_RULES_CHECKIN.py
 
 from __future__ import annotations
 
-import sqlite3
-import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
-
 ROOT = Path(__file__).resolve().parent
-DB_PATH = ROOT / "data" / "matinal.db"
-KEY_COLS = ["Codigo Cliente", "Fecha Check-in"]
-EXPECTED_COLS = [
-    "Codigo Cliente",
+
+ESTADOS_ESPERADOS = {
+    "EN_RUTA",
+    "FUERA_RUTA_CLIENTE",
+    "SIN_RUTA_ESE_DIA",
+    "VENDEDOR_NO_MAPEABLE",
+}
+
+COLUMNAS_DETALLE = [
     "Cliente",
-    "Codigo Empleado",
-    "Supervisor",
-    "Coordenadas Check-in",
-    "Coordenadas Check-out",
-    "Fecha Check-in",
-    "Fecha Check-out",
-    "Motivo Invalidez Check-in",
-    "Motivo Invalidez Check-out",
-    "Existe Carga",
-    "Tiempo en PDV",
-    "Valido",
+    "NombreClienteCHKIN",
+    "CodVendedorCHKIN",
+    "CodVendedor",
+    "SupervisorCHKIN",
+    "FechaHoraCheckIn",
+    "FechaHoraCheckOut",
+    "FechaVisita",
+    "CheckInCorrecto",
+    "CheckOutCorrecto",
+    "VisitaValida",
+    "ValidoOrigen",
+    "CoincideValidezOrigen",
+    "ExisteCarga",
+    "TiempoPDV",
+    "TiempoPDVSegundos",
+    "DiaConRuta",
+    "ClienteProgramadoEnRuta",
+    "EstadoRuta",
+    "VisitaEnRuta",
+    "VisitaFueraRuta",
+]
+
+COLUMNAS_RESUMEN = [
+    "CodVend",
+    "Vendedor",
+    "SUP",
+    "DiasConRuta",
+    "VisitasUnicas",
+    "VisitasEnRuta",
+    "PctVisitasEnRuta",
+    "VisitasFueraRuta",
+    "PctVisitasFueraRuta",
+    "VisitasFueraRutaCliente",
+    "VisitasSinRutaEseDia",
+    "CheckInValidos",
+    "PctCheckInValidos",
+    "CheckOutValidos",
+    "PctCheckOutValidos",
+    "VisitasValidas",
+    "PctVisitasValidas",
 ]
 
 
 def titulo(texto: str) -> None:
-    print("\n" + "=" * 88)
+    print("\n" + "=" * 96)
     print(texto)
-    print("=" * 88)
+    print("=" * 96)
 
 
-def ok(etiqueta: str, condicion: bool, detalle: str = "") -> bool:
+def control(etiqueta: str, condicion: bool, detalle: str = "") -> bool:
     estado = "OK" if condicion else "ERROR"
     sufijo = f" | {detalle}" if detalle else ""
     print(f"[{estado}] {etiqueta}{sufijo}")
-    return condicion
+    return bool(condicion)
 
 
-def normalizar_key_cliente(serie: pd.Series) -> pd.Series:
-    return pd.to_numeric(serie, errors="coerce").astype("Int64").astype("string")
+def normalizar_codigo_vendedor(serie: pd.Series) -> pd.Series:
+    numerico = pd.to_numeric(serie.astype("string").str.strip(), errors="coerce")
+    entero = numerico.notna() & np.isclose(numerico, np.floor(numerico))
+    salida = pd.Series(pd.NA, index=serie.index, dtype="Int64")
+    salida.loc[entero] = numerico.loc[entero].astype("int64")
+    return salida
 
 
-def normalizar_key_fecha(serie: pd.Series) -> pd.Series:
-    fechas = pd.to_datetime(serie, errors="coerce")
-    return fechas.dt.strftime("%Y-%m-%d %H:%M:%S.%f").astype("string")
+def resolver_maestro(maestros: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    maestro = maestros.get("maestro_vendedores", pd.DataFrame())
+    if maestro.empty:
+        raise ValueError("maestro_vendedores no esta disponible o esta vacio.")
+
+    col_codigo = next(
+        (
+            c
+            for c in ["Codigo_Vendedor", "CodVend", "CodVendedor", "Codigo", "codven"]
+            if c in maestro.columns
+        ),
+        None,
+    )
+    col_nombre = next(
+        (
+            c
+            for c in ["Nombre_Vendedor", "Nombre", "Vendedor", "NombreVendedor"]
+            if c in maestro.columns
+        ),
+        None,
+    )
+    col_sup = next(
+        (c for c in ["SUP", "Sup", "Supervisor"] if c in maestro.columns),
+        None,
+    )
+    if not all([col_codigo, col_nombre, col_sup]):
+        raise ValueError(
+            "No se pudo resolver el contrato del maestro. "
+            f"Columnas encontradas: {list(maestro.columns)}"
+        )
+
+    return pd.DataFrame(
+        {
+            "CodVend": pd.to_numeric(maestro[col_codigo], errors="coerce").astype(
+                "Int64"
+            ),
+            "Vendedor": maestro[col_nombre].astype("string").str.strip(),
+            "SUP": pd.to_numeric(maestro[col_sup], errors="coerce").astype("Int64"),
+        }
+    )
+
+
+def comparar_porcentaje(
+    df: pd.DataFrame,
+    numerador: str,
+    denominador: str,
+    porcentaje: str,
+) -> int:
+    den = (
+        pd.to_numeric(df[denominador], errors="coerce").fillna(0).to_numpy(dtype=float)
+    )
+    num = pd.to_numeric(df[numerador], errors="coerce").fillna(0).to_numpy(dtype=float)
+    esperado = np.divide(num, den, out=np.zeros(len(df), dtype=float), where=den != 0)
+    real = (
+        pd.to_numeric(df[porcentaje], errors="coerce")
+        .fillna(np.nan)
+        .to_numpy(dtype=float)
+    )
+    return int((~np.isclose(esperado, real, equal_nan=False)).sum())
 
 
 def main() -> int:
     inicio = time.perf_counter()
     errores = 0
 
-    titulo("AU_CHKIN_STAGING - AUDITORIA FORENSE")
+    titulo("AU_BUSINESS_RULES_CHECKIN - AUDITORIA FORENSE")
     print(f"Proyecto : {ROOT}")
-    print(f"SQLite   : {DB_PATH}")
     print("Modo     : SOLO LECTURA")
+    print("Objeto   : CORE_CHECKIN + CORE_RUTAS + MAESTRO -> BUSINESS_RULES_CHECKIN")
 
-    if not DB_PATH.is_file():
-        print(f"\n[ERROR] No existe la base: {DB_PATH}")
+    titulo("1. IMPORTACION DE CAPAS PRODUCTIVAS")
+    try:
+        from modules.core.core_checkin import obtener_core_checkin
+        from modules.core.core_rutas import obtener_core_rutas
+        from modules.staging import obtener_staging_maestros
+        from modules.business_rules.business_rules_checkin import (
+            construir_detalle_checkin_ruta,
+            construir_resumen_checkin_vendedores,
+            obtener_business_rules_checkin,
+        )
+    except Exception as exc:
+        print(f"[ERROR] Importacion: {type(exc).__name__}: {exc}")
         return 1
 
-    # 1. Auditoria directa de SQLite, abriendo explicitamente en modo read-only.
-    titulo("1. SQLITE.chkin")
-    uri = DB_PATH.resolve().as_uri() + "?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    print("[OK] CORE_CHECKIN")
+    print("[OK] CORE_RUTAS")
+    print("[OK] STAGING_MAESTROS")
+    print("[OK] BUSINESS_RULES_CHECKIN")
+
+    titulo("2. CARGA DE FUENTES REALES")
     try:
-        existe = conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='chkin'"
-        ).fetchone()
-        if not ok("Existe tabla chkin", bool(existe)):
-            return 1
+        for funcion in [
+            obtener_core_checkin,
+            obtener_core_rutas,
+            obtener_staging_maestros,
+        ]:
+            if hasattr(funcion, "clear"):
+                funcion.clear()
+        core_checkin = obtener_core_checkin()
+        core_rutas = obtener_core_rutas()
+        maestros = obtener_staging_maestros()
+        maestro = resolver_maestro(maestros)
+    except Exception as exc:
+        print(f"[ERROR] Carga de fuentes: {type(exc).__name__}: {exc}")
+        return 1
 
-        info = conn.execute('PRAGMA table_info("chkin")').fetchall()
-        sql_cols = [fila[1] for fila in info]
-        errores += not ok(
-            "Contrato de 13 columnas",
-            sql_cols == EXPECTED_COLS,
-            f"encontradas={len(sql_cols)}",
-        )
-        if sql_cols != EXPECTED_COLS:
-            print("Esperadas :", EXPECTED_COLS)
-            print("Encontradas:", sql_cols)
+    print(f"CORE_CHECKIN filas : {len(core_checkin)}")
+    print(f"CORE_RUTAS filas   : {len(core_rutas)}")
+    print(f"MAESTRO filas      : {len(maestro)}")
+    errores += not control("CORE_CHECKIN no vacio", not core_checkin.empty)
+    errores += not control("CORE_RUTAS no vacio", not core_rutas.empty)
+    errores += not control("MAESTRO no vacio", not maestro.empty)
+    errores += not control(
+        "CodVend maestro sin duplicados", not maestro["CodVend"].duplicated().any()
+    )
+    errores += not control(
+        "CodVend maestro completo", not maestro["CodVend"].isna().any()
+    )
 
-        sql_rows = int(conn.execute('SELECT COUNT(*) FROM "chkin"').fetchone()[0])
-        sql_distinct_key = int(
-            conn.execute(
-                """
-                SELECT COUNT(*)
-                FROM (
-                    SELECT "Codigo Cliente", "Fecha Check-in"
-                    FROM chkin
-                    GROUP BY "Codigo Cliente", "Fecha Check-in"
-                )
-                """
-            ).fetchone()[0]
-        )
-        sql_null_key = int(
-            conn.execute(
-                """
-                SELECT COUNT(*) FROM chkin
-                WHERE "Codigo Cliente" IS NULL
-                   OR TRIM("Codigo Cliente") = ''
-                   OR "Fecha Check-in" IS NULL
-                   OR TRIM("Fecha Check-in") = ''
-                """
-            ).fetchone()[0]
-        )
-        rango = conn.execute(
-            'SELECT MIN("Fecha Check-in"), MAX("Fecha Check-in") FROM chkin'
-        ).fetchone()
-
-        print(f"Filas SQLite         : {sql_rows}")
-        print(f"KEY distintas        : {sql_distinct_key}")
-        print(f"KEY nulas/vacias     : {sql_null_key}")
-        print(f"Fecha Check-in MIN   : {rango[0]}")
-        print(f"Fecha Check-in MAX   : {rango[1]}")
-        errores += not ok("KEY SQLite unica", sql_rows == sql_distinct_key)
-        errores += not ok("KEY SQLite completa", sql_null_key == 0)
-
-        # Carga solo las columnas necesarias para conciliacion detallada.
-        sql_key_df = pd.read_sql_query(
-            'SELECT "Codigo Cliente", "Fecha Check-in" FROM chkin', conn
-        )
-    finally:
-        conn.close()
-
-    # 2. Ejecutar exactamente el STAGING productivo.
-    titulo("2. EJECUCION obtener_staging_chkin()")
+    titulo("3. DETALLE DE VISITAS CLASIFICADO")
     try:
-        from modules.staging import obtener_staging_chkin
+        detalle = construir_detalle_checkin_ruta(core_checkin, core_rutas)
+    except Exception as exc:
+        print(f"[ERROR] construir_detalle_checkin_ruta: {type(exc).__name__}: {exc}")
+        return 2
+
+    print(f"Filas detalle   : {len(detalle)}")
+    print(f"Columnas detalle: {len(detalle.columns)}")
+    errores += not control(
+        "Contrato exacto detalle", list(detalle.columns) == COLUMNAS_DETALLE
+    )
+    errores += not control(
+        "Misma cantidad CORE_CHECKIN/detalle",
+        len(detalle) == len(core_checkin),
+        f"CORE={len(core_checkin)} | detalle={len(detalle)}",
+    )
+
+    duplicadas = int(
+        detalle.duplicated(["Cliente", "FechaHoraCheckIn"], keep=False).sum()
+    )
+    nulas_key = int(detalle[["Cliente", "FechaHoraCheckIn"]].isna().any(axis=1).sum())
+    print(f"KEY duplicadas detalle: {duplicadas}")
+    print(f"KEY nulas detalle     : {nulas_key}")
+    errores += not control("KEY detalle unica", duplicadas == 0)
+    errores += not control("KEY detalle completa", nulas_key == 0)
+
+    estados = set(detalle["EstadoRuta"].dropna().astype(str).unique())
+    estados_desconocidos = estados - ESTADOS_ESPERADOS
+    print(f"Estados encontrados   : {sorted(estados)}")
+    print(f"Estados desconocidos  : {sorted(estados_desconocidos)}")
+    errores += not control("Catalogo EstadoRuta valido", not estados_desconocidos)
+
+    conteo_estados = detalle["EstadoRuta"].value_counts(dropna=False)
+    print("\nDistribucion EstadoRuta:")
+    print(conteo_estados.to_string())
+
+    en_ruta_esperado = detalle["EstadoRuta"].eq("EN_RUTA")
+    fuera_esperado = detalle["EstadoRuta"].isin(
+        ["FUERA_RUTA_CLIENTE", "SIN_RUTA_ESE_DIA"]
+    )
+    dif_en_ruta = int((detalle["VisitaEnRuta"].astype(bool) != en_ruta_esperado).sum())
+    dif_fuera = int((detalle["VisitaFueraRuta"].astype(bool) != fuera_esperado).sum())
+    errores += not control(
+        "Bandera VisitaEnRuta", dif_en_ruta == 0, f"diferencias={dif_en_ruta}"
+    )
+    errores += not control(
+        "Bandera VisitaFueraRuta", dif_fuera == 0, f"diferencias={dif_fuera}"
+    )
+
+    mapeables = detalle["CodVendedor"].notna()
+    particion_mapeables = detalle.loc[mapeables, "VisitaEnRuta"].astype(
+        "Int64"
+    ) + detalle.loc[mapeables, "VisitaFueraRuta"].astype("Int64")
+    errores += not control(
+        "Visitas mapeables particionadas En Ruta/Fuera Ruta",
+        bool((particion_mapeables == 1).all()),
+    )
+
+    titulo("4. VALIDACION DIRECTA DEL CRUCE CON CORE_RUTAS")
+    cod_checkin = normalizar_codigo_vendedor(core_checkin["CodVendedorCHKIN"])
+    visitas_clave = pd.DataFrame(
+        {
+            "Cliente": core_checkin["Cliente"].astype("Int64"),
+            "CodVendedor": cod_checkin,
+            "Fecha": pd.to_datetime(
+                core_checkin["FechaVisita"], errors="coerce"
+            ).dt.normalize(),
+        }
+    )
+    rutas_clave = set(
+        map(
+            tuple,
+            core_rutas[["Cliente", "CodVendedor", "FechaRuta"]]
+            .assign(FechaRuta=lambda x: pd.to_datetime(x["FechaRuta"]).dt.normalize())
+            .itertuples(index=False, name=None),
+        )
+    )
+    esperado_en_ruta = pd.Series(
+        [
+            False if pd.isna(v) else (c, v, f) in rutas_clave
+            for c, v, f in visitas_clave.itertuples(index=False, name=None)
+        ],
+        index=detalle.index,
+        dtype="boolean",
+    )
+    diferencias_cruce = int(
+        (detalle["VisitaEnRuta"] != esperado_en_ruta).fillna(True).sum()
+    )
+    errores += not control(
+        "Clasificacion EN_RUTA coincide con clave Cliente+Vendedor+Fecha",
+        diferencias_cruce == 0,
+        f"diferencias={diferencias_cruce}",
+    )
+
+    titulo("5. RESUMEN POR VENDEDOR")
+    try:
+        resumen = construir_resumen_checkin_vendedores(
+            core_checkin,
+            core_rutas,
+            maestros,
+        )
     except Exception as exc:
         print(
-            f"[ERROR] No se pudo importar modules.staging: {type(exc).__name__}: {exc}"
+            f"[ERROR] construir_resumen_checkin_vendedores: {type(exc).__name__}: {exc}"
         )
-        return 1
+        return 2
 
-    try:
-        # Evita que una version cacheada de Streamlit oculte el estado actual.
-        if hasattr(obtener_staging_chkin, "clear"):
-            obtener_staging_chkin.clear()
-        df = obtener_staging_chkin()
-    except Exception as exc:
-        print(f"[ERROR] obtener_staging_chkin fallo: {type(exc).__name__}: {exc}")
-        return 1
-
-    if not isinstance(df, pd.DataFrame):
-        print(f"[ERROR] STAGING devolvio {type(df).__name__}, no DataFrame.")
-        return 1
-
-    print(f"Filas STAGING        : {len(df)}")
-    print(f"Columnas STAGING     : {len(df.columns)}")
-    errores += not ok("STAGING no vacio", not df.empty)
-    errores += not ok(
-        "Contrato de columnas STAGING",
-        list(df.columns) == EXPECTED_COLS,
-        f"encontradas={len(df.columns)}",
+    print(f"Filas resumen   : {len(resumen)}")
+    print(f"Columnas resumen: {len(resumen.columns)}")
+    errores += not control(
+        "Contrato exacto resumen", list(resumen.columns) == COLUMNAS_RESUMEN
+    )
+    errores += not control(
+        "Una fila por vendedor del maestro",
+        len(resumen) == len(maestro),
+        f"maestro={len(maestro)} | resumen={len(resumen)}",
+    )
+    errores += not control(
+        "CodVend resumen sin duplicados", not resumen["CodVend"].duplicated().any()
     )
 
-    faltantes = [c for c in EXPECTED_COLS if c not in df.columns]
-    if faltantes:
-        print("Columnas faltantes:", faltantes)
-        return 1
-
-    # 3. Conciliacion de granularidad y KEY.
-    titulo("3. CONCILIACION SQLITE vs STAGING")
-    errores += not ok(
-        "Misma cantidad de filas",
-        len(df) == sql_rows,
-        f"SQLite={sql_rows} | STAGING={len(df)}",
+    cod_maestro = set(maestro["CodVend"].dropna().astype(int).tolist())
+    cod_resumen = set(resumen["CodVend"].dropna().astype(int).tolist())
+    errores += not control(
+        "Conservacion exacta del universo maestro",
+        cod_maestro == cod_resumen,
+        f"faltan={len(cod_maestro - cod_resumen)} | sobran={len(cod_resumen - cod_maestro)}",
     )
 
-    stg_dup = int(df.duplicated(subset=KEY_COLS, keep=False).sum())
-    stg_key_null = int(df[KEY_COLS].isna().any(axis=1).sum())
-    print(f"Filas en KEY duplicadas: {stg_dup}")
-    print(f"Filas con KEY nula     : {stg_key_null}")
-    errores += not ok("KEY STAGING unica", stg_dup == 0)
-    errores += not ok("KEY STAGING completa", stg_key_null == 0)
-
-    sql_key = pd.DataFrame(
-        {
-            "Codigo Cliente": normalizar_key_cliente(sql_key_df["Codigo Cliente"]),
-            "Fecha Check-in": normalizar_key_fecha(sql_key_df["Fecha Check-in"]),
-        }
-    )
-    stg_key = pd.DataFrame(
-        {
-            "Codigo Cliente": normalizar_key_cliente(df["Codigo Cliente"]),
-            "Fecha Check-in": normalizar_key_fecha(df["Fecha Check-in"]),
-        }
-    )
-    sql_set = set(map(tuple, sql_key.itertuples(index=False, name=None)))
-    stg_set = set(map(tuple, stg_key.itertuples(index=False, name=None)))
-    faltan_staging = sql_set - stg_set
-    sobran_staging = stg_set - sql_set
-    print(f"KEY SQLite ausentes en STAGING : {len(faltan_staging)}")
-    print(f"KEY STAGING ausentes en SQLite : {len(sobran_staging)}")
-    errores += not ok(
-        "Conservacion exacta de KEY",
-        not faltan_staging and not sobran_staging,
-    )
-    if faltan_staging:
-        print("Muestra faltantes STAGING:", list(faltan_staging)[:5])
-    if sobran_staging:
-        print("Muestra sobrantes STAGING:", list(sobran_staging)[:5])
-
-    # 4. Tipos tecnicos.
-    titulo("4. TIPOS TECNICOS STAGING")
-    checks_tipo = {
-        "Codigo Cliente -> Int64": str(df["Codigo Cliente"].dtype) == "Int64",
-        "Codigo Empleado -> string": pd.api.types.is_string_dtype(
-            df["Codigo Empleado"].dtype
-        ),
-        "Fecha Check-in -> datetime": pd.api.types.is_datetime64_any_dtype(
-            df["Fecha Check-in"]
-        ),
-        "Fecha Check-out -> datetime": pd.api.types.is_datetime64_any_dtype(
-            df["Fecha Check-out"]
-        ),
-        "Tiempo en PDV -> timedelta": pd.api.types.is_timedelta64_dtype(
-            df["Tiempo en PDV"]
-        ),
+    controles_conteo = {
+        "EnRuta + FueraRuta = VisitasUnicas": (
+            resumen["VisitasEnRuta"] + resumen["VisitasFueraRuta"]
+            == resumen["VisitasUnicas"]
+        ).all(),
+        "FueraRutaCliente + SinRutaDia = FueraRuta": (
+            resumen["VisitasFueraRutaCliente"] + resumen["VisitasSinRutaEseDia"]
+            == resumen["VisitasFueraRuta"]
+        ).all(),
+        "CheckInValidos <= VisitasUnicas": (
+            resumen["CheckInValidos"] <= resumen["VisitasUnicas"]
+        ).all(),
+        "CheckOutValidos <= VisitasUnicas": (
+            resumen["CheckOutValidos"] <= resumen["VisitasUnicas"]
+        ).all(),
+        "VisitasValidas <= CheckInValidos": (
+            resumen["VisitasValidas"] <= resumen["CheckInValidos"]
+        ).all(),
+        "VisitasValidas <= CheckOutValidos": (
+            resumen["VisitasValidas"] <= resumen["CheckOutValidos"]
+        ).all(),
     }
-    for etiqueta, condicion in checks_tipo.items():
-        errores += not ok(etiqueta, condicion)
+    for nombre, valido in controles_conteo.items():
+        errores += not control(nombre, bool(valido))
 
-    print("\nDtypes relevantes:")
-    print(
-        df[
-            [
-                "Codigo Cliente",
-                "Codigo Empleado",
-                "Supervisor",
-                "Fecha Check-in",
-                "Fecha Check-out",
-                "Tiempo en PDV",
-            ]
-        ].dtypes.to_string()
+    titulo("6. PORCENTAJES")
+    pares = [
+        ("VisitasEnRuta", "VisitasUnicas", "PctVisitasEnRuta"),
+        ("VisitasFueraRuta", "VisitasUnicas", "PctVisitasFueraRuta"),
+        ("CheckInValidos", "VisitasUnicas", "PctCheckInValidos"),
+        ("CheckOutValidos", "VisitasUnicas", "PctCheckOutValidos"),
+        ("VisitasValidas", "VisitasUnicas", "PctVisitasValidas"),
+    ]
+    for numerador, denominador, porcentaje in pares:
+        diferencias = comparar_porcentaje(resumen, numerador, denominador, porcentaje)
+        rango_valido = bool(
+            resumen[porcentaje].between(0, 1, inclusive="both").fillna(False).all()
+        )
+        errores += not control(
+            f"Formula {porcentaje}", diferencias == 0, f"diferencias={diferencias}"
+        )
+        errores += not control(f"Rango 0..1 {porcentaje}", rango_valido)
+
+    pct_particion = resumen["PctVisitasEnRuta"] + resumen["PctVisitasFueraRuta"]
+    esperado_pct = pd.Series(
+        np.where(resumen["VisitasUnicas"] > 0, 1.0, 0.0),
+        index=resumen.index,
+    )
+    diferencias_particion = int(
+        (~np.isclose(pct_particion.astype(float), esperado_pct)).sum()
+    )
+    errores += not control(
+        "PctEnRuta + PctFueraRuta",
+        diferencias_particion == 0,
+        f"diferencias={diferencias_particion}",
     )
 
-    # 5. Calidad tecnica, sin aplicar reglas CORE.
-    titulo("5. CALIDAD TECNICA")
-    for col in EXPECTED_COLS:
-        print(f"{col:<32} nulos={int(df[col].isna().sum()):>7}")
-
-    empleados = df["Codigo Empleado"].dropna().astype("string")
-    empleados_alfanum = empleados[~empleados.str.fullmatch(r"\d+")]
-    print(f"\nCodigos Empleado distintos          : {empleados.nunique()}")
-    print(f"Codigos Empleado alfanumericos      : {empleados_alfanum.nunique()}")
-    if not empleados_alfanum.empty:
-        print(
-            "Muestra alfanumericos                :",
-            empleados_alfanum.drop_duplicates().head(15).tolist(),
+    titulo("7. CONCILIACION GLOBAL DETALLE vs RESUMEN")
+    detalle_mapeado = detalle.loc[
+        detalle["CodVendedor"].isin(resumen["CodVend"])
+    ].copy()
+    globales = {
+        "VisitasUnicas": len(detalle_mapeado),
+        "VisitasEnRuta": int(detalle_mapeado["VisitaEnRuta"].sum()),
+        "VisitasFueraRuta": int(detalle_mapeado["VisitaFueraRuta"].sum()),
+        "CheckInValidos": int(detalle_mapeado["CheckInCorrecto"].sum()),
+        "CheckOutValidos": int(detalle_mapeado["CheckOutCorrecto"].sum()),
+        "VisitasValidas": int(detalle_mapeado["VisitaValida"].sum()),
+    }
+    for columna, esperado in globales.items():
+        real = int(resumen[columna].sum())
+        errores += not control(
+            f"Conciliacion {columna}",
+            real == esperado,
+            f"detalle={esperado} | resumen={real}",
         )
 
-    fechas_ci_nulas = int(df["Fecha Check-in"].isna().sum())
-    fechas_co_nulas = int(df["Fecha Check-out"].isna().sum())
-    tiempos_nulos = int(df["Tiempo en PDV"].isna().sum())
-    errores += not ok(
-        "Fecha Check-in parseada", fechas_ci_nulas == 0, f"NaT={fechas_ci_nulas}"
-    )
-    errores += not ok(
-        "Fecha Check-out parseada", fechas_co_nulas == 0, f"NaT={fechas_co_nulas}"
-    )
-    errores += not ok(
-        "Tiempo en PDV parseado", tiempos_nulos == 0, f"NaT={tiempos_nulos}"
-    )
+    print("\nTotales globales:")
+    for columna, valor in globales.items():
+        print(f"{columna:<28}: {valor}")
 
-    if not df["Fecha Check-in"].dropna().empty:
-        print(
-            f"Rango STAGING Check-in : {df['Fecha Check-in'].min()} -> {df['Fecha Check-in'].max()}"
+    titulo("8. CODIGOS CHKIN NO MAPEABLES")
+    no_mapeables = detalle.loc[
+        detalle["EstadoRuta"].eq("VENDEDOR_NO_MAPEABLE"),
+        "CodVendedorCHKIN",
+    ]
+    print(f"Visitas vendedor no mapeable: {len(no_mapeables)}")
+    print(f"Codigos distintos            : {no_mapeables.nunique(dropna=True)}")
+    if not no_mapeables.empty:
+        print("Muestra:")
+        print(no_mapeables.value_counts(dropna=False).head(20).to_string())
+    print("NOTA: se informan, pero no se atribuyen a vendedores del maestro.")
+
+    titulo("9. FUNCION PRODUCTIVA")
+    try:
+        if hasattr(obtener_business_rules_checkin, "clear"):
+            obtener_business_rules_checkin.clear()
+        productivo = obtener_business_rules_checkin()
+    except Exception as exc:
+        print(f"[ERROR] obtener_business_rules_checkin: {type(exc).__name__}: {exc}")
+        return 2
+
+    det_prod = productivo.get("detalle_visitas")
+    res_prod = productivo.get("resumen_vendedores")
+    errores += not control(
+        "Salida productiva contiene detalle_visitas",
+        isinstance(det_prod, pd.DataFrame),
+    )
+    errores += not control(
+        "Salida productiva contiene resumen_vendedores",
+        isinstance(res_prod, pd.DataFrame),
+    )
+    if isinstance(det_prod, pd.DataFrame):
+        errores += not control(
+            "Misma cantidad detalle directo/productivo",
+            len(det_prod) == len(detalle),
         )
-    if not df["Tiempo en PDV"].dropna().empty:
-        print(f"Tiempo PDV minimo      : {df['Tiempo en PDV'].min()}")
-        print(f"Tiempo PDV maximo      : {df['Tiempo en PDV'].max()}")
-
-    print("\nValores Motivo Invalidez Check-in:")
-    print(df["Motivo Invalidez Check-in"].value_counts(dropna=False).to_string())
-    print("\nValores Motivo Invalidez Check-out:")
-    print(df["Motivo Invalidez Check-out"].value_counts(dropna=False).to_string())
-    print("\nValores Valido:")
-    print(df["Valido"].value_counts(dropna=False).to_string())
-    print("\nValores Existe Carga:")
-    print(df["Existe Carga"].value_counts(dropna=False).to_string())
-
-    # 6. Control informativo de la regla que luego pertenecera a CORE.
-    # No altera STAGING ni usa esta regla para filtrar registros.
-    titulo("6. CONTROL FUNCIONAL INFORMATIVO PARA FUTURO CORE")
-    ci_correcto = df["Motivo Invalidez Check-in"].isna()
-    co_correcto = df["Motivo Invalidez Check-out"].isna()
-    valido_calculado = ci_correcto & co_correcto
-    valido_origen = df["Valido"].astype("string").str.upper().eq("SI")
-    diferencias = int((valido_calculado != valido_origen).sum())
-    print(f"Check-in sin motivo de invalidez : {int(ci_correcto.sum())}")
-    print(f"Check-out sin motivo de invalidez: {int(co_correcto.sum())}")
-    print(f"Valido calculado por ambos       : {int(valido_calculado.sum())}")
-    print(f"Valido='SI' en origen            : {int(valido_origen.sum())}")
-    print(f"Diferencias regla vs origen      : {diferencias}")
-    if diferencias:
-        muestra_cols = [
-            "Codigo Cliente",
-            "Codigo Empleado",
-            "Fecha Check-in",
-            "Motivo Invalidez Check-in",
-            "Motivo Invalidez Check-out",
-            "Valido",
-        ]
-        print("\nMuestra de diferencias:")
-        print(
-            df.loc[valido_calculado != valido_origen, muestra_cols]
-            .head(10)
-            .to_string(index=False)
+    if isinstance(res_prod, pd.DataFrame):
+        errores += not control(
+            "Misma cantidad resumen directo/productivo",
+            len(res_prod) == len(resumen),
+        )
+        errores += not control(
+            "Mismos CodVend resumen directo/productivo",
+            set(res_prod["CodVend"].dropna().astype(int)) == cod_resumen,
         )
 
-    titulo("7. VEREDICTO")
+    titulo("10. VEREDICTO")
     duracion = time.perf_counter() - inicio
     if errores == 0:
-        print("STAGING_CHKIN APROBADO")
+        print("BUSINESS_RULES_CHECKIN APROBADO")
         print(
-            "No se detectaron perdidas de granularidad, duplicacion de KEY ni errores de tipado tecnico."
-        )
-        print(
-            "El control funcional del punto 6 es informativo y debe interpretarse antes de crear CORE_CHKIN."
+            "La clasificacion de ruta, los agregados por vendedor, los porcentajes "
+            "y la conservacion del universo maestro son consistentes."
         )
         print(f"Duracion total: {duracion:.2f} s")
         return 0
 
-    print("STAGING_CHKIN NO APROBADO")
-    print(f"Controles tecnicos fallidos: {errores}")
+    print("BUSINESS_RULES_CHECKIN NO APROBADO")
+    print(f"Controles fallidos: {errores}")
     print(f"Duracion total: {duracion:.2f} s")
     return 2
 
@@ -345,8 +486,8 @@ if __name__ == "__main__":
         print("\nAuditoria interrumpida por el usuario.")
         raise SystemExit(130)
     except Exception as exc:
-        print("\n" + "=" * 88)
-        print("ERROR NO CONTROLADO EN AU_CHKIN_STAGING")
-        print("=" * 88)
+        print("\n" + "=" * 96)
+        print("ERROR NO CONTROLADO EN AU_BUSINESS_RULES_CHECKIN")
+        print("=" * 96)
         print(f"{type(exc).__name__}: {exc}")
         raise

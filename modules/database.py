@@ -281,6 +281,765 @@ def guardar_dataframe_sql(df: pd.DataFrame, nombre_tabla: str, if_exists="replac
         conn.close()
 
 
+def asegurar_tabla_maestro_tp():
+    """
+    Crea la tabla maestro_tp si todavía no existe.
+
+    Contrato:
+        Anio             INTEGER
+        Mes              INTEGER
+        Taxonomia        TEXT
+        Obj_TP_Pepsico   INTEGER
+
+    Clave única lógica y física:
+        Anio + Mes + Taxonomia
+    """
+    conn = obtener_conexion()
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS maestro_tp (
+                Anio INTEGER NOT NULL,
+                Mes INTEGER NOT NULL CHECK (Mes BETWEEN 1 AND 12),
+                Taxonomia TEXT NOT NULL CHECK (Taxonomia IN ('A', 'B', 'C', 'D')),
+                Obj_TP_Pepsico INTEGER NOT NULL DEFAULT 0
+                    CHECK (Obj_TP_Pepsico >= 0),
+                PRIMARY KEY (Anio, Mes, Taxonomia)
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def guardar_maestro_tp(df: pd.DataFrame, anio, mes):
+    """
+    Valida y reemplaza de forma transaccional únicamente el período indicado
+    dentro de maestro_tp, preservando el resto del histórico.
+
+    Devuelve:
+        (True, mensaje) si la operación se confirma.
+        (False, mensaje) ante un error de contrato o persistencia.
+    """
+    columnas = ["Taxonomia", "Obj_TP_Pepsico"]
+    faltantes = [col for col in columnas if col not in df.columns]
+    if faltantes:
+        return False, (
+            "Faltan columnas obligatorias para maestro_tp: " + ", ".join(faltantes)
+        )
+
+    try:
+        anio_int = int(float(anio))
+        mes_int = int(float(mes))
+    except (TypeError, ValueError):
+        return False, "Anio y Mes deben ser valores numéricos válidos."
+
+    if mes_int < 1 or mes_int > 12:
+        return False, "Mes debe estar comprendido entre 1 y 12."
+
+    trabajo = df[columnas].copy()
+    trabajo["Taxonomia"] = trabajo["Taxonomia"].astype("string").str.strip().str.upper()
+    trabajo["Obj_TP_Pepsico"] = pd.to_numeric(
+        trabajo["Obj_TP_Pepsico"], errors="coerce"
+    )
+
+    if trabajo["Taxonomia"].isna().any():
+        return False, "Taxonomia contiene valores nulos."
+    if not trabajo["Taxonomia"].isin(["A", "B", "C", "D"]).all():
+        invalidas = sorted(
+            trabajo.loc[
+                ~trabajo["Taxonomia"].isin(["A", "B", "C", "D"]),
+                "Taxonomia",
+            ]
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+        return False, f"Taxonomías no válidas: {invalidas}."
+    if trabajo["Taxonomia"].duplicated().any():
+        duplicadas = sorted(
+            trabajo.loc[trabajo["Taxonomia"].duplicated(False), "Taxonomia"]
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+        return False, f"Taxonomías duplicadas: {duplicadas}."
+    if set(trabajo["Taxonomia"].tolist()) != {"A", "B", "C", "D"}:
+        return False, "El período debe contener exactamente las taxonomías A, B, C y D."
+    if trabajo["Obj_TP_Pepsico"].isna().any():
+        return False, "Obj_TP_Pepsico contiene valores vacíos o no numéricos."
+    if (trabajo["Obj_TP_Pepsico"] < 0).any():
+        return False, "Obj_TP_Pepsico no puede contener valores negativos."
+    if not (trabajo["Obj_TP_Pepsico"] % 1 == 0).all():
+        return False, "Obj_TP_Pepsico debe expresarse como cantidad entera de clientes."
+
+    trabajo["Obj_TP_Pepsico"] = trabajo["Obj_TP_Pepsico"].astype(int)
+    trabajo["Anio"] = anio_int
+    trabajo["Mes"] = mes_int
+    trabajo = trabajo[["Anio", "Mes", "Taxonomia", "Obj_TP_Pepsico"]]
+    trabajo = trabajo.sort_values("Taxonomia").reset_index(drop=True)
+
+    conn = obtener_conexion()
+    try:
+        conn.execute("BEGIN")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS maestro_tp (
+                Anio INTEGER NOT NULL,
+                Mes INTEGER NOT NULL CHECK (Mes BETWEEN 1 AND 12),
+                Taxonomia TEXT NOT NULL CHECK (Taxonomia IN ('A', 'B', 'C', 'D')),
+                Obj_TP_Pepsico INTEGER NOT NULL DEFAULT 0
+                    CHECK (Obj_TP_Pepsico >= 0),
+                PRIMARY KEY (Anio, Mes, Taxonomia)
+            )
+            """
+        )
+        conn.execute(
+            "DELETE FROM maestro_tp WHERE Anio = ? AND Mes = ?",
+            (anio_int, mes_int),
+        )
+        conn.executemany(
+            """
+            INSERT INTO maestro_tp
+                (Anio, Mes, Taxonomia, Obj_TP_Pepsico)
+            VALUES (?, ?, ?, ?)
+            """,
+            list(trabajo.itertuples(index=False, name=None)),
+        )
+        conn.commit()
+        return (
+            True,
+            f"Maestro TP guardado para {mes_int:02d}/{anio_int}: "
+            f"{len(trabajo)} taxonomías.",
+        )
+    except Exception as exc:
+        conn.rollback()
+        return False, f"Error al guardar maestro_tp: {exc}"
+    finally:
+        conn.close()
+
+
+def asegurar_tablas_objetivos_tp():
+    """Crea las tablas congeladas de objetivos TP sin alterar maestro_tp."""
+    conn = obtener_conexion()
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS objetivos_tp_periodo (
+                Anio INTEGER NOT NULL,
+                Mes INTEGER NOT NULL CHECK (Mes BETWEEN 1 AND 12),
+                Taxonomia TEXT NOT NULL CHECK (Taxonomia IN ('A','B','C','D')),
+                Obj_TP_Pepsico INTEGER NOT NULL CHECK (Obj_TP_Pepsico >= 0),
+                Factor_Ajuste REAL NOT NULL,
+                Objetivo_Base_Ajustado INTEGER NOT NULL CHECK (Objetivo_Base_Ajustado >= 0),
+                Adicional_Global INTEGER NOT NULL DEFAULT 0 CHECK (Adicional_Global >= 0),
+                Objetivo_Final_Taxonomia INTEGER NOT NULL CHECK (Objetivo_Final_Taxonomia >= 0),
+                Potencial_Taxonomia INTEGER NOT NULL CHECK (Potencial_Taxonomia >= 0),
+                EstadoSnapshot TEXT NOT NULL,
+                FechaGeneracion TEXT NOT NULL,
+                FechaModificacion TEXT,
+                PRIMARY KEY (Anio, Mes, Taxonomia)
+            );
+
+            CREATE TABLE IF NOT EXISTS objetivos_tp_vendedor (
+                Anio INTEGER NOT NULL,
+                Mes INTEGER NOT NULL CHECK (Mes BETWEEN 1 AND 12),
+                CodVendedor INTEGER NOT NULL,
+                Vendedor_Snapshot TEXT,
+                Supervisor_Snapshot TEXT,
+                Taxonomia TEXT NOT NULL CHECK (Taxonomia IN ('A','B','C','D')),
+                Clientes_Potenciales_Snapshot INTEGER NOT NULL
+                    CHECK (Clientes_Potenciales_Snapshot >= 0),
+                Objetivo_Taxonomia_Final INTEGER NOT NULL
+                    CHECK (Objetivo_Taxonomia_Final >= 0),
+                Obj_TP_Asignado INTEGER NOT NULL CHECK (Obj_TP_Asignado >= 0),
+                Obj_TP_Manual INTEGER CHECK (Obj_TP_Manual IS NULL OR Obj_TP_Manual >= 0),
+                Motivo_Modificacion TEXT,
+                FechaGeneracion TEXT NOT NULL,
+                FechaModificacion TEXT,
+                PRIMARY KEY (Anio, Mes, CodVendedor, Taxonomia)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_obj_tp_vendedor_periodo
+                ON objetivos_tp_vendedor (Anio, Mes);
+            CREATE INDEX IF NOT EXISTS idx_obj_tp_vendedor_taxonomia
+                ON objetivos_tp_vendedor (Anio, Mes, Taxonomia);
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _resolver_columna_tp(columnas, candidatos, etiqueta):
+    mapa = {str(c).strip().lower(): c for c in columnas}
+    for candidato in candidatos:
+        encontrado = mapa.get(str(candidato).strip().lower())
+        if encontrado is not None:
+            return encontrado
+    raise ValueError(
+        f"No se encontró la columna {etiqueta}. Candidatos={candidatos}; "
+        f"columnas disponibles={list(columnas)}."
+    )
+
+
+def _asignar_entero_con_topes_tp(df, columna_capacidad, objetivo_total):
+    """Reparte enteros proporcionalmente, sin exceder capacidad y conciliando el total."""
+    resultado = df.copy().reset_index(drop=True)
+    resultado[columna_capacidad] = (
+        pd.to_numeric(resultado[columna_capacidad], errors="coerce")
+        .fillna(0)
+        .astype(int)
+    )
+    objetivo_total = int(objetivo_total)
+    capacidad_total = int(resultado[columna_capacidad].sum())
+    if capacidad_total < objetivo_total:
+        raise ValueError(
+            f"Objetivo no factible: objetivo={objetivo_total}, capacidad={capacidad_total}."
+        )
+    if objetivo_total == 0:
+        resultado["Obj_TP_Asignado"] = 0
+        return resultado
+
+    peso = resultado[columna_capacidad] / capacidad_total
+    teorico = peso * objetivo_total
+    asignado = teorico.astype(int)
+    asignado = asignado.clip(upper=resultado[columna_capacidad])
+    faltan = objetivo_total - int(asignado.sum())
+
+    while faltan > 0:
+        capacidad_libre = resultado[columna_capacidad] - asignado
+        elegibles = capacidad_libre > 0
+        if not elegibles.any():
+            raise ValueError(
+                f"No existe capacidad suficiente para distribuir {faltan} unidades TP."
+            )
+        residuos = (teorico - asignado).where(elegibles, -1.0)
+        orden = sorted(
+            resultado.index[elegibles].tolist(),
+            key=lambda i: (
+                -float(residuos.loc[i]),
+                -int(capacidad_libre.loc[i]),
+                int(resultado.loc[i, "CodVendedor"]),
+            ),
+        )
+        progreso = 0
+        for i in orden:
+            if faltan <= 0:
+                break
+            if asignado.loc[i] < resultado.loc[i, columna_capacidad]:
+                asignado.loc[i] += 1
+                faltan -= 1
+                progreso += 1
+        if progreso == 0:
+            raise ValueError("El reparto TP quedó bloqueado sin capacidad marginal.")
+
+    resultado["Obj_TP_Asignado"] = asignado.astype(int)
+    return resultado
+
+
+def _objetivos_base_tp(maestro):
+    factores = {"A": 1.20, "B": 1.20, "C": 1.05, "D": 1.05}
+    prioridad_empate = {"B": 0, "A": 1, "C": 2, "D": 3}
+    trabajo = maestro.copy().sort_values("Taxonomia").reset_index(drop=True)
+    trabajo["Factor_Ajuste"] = trabajo["Taxonomia"].map(factores)
+    trabajo["Base_Decimal"] = trabajo["Obj_TP_Pepsico"] * trabajo["Factor_Ajuste"]
+    trabajo["Objetivo_Base_Ajustado"] = trabajo["Base_Decimal"].astype(int)
+    objetivo_entero = int(round(float(trabajo["Base_Decimal"].sum())))
+    faltan = objetivo_entero - int(trabajo["Objetivo_Base_Ajustado"].sum())
+    trabajo["Resto"] = trabajo["Base_Decimal"] - trabajo["Objetivo_Base_Ajustado"]
+    orden = sorted(
+        trabajo.index.tolist(),
+        key=lambda i: (
+            -float(trabajo.loc[i, "Resto"]),
+            prioridad_empate[str(trabajo.loc[i, "Taxonomia"])],
+        ),
+    )
+    for i in orden[:faltan]:
+        trabajo.loc[i, "Objetivo_Base_Ajustado"] += 1
+    return trabajo
+
+
+def generar_snapshot_objetivos_tp(anio, mes):
+    """
+    Genera una única vez los objetivos TP congelados.
+    A/B reciben +20%; C/D +5%. El adicional para alcanzar +20% global
+    se distribuye solo entre C/D según la capacidad libre observada en ese momento.
+    """
+    anio_int, mes_int = int(float(anio)), int(float(mes))
+    asegurar_tablas_objetivos_tp()
+    conn = obtener_conexion()
+    try:
+        existente = conn.execute(
+            "SELECT COUNT(*) FROM objetivos_tp_vendedor WHERE Anio=? AND Mes=?",
+            (anio_int, mes_int),
+        ).fetchone()[0]
+        if existente:
+            return False, (
+                f"El snapshot TP {mes_int:02d}/{anio_int} ya existe. "
+                "No se recalculó ni se modificó."
+            )
+
+        maestro = pd.read_sql_query(
+            """
+            SELECT Anio, Mes, Taxonomia, Obj_TP_Pepsico
+            FROM maestro_tp
+            WHERE Anio=? AND Mes=?
+            ORDER BY Taxonomia
+            """,
+            conn,
+            params=(anio_int, mes_int),
+        )
+        if set(maestro.get("Taxonomia", pd.Series(dtype=str)).astype(str)) != {
+            "A",
+            "B",
+            "C",
+            "D",
+        }:
+            return (
+                False,
+                "maestro_tp debe contener exactamente A, B, C y D para el período.",
+            )
+        maestro["Obj_TP_Pepsico"] = pd.to_numeric(
+            maestro["Obj_TP_Pepsico"], errors="coerce"
+        )
+        if maestro["Obj_TP_Pepsico"].isna().any():
+            return False, "maestro_tp contiene objetivos no numéricos."
+        maestro["Obj_TP_Pepsico"] = maestro["Obj_TP_Pepsico"].astype(int)
+
+        universo = pd.read_sql_query("SELECT * FROM universo", conn)
+        if universo.empty:
+            return False, "La tabla universo está vacía."
+        col_cliente = _resolver_columna_tp(
+            universo.columns,
+            ["Codigo", "Cliente", "Cliente_id", "Codigo Cliente"],
+            "cliente",
+        )
+        col_vendedor = _resolver_columna_tp(
+            universo.columns,
+            ["codven", "CodVendedor", "Codigo_Vendedor", "Vendedor"],
+            "vendedor",
+        )
+        col_taxonomia = _resolver_columna_tp(
+            universo.columns,
+            ["SegmentoClienteCodigo", "Taxonomia", "Taxonomía", "Segmento"],
+            "taxonomía",
+        )
+        col_subramo = next(
+            (c for c in universo.columns if str(c).strip().lower() == "subramo"),
+            None,
+        )
+        u = universo[
+            [col_cliente, col_vendedor, col_taxonomia]
+            + ([col_subramo] if col_subramo else [])
+        ].copy()
+        if col_subramo:
+            sub = u[col_subramo].fillna("").astype(str).str.strip().str.upper()
+            u = u[~sub.isin(["EMPLEADOS", "EMPLOYEES"])].copy()
+        u["CodVendedor"] = pd.to_numeric(u[col_vendedor], errors="coerce").astype(
+            "Int64"
+        )
+        u["Cliente"] = pd.to_numeric(u[col_cliente], errors="coerce").astype("Int64")
+        u["Taxonomia"] = u[col_taxonomia].fillna("").astype(str).str.strip().str.upper()
+        u = u.dropna(subset=["CodVendedor", "Cliente"])
+        u = u[u["Taxonomia"].isin(["A", "B", "C", "D"])].copy()
+        u = u.drop_duplicates(["CodVendedor", "Cliente", "Taxonomia"])
+        potencial = u.groupby(["CodVendedor", "Taxonomia"], as_index=False).agg(
+            Clientes_Potenciales_Snapshot=("Cliente", "nunique")
+        )
+        if potencial.empty:
+            return False, "No se encontraron clientes potenciales A/B/C/D por vendedor."
+
+        vendedores = pd.read_sql_query("SELECT * FROM maestro_vendedores", conn)
+        if not vendedores.empty:
+            if "Anio" in vendedores.columns and "Mes" in vendedores.columns:
+                vendedores = vendedores[
+                    (vendedores["Anio"].astype(str) == str(anio_int))
+                    & (vendedores["Mes"].astype(str) == str(mes_int))
+                ].copy()
+            cv = _resolver_columna_tp(
+                vendedores.columns,
+                ["Codigo_Vendedor", "CodVendedor", "CodVend"],
+                "código vendedor maestro",
+            )
+            nv = next(
+                (c for c in ["Nombre_Vendedor", "Nombre"] if c in vendedores.columns),
+                None,
+            )
+            sv = next(
+                (c for c in ["Supervisor", "SUP"] if c in vendedores.columns), None
+            )
+            vm = pd.DataFrame(
+                {
+                    "CodVendedor": pd.to_numeric(
+                        vendedores[cv], errors="coerce"
+                    ).astype("Int64")
+                }
+            )
+            vm["Vendedor_Snapshot"] = (
+                vendedores[nv].astype(str).str.strip() if nv else ""
+            )
+            vm["Supervisor_Snapshot"] = (
+                vendedores[sv].astype(str).str.strip() if sv else ""
+            )
+            vm = vm.dropna(subset=["CodVendedor"]).drop_duplicates("CodVendedor")
+            potencial = potencial.merge(vm, on="CodVendedor", how="left")
+        else:
+            potencial["Vendedor_Snapshot"] = ""
+            potencial["Supervisor_Snapshot"] = ""
+        potencial[["Vendedor_Snapshot", "Supervisor_Snapshot"]] = potencial[
+            ["Vendedor_Snapshot", "Supervisor_Snapshot"]
+        ].fillna("")
+
+        base = _objetivos_base_tp(maestro)
+        pot_tax = potencial.groupby("Taxonomia", as_index=False)[
+            "Clientes_Potenciales_Snapshot"
+        ].sum()
+        base = base.merge(pot_tax, on="Taxonomia", how="left")
+        base["Clientes_Potenciales_Snapshot"] = (
+            base["Clientes_Potenciales_Snapshot"].fillna(0).astype(int)
+        )
+        minimo_global = int(round(float(maestro["Obj_TP_Pepsico"].sum()) * 1.20))
+        adicional_total = minimo_global - int(base["Objetivo_Base_Ajustado"].sum())
+        if adicional_total < 0:
+            adicional_total = 0
+        base["Adicional_Global"] = 0
+        libres = {}
+        for tax in ["C", "D"]:
+            fila = base.loc[base["Taxonomia"] == tax].iloc[0]
+            libres[tax] = max(
+                int(fila["Clientes_Potenciales_Snapshot"])
+                - int(fila["Objetivo_Base_Ajustado"]),
+                0,
+            )
+        if sum(libres.values()) < adicional_total:
+            return False, (
+                f"Objetivo global no factible: adicional requerido={adicional_total}, "
+                f"capacidad libre C+D={sum(libres.values())}."
+            )
+        if adicional_total:
+            teoricos = {
+                tax: adicional_total * libres[tax] / sum(libres.values())
+                for tax in ["C", "D"]
+            }
+            adicionales = {
+                tax: min(int(teoricos[tax]), libres[tax]) for tax in ["C", "D"]
+            }
+            faltan = adicional_total - sum(adicionales.values())
+            while faltan > 0:
+                orden = sorted(
+                    ["C", "D"],
+                    key=lambda tax: (
+                        -(teoricos[tax] - adicionales[tax]),
+                        -(libres[tax] - adicionales[tax]),
+                        tax,
+                    ),
+                )
+                progreso = False
+                for tax in orden:
+                    if faltan and adicionales[tax] < libres[tax]:
+                        adicionales[tax] += 1
+                        faltan -= 1
+                        progreso = True
+                if not progreso:
+                    return (
+                        False,
+                        "No se pudo conciliar el adicional global entre C y D.",
+                    )
+            for tax, valor in adicionales.items():
+                base.loc[base["Taxonomia"] == tax, "Adicional_Global"] = int(valor)
+
+        base["Objetivo_Final_Taxonomia"] = (
+            base["Objetivo_Base_Ajustado"] + base["Adicional_Global"]
+        ).astype(int)
+        if (
+            base["Objetivo_Final_Taxonomia"] > base["Clientes_Potenciales_Snapshot"]
+        ).any():
+            detalle = base.loc[
+                base["Objetivo_Final_Taxonomia"]
+                > base["Clientes_Potenciales_Snapshot"],
+                [
+                    "Taxonomia",
+                    "Objetivo_Final_Taxonomia",
+                    "Clientes_Potenciales_Snapshot",
+                ],
+            ].to_dict("records")
+            return False, f"Objetivos por taxonomía no factibles: {detalle}."
+
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        filas_vendedor = []
+        for _, taxrow in base.iterrows():
+            tax = str(taxrow["Taxonomia"])
+            grupo = potencial[potencial["Taxonomia"] == tax].copy()
+            grupo = _asignar_entero_con_topes_tp(
+                grupo,
+                "Clientes_Potenciales_Snapshot",
+                int(taxrow["Objetivo_Final_Taxonomia"]),
+            )
+            grupo["Anio"] = anio_int
+            grupo["Mes"] = mes_int
+            grupo["Objetivo_Taxonomia_Final"] = int(taxrow["Objetivo_Final_Taxonomia"])
+            grupo["Obj_TP_Manual"] = pd.NA
+            grupo["Motivo_Modificacion"] = pd.NA
+            grupo["FechaGeneracion"] = fecha
+            grupo["FechaModificacion"] = pd.NA
+            filas_vendedor.append(grupo)
+        detalle = pd.concat(filas_vendedor, ignore_index=True)
+        cols_det = [
+            "Anio",
+            "Mes",
+            "CodVendedor",
+            "Vendedor_Snapshot",
+            "Supervisor_Snapshot",
+            "Taxonomia",
+            "Clientes_Potenciales_Snapshot",
+            "Objetivo_Taxonomia_Final",
+            "Obj_TP_Asignado",
+            "Obj_TP_Manual",
+            "Motivo_Modificacion",
+            "FechaGeneracion",
+            "FechaModificacion",
+        ]
+        detalle = detalle[cols_det]
+        if (
+            detalle["Obj_TP_Asignado"] > detalle["Clientes_Potenciales_Snapshot"]
+        ).any():
+            return (
+                False,
+                "Control fallido: un objetivo vendedor supera su potencial snapshot.",
+            )
+        conciliacion = detalle.groupby("Taxonomia")["Obj_TP_Asignado"].sum()
+        esperados = base.set_index("Taxonomia")["Objetivo_Final_Taxonomia"]
+        if not conciliacion.equals(esperados.astype(int)):
+            return (
+                False,
+                f"Conciliación por taxonomía fallida: asignado={conciliacion.to_dict()}, esperado={esperados.to_dict()}.",
+            )
+        if int(detalle["Obj_TP_Asignado"].sum()) < minimo_global:
+            return False, "Control global +20% no cumplido."
+
+        periodo = base[
+            [
+                "Taxonomia",
+                "Obj_TP_Pepsico",
+                "Factor_Ajuste",
+                "Objetivo_Base_Ajustado",
+                "Adicional_Global",
+                "Objetivo_Final_Taxonomia",
+                "Clientes_Potenciales_Snapshot",
+            ]
+        ].rename(columns={"Clientes_Potenciales_Snapshot": "Potencial_Taxonomia"})
+        periodo["Anio"] = anio_int
+        periodo["Mes"] = mes_int
+        periodo["EstadoSnapshot"] = "CONCILIADO"
+        periodo["FechaGeneracion"] = fecha
+        periodo["FechaModificacion"] = pd.NA
+        periodo = periodo[
+            [
+                "Anio",
+                "Mes",
+                "Taxonomia",
+                "Obj_TP_Pepsico",
+                "Factor_Ajuste",
+                "Objetivo_Base_Ajustado",
+                "Adicional_Global",
+                "Objetivo_Final_Taxonomia",
+                "Potencial_Taxonomia",
+                "EstadoSnapshot",
+                "FechaGeneracion",
+                "FechaModificacion",
+            ]
+        ]
+
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            periodo.to_sql(
+                "objetivos_tp_periodo", conn, if_exists="append", index=False
+            )
+            detalle.to_sql(
+                "objetivos_tp_vendedor", conn, if_exists="append", index=False
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return True, (
+            f"Snapshot TP {mes_int:02d}/{anio_int} generado y congelado: "
+            f"objetivo total={int(detalle['Obj_TP_Asignado'].sum())}, "
+            f"filas vendedor-taxonomía={len(detalle)}."
+        )
+    except Exception as exc:
+        return False, f"Error al generar snapshot TP: {exc}"
+    finally:
+        conn.close()
+
+
+def obtener_snapshot_objetivos_tp(anio, mes):
+    asegurar_tablas_objetivos_tp()
+    conn = obtener_conexion()
+    try:
+        return pd.read_sql_query(
+            """
+            SELECT *, COALESCE(Obj_TP_Manual, Obj_TP_Asignado) AS Obj_TP_Final
+            FROM objetivos_tp_vendedor
+            WHERE Anio=? AND Mes=?
+            ORDER BY Supervisor_Snapshot, Vendedor_Snapshot, Taxonomia
+            """,
+            conn,
+            params=(int(float(anio)), int(float(mes))),
+        )
+    finally:
+        conn.close()
+
+
+def obtener_control_objetivos_tp(anio, mes):
+    asegurar_tablas_objetivos_tp()
+    conn = obtener_conexion()
+    try:
+        periodo = pd.read_sql_query(
+            "SELECT * FROM objetivos_tp_periodo WHERE Anio=? AND Mes=? ORDER BY Taxonomia",
+            conn,
+            params=(int(float(anio)), int(float(mes))),
+        )
+        detalle = pd.read_sql_query(
+            """
+            SELECT Taxonomia,
+                   SUM(Obj_TP_Asignado) AS Objetivo_Asignado_Original,
+                   SUM(COALESCE(Obj_TP_Manual, Obj_TP_Asignado)) AS Objetivo_Final,
+                   SUM(Clientes_Potenciales_Snapshot) AS Potencial_Snapshot
+            FROM objetivos_tp_vendedor
+            WHERE Anio=? AND Mes=?
+            GROUP BY Taxonomia
+            ORDER BY Taxonomia
+            """,
+            conn,
+            params=(int(float(anio)), int(float(mes))),
+        )
+        return periodo, detalle
+    finally:
+        conn.close()
+
+
+def guardar_modificaciones_objetivos_tp(df_editado, anio, mes):
+    """Actualiza solo las filas recibidas y conserva intacto el resto del snapshot."""
+    requeridas = ["CodVendedor", "Taxonomia", "Obj_TP_Manual", "Motivo_Modificacion"]
+    faltantes = [c for c in requeridas if c not in df_editado.columns]
+    if faltantes:
+        return False, "Faltan columnas: " + ", ".join(faltantes)
+    anio_int, mes_int = int(float(anio)), int(float(mes))
+    actual = obtener_snapshot_objetivos_tp(anio_int, mes_int)
+    if actual.empty:
+        return False, "No existe snapshot TP para el período seleccionado."
+
+    cambios = df_editado[requeridas].copy()
+    cambios["CodVendedor"] = pd.to_numeric(
+        cambios["CodVendedor"], errors="coerce"
+    ).astype("Int64")
+    cambios["Taxonomia"] = cambios["Taxonomia"].astype(str).str.strip().str.upper()
+    cambios["Obj_TP_Manual"] = pd.to_numeric(cambios["Obj_TP_Manual"], errors="coerce")
+    if cambios.duplicated(["CodVendedor", "Taxonomia"]).any():
+        return False, "La edición contiene claves vendedor-taxonomía duplicadas."
+
+    claves = ["CodVendedor", "Taxonomia"]
+    referencia = actual[claves + ["Clientes_Potenciales_Snapshot", "Obj_TP_Asignado"]]
+    cambios = cambios.merge(referencia, on=claves, how="left")
+    if cambios["Clientes_Potenciales_Snapshot"].isna().any():
+        return False, "Hay filas editadas que no pertenecen al snapshot persistido."
+    final_cambio = cambios["Obj_TP_Manual"].fillna(cambios["Obj_TP_Asignado"])
+    if (final_cambio < 0).any() or not (final_cambio % 1 == 0).all():
+        return False, "Los objetivos finales deben ser enteros no negativos."
+    if (final_cambio > cambios["Clientes_Potenciales_Snapshot"]).any():
+        malos = cambios.loc[
+            final_cambio > cambios["Clientes_Potenciales_Snapshot"],
+            [
+                "CodVendedor",
+                "Taxonomia",
+                "Clientes_Potenciales_Snapshot",
+                "Obj_TP_Manual",
+            ],
+        ].to_dict("records")
+        return False, f"Objetivos manuales superiores al potencial snapshot: {malos}."
+    modificadas = cambios["Obj_TP_Manual"].notna()
+    motivo = cambios["Motivo_Modificacion"].fillna("").astype(str).str.strip()
+    if (modificadas & motivo.eq("")).any():
+        return False, "Toda modificación manual requiere Motivo_Modificacion."
+
+    # Simulación completa antes de escribir: solo reemplaza las claves editadas.
+    simulado = actual.copy().set_index(claves)
+    for _, fila in cambios.iterrows():
+        clave = (int(fila["CodVendedor"]), fila["Taxonomia"])
+        manual = pd.NA if pd.isna(fila["Obj_TP_Manual"]) else int(fila["Obj_TP_Manual"])
+        simulado.loc[clave, "Obj_TP_Manual"] = manual
+        simulado.loc[clave, "Motivo_Modificacion"] = (
+            pd.NA if pd.isna(manual) else str(fila["Motivo_Modificacion"]).strip()
+        )
+    simulado = simulado.reset_index()
+    simulado["Obj_TP_Final"] = (
+        pd.to_numeric(simulado["Obj_TP_Manual"], errors="coerce")
+        .fillna(simulado["Obj_TP_Asignado"])
+        .astype(int)
+    )
+
+    conn = obtener_conexion()
+    try:
+        maestro_total = (
+            conn.execute(
+                "SELECT SUM(Obj_TP_Pepsico) FROM maestro_tp WHERE Anio=? AND Mes=?",
+                (anio_int, mes_int),
+            ).fetchone()[0]
+            or 0
+        )
+        minimo = int(round(float(maestro_total) * 1.20))
+        suma_final = int(simulado["Obj_TP_Final"].sum())
+        ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        estado = "CONCILIADO" if suma_final >= minimo else "OBSERVADO"
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            for _, fila in cambios.iterrows():
+                manual = (
+                    None
+                    if pd.isna(fila["Obj_TP_Manual"])
+                    else int(fila["Obj_TP_Manual"])
+                )
+                mot = (
+                    None if manual is None else str(fila["Motivo_Modificacion"]).strip()
+                )
+                fecha_mod = None if manual is None else ahora
+                conn.execute(
+                    """
+                    UPDATE objetivos_tp_vendedor
+                    SET Obj_TP_Manual=?, Motivo_Modificacion=?, FechaModificacion=?
+                    WHERE Anio=? AND Mes=? AND CodVendedor=? AND Taxonomia=?
+                    """,
+                    (
+                        manual,
+                        mot,
+                        fecha_mod,
+                        anio_int,
+                        mes_int,
+                        int(fila["CodVendedor"]),
+                        fila["Taxonomia"],
+                    ),
+                )
+            conn.execute(
+                "UPDATE objetivos_tp_periodo SET EstadoSnapshot=?, FechaModificacion=? WHERE Anio=? AND Mes=?",
+                (estado, ahora, anio_int, mes_int),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return True, (
+            f"Modificaciones TP guardadas. Estado={estado}; total final={suma_final}; "
+            f"mínimo global={minimo}."
+        )
+    except Exception as exc:
+        return False, f"Error al guardar modificaciones TP: {exc}"
+    finally:
+        conn.close()
+
+
 def tablas_existen() -> bool:
     """Verifica de forma robusta si las tablas operativas existen y contienen registros."""
     conn = obtener_conexion()
@@ -2056,6 +2815,7 @@ def importar_maestros_multisolapa_atomica(
         "Maestro_Segmentos": "maestro_segmentos",
         "Maestro_Marcas_CEBE": "maestro_marcas_cebe",
         "Maestro_CCC_Config": "maestro_ccc",
+        "Maestro_TP_Config": "maestro_tp",
         "Maestro_Innovaciones": "maestro_innovaciones",
         "Objetivos_Calibrados": "objetivos_vendedores",
     }

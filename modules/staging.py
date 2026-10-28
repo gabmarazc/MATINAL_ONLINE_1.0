@@ -352,21 +352,12 @@ def obtener_staging_maestros():
 @st.cache_data(show_spinner=False)
 def obtener_staging_chkin():
     """
-    Capa Staging (Técnica Pura): ingesta exclusiva desde SQLite.chkin.
+    Capa STAGING tecnica de CHKIN.
 
-    Responsabilidades:
-    - conservar la granularidad original de una fila por evento de visita;
-    - normalizar identificadores relacionales sin aplicar reglas comerciales;
-    - tipar Fecha Check-in y Fecha Check-out como datetime;
-    - convertir Tiempo en PDV a timedelta;
-    - normalizar blancos/nulos de campos de texto;
-    - exponer coordenadas RAW sin interpretar geolocalización.
-
-    No determina si el check-in, check-out o la visita son válidos. Esa
-    interpretación corresponde a CORE.
+    Lee exclusivamente SQLite.chkin, conserva una fila por evento y realiza
+    solo normalizacion tecnica. No calcula validez operativa ni KPI.
     """
     t0 = time.perf_counter()
-
     columnas = [
         "Codigo Cliente",
         "Cliente",
@@ -408,7 +399,7 @@ def obtener_staging_chkin():
 
     if df_raw.empty:
         print(
-            f"[PERF_CORE] obtener_staging_chkin (vacío) -> "
+            f"[PERF_CORE] obtener_staging_chkin (vacio) -> "
             f"{time.perf_counter() - t0:.4f} s"
         )
         return pd.DataFrame(columns=columnas)
@@ -416,32 +407,27 @@ def obtener_staging_chkin():
     faltantes = [col for col in columnas if col not in df_raw.columns]
     if faltantes:
         raise ValueError(
-            "SQLite.chkin no cumple el contrato esperado por STAGING. "
+            "SQLite.chkin no cumple el contrato esperado por STAGING_CHKIN. "
             f"Columnas faltantes: {faltantes}."
         )
 
     df = df_raw[columnas].copy()
 
-    # Identificador de cliente: numérico y nullable para relaciones posteriores.
     df["Codigo Cliente"] = pd.to_numeric(df["Codigo Cliente"], errors="coerce").astype(
         "Int64"
     )
 
-    # Codigo Empleado permanece como texto porque CHKIN contiene también IDs
-    # alfanuméricos. Supervisor se preserva como texto nullable por el mismo
-    # principio técnico: STAGING no interpreta su semántica.
     for col in ["Codigo Empleado", "Supervisor"]:
         serie = df[col].astype("string").str.strip()
-        df[col] = serie.mask(serie.isin(["", "nan", "None", "<NA>"]), pd.NA)
+        df[col] = serie.mask(
+            serie.isna() | serie.str.upper().isin(["", "NAN", "NONE", "NAT", "<NA>"]),
+            pd.NA,
+        )
 
-    # Fechas completas: se conserva la precisión temporal almacenada en SQLite.
     df["Fecha Check-in"] = pd.to_datetime(df["Fecha Check-in"], errors="coerce")
     df["Fecha Check-out"] = pd.to_datetime(df["Fecha Check-out"], errors="coerce")
-
-    # Duración técnica; no depende de Valido ni de los motivos de invalidez.
     df["Tiempo en PDV"] = pd.to_timedelta(df["Tiempo en PDV"], errors="coerce")
 
-    # Normalización técnica de texto. No se interpreta ninguna condición funcional.
     columnas_texto = [
         "Cliente",
         "Coordenadas Check-in",
@@ -453,7 +439,10 @@ def obtener_staging_chkin():
     ]
     for col in columnas_texto:
         serie = df[col].astype("string").str.strip()
-        df[col] = serie.mask(serie.isin(["", "nan", "None", "<NA>"]), pd.NA)
+        df[col] = serie.mask(
+            serie.isna() | serie.str.upper().isin(["", "NAN", "NONE", "NAT", "<NA>"]),
+            pd.NA,
+        )
 
     print(
         f"[PERF_CORE] obtener_staging_chkin -> "
