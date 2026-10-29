@@ -8,6 +8,7 @@ import streamlit as st
 
 from modules import database as db
 from modules.business_rules.business_rules_gerencial import obtener_motor_gerencial
+from modules.business_rules.business_rules_tp import generar_business_rules_tp
 from modules.rep_ccc_core import obtener_matriz_ccc_comercial
 from modules.rep_MN_core import obtener_matriz_mn_comercial
 
@@ -413,6 +414,98 @@ def construir_bloque_mn(df_mn: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def construir_bloque_tp_gerencial(
+    anio: int, mes: int, supervisor: str = "TODOS"
+) -> pd.DataFrame:
+    """Cruza el realizado TP correcto con el objetivo corporativo fijo Obj_TP_Pepsico."""
+    try:
+        br_tp = generar_business_rules_tp()
+    except Exception:
+        return pd.DataFrame()
+    if not isinstance(br_tp, dict):
+        return pd.DataFrame()
+    detalle = br_tp.get("df_filtrado", br_tp.get("detalle_tp", pd.DataFrame()))
+    if detalle is None or detalle.empty:
+        return pd.DataFrame()
+    trabajo = detalle.copy()
+    if supervisor != "TODOS":
+        col_sup = next(
+            (
+                c
+                for c in ["Supervisor", "SUP", "Supervisor_Snapshot"]
+                if c in trabajo.columns
+            ),
+            None,
+        )
+        if col_sup is not None:
+            trabajo = trabajo[
+                trabajo[col_sup].fillna("").astype(str).str.strip()
+                == str(supervisor).strip()
+            ].copy()
+    faltantes = [
+        c for c in ["Taxonomia", "Cliente_id", "Es_TP"] if c not in trabajo.columns
+    ]
+    if faltantes:
+        raise ValueError(
+            "TP Gerencial: faltan columnas del realizado: " + ", ".join(faltantes)
+        )
+    trabajo["Taxonomia"] = (
+        trabajo["Taxonomia"].fillna("").astype(str).str.strip().str.upper()
+    )
+    trabajo = trabajo[trabajo["Taxonomia"].isin(["A", "B", "C", "D"])].copy()
+    trabajo["Es_TP"] = trabajo["Es_TP"].fillna(False).astype(bool)
+    realizado = trabajo.groupby("Taxonomia", as_index=False).agg(
+        Clientes_Censados=("Cliente_id", "nunique"),
+        Clientes_TP=("Es_TP", lambda x: int(x.sum())),
+    )
+    maestro = db.cargar_tabla_sql(
+        "SELECT Anio, Mes, Taxonomia, Obj_TP_Pepsico FROM maestro_tp"
+    )
+    if maestro is None or maestro.empty:
+        return pd.DataFrame()
+    maestro = maestro[
+        (maestro["Anio"].astype(str) == str(anio))
+        & (maestro["Mes"].astype(str) == str(mes))
+    ].copy()
+    maestro["Taxonomia"] = (
+        maestro["Taxonomia"].fillna("").astype(str).str.strip().str.upper()
+    )
+    maestro["Obj_TP_Pepsico"] = (
+        pd.to_numeric(maestro["Obj_TP_Pepsico"], errors="coerce").fillna(0).astype(int)
+    )
+    objetivos = maestro.groupby("Taxonomia", as_index=False)["Obj_TP_Pepsico"].sum()
+    resultado = (
+        pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"]})
+        .merge(realizado, on="Taxonomia", how="left")
+        .merge(objetivos, on="Taxonomia", how="left")
+    )
+    cols = ["Clientes_Censados", "Clientes_TP", "Obj_TP_Pepsico"]
+    resultado[cols] = resultado[cols].fillna(0).astype(int)
+    resultado["Porcentaje_TP_Sobre_Censados"] = (
+        resultado["Clientes_TP"]
+        .div(resultado["Clientes_Censados"].replace(0, pd.NA))
+        .mul(100)
+        .fillna(0.0)
+    )
+    resultado["Cumplimiento_TP_Pepsico_Pct"] = (
+        resultado["Clientes_TP"]
+        .div(resultado["Obj_TP_Pepsico"].replace(0, pd.NA))
+        .mul(100)
+        .fillna(0.0)
+    )
+    resultado["Gap_TP_Pepsico"] = (
+        (resultado["Obj_TP_Pepsico"] - resultado["Clientes_TP"])
+        .clip(lower=0)
+        .astype(int)
+    )
+    resultado["Excedente_TP_Pepsico"] = (
+        (resultado["Clientes_TP"] - resultado["Obj_TP_Pepsico"])
+        .clip(lower=0)
+        .astype(int)
+    )
+    return resultado.sort_values("Taxonomia").reset_index(drop=True)
+
+
 # ==========================================================
 # MOTOR DEL REPORTE (BASE CACHEADA + DERIVADO LIVIANO)
 # ==========================================================
@@ -437,12 +530,14 @@ def obtener_motor_gerencial_base(
 
     df_ccc = obtener_matriz_ccc_comercial(int(anio), int(mes), filtros)
     df_mn = obtener_matriz_mn_comercial(int(anio), int(mes), filtros)
+    df_tp = construir_bloque_tp_gerencial(int(anio), int(mes), supervisor)
 
     return {
         "kilos_raw": motor_base.get("kilos", pd.DataFrame()),
         "gross_raw": motor_base.get("gross", pd.DataFrame()),
         "ccc": construir_bloque_ccc(df_ccc, maestro_ccc),
         "mn": construir_bloque_mn(df_mn),
+        "tp": df_tp,
     }
 
 
@@ -468,6 +563,7 @@ def construir_motor_gerencial_escenario(
         ),
         "ccc": base.get("ccc", pd.DataFrame()),
         "mn": base.get("mn", pd.DataFrame()),
+        "tp": base.get("tp", pd.DataFrame()),
         "modo_proyeccion": modo_proyeccion,
     }
 
@@ -792,6 +888,71 @@ def _render_pestana_mn(df_mn: pd.DataFrame):
         st.dataframe(df_filtrado, width="stretch", hide_index=True)
 
 
+def _render_pestana_tp(df_tp: pd.DataFrame):
+    if df_tp is None or df_tp.empty:
+        st.info("No hay datos de Tienda Perfecta para el período seleccionado.")
+        return
+    requeridas = [
+        "Taxonomia",
+        "Clientes_Censados",
+        "Clientes_TP",
+        "Obj_TP_Pepsico",
+        "Porcentaje_TP_Sobre_Censados",
+        "Cumplimiento_TP_Pepsico_Pct",
+        "Gap_TP_Pepsico",
+    ]
+    if not _validar_columnas_requeridas(df_tp, requeridas, "TP Visual"):
+        return
+    df_filtrado = _seleccion_local(
+        df_tp, "Taxonomia", "Taxonomías de TP", "gerencial_filtro_taxonomias_tp_v1"
+    )
+    if df_filtrado.empty:
+        st.warning("Seleccioná al menos una taxonomía de TP.")
+        return
+    censados = int(df_filtrado["Clientes_Censados"].sum())
+    actual = int(df_filtrado["Clientes_TP"].sum())
+    objetivo = int(df_filtrado["Obj_TP_Pepsico"].sum())
+    cumplimiento = actual / objetivo * 100.0 if objetivo > 0 else 0.0
+    gap = max(objetivo - actual, 0)
+    st.markdown("### KPIs ejecutivos - Tienda Perfecta")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("TP Actual", f"{actual:,.0f}")
+    col2.metric("Objetivo Compañía PepsiCo", f"{objetivo:,.0f}")
+    col3.metric(
+        "% Cumplimiento TP",
+        f"{cumplimiento:,.2f}%",
+        delta=f"{cumplimiento - 100.0:,.2f} pp vs objetivo",
+        delta_color="normal",
+    )
+    col4.metric("Gap vs PepsiCo", f"{gap:,.0f}")
+    st.markdown("### Cumplimiento por taxonomía")
+    detalle = df_filtrado[
+        [
+            "Taxonomia",
+            "Clientes_Censados",
+            "Clientes_TP",
+            "Porcentaje_TP_Sobre_Censados",
+            "Obj_TP_Pepsico",
+            "Cumplimiento_TP_Pepsico_Pct",
+            "Gap_TP_Pepsico",
+            "Excedente_TP_Pepsico",
+        ]
+    ].copy()
+    detalle = detalle.rename(
+        columns={
+            "Taxonomia": "Taxonomía",
+            "Clientes_Censados": "Clientes Censados",
+            "Clientes_TP": "TP Actual",
+            "Porcentaje_TP_Sobre_Censados": "% TP sobre Censados",
+            "Obj_TP_Pepsico": "Objetivo PepsiCo",
+            "Cumplimiento_TP_Pepsico_Pct": "% Cumplimiento PepsiCo",
+            "Gap_TP_Pepsico": "Gap vs PepsiCo",
+            "Excedente_TP_Pepsico": "Excedente vs PepsiCo",
+        }
+    )
+    st.dataframe(detalle, width="stretch", hide_index=True)
+
+
 # ==========================================================
 # FRAGMENTO PRINCIPAL
 # ==========================================================
@@ -824,8 +985,8 @@ def render_fragmento_gerencial_core(
         modo_proyeccion,
     )
 
-    tab_k, tab_g, tab_c, tab_m = st.tabs(
-        ["📦 KILOS", "💰 GROSS", "📈 CCC", "📱 MI NEGOCIO"]
+    tab_k, tab_g, tab_c, tab_m, tab_tp = st.tabs(
+        ["📦 KILOS", "💰 GROSS", "📈 CCC", "📱 MI NEGOCIO", "⭐ TP"]
     )
 
     with tab_k:
@@ -839,6 +1000,9 @@ def render_fragmento_gerencial_core(
 
     with tab_m:
         _render_pestana_mn(motor.get("mn", pd.DataFrame()))
+
+    with tab_tp:
+        _render_pestana_tp(motor.get("tp", pd.DataFrame()))
 
 
 # ==========================================================

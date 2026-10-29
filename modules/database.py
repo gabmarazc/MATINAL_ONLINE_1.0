@@ -921,121 +921,247 @@ def obtener_control_objetivos_tp(anio, mes):
         conn.close()
 
 
-def guardar_modificaciones_objetivos_tp(df_editado, anio, mes):
-    """Actualiza solo las filas recibidas y conserva intacto el resto del snapshot."""
-    requeridas = ["CodVendedor", "Taxonomia", "Obj_TP_Manual", "Motivo_Modificacion"]
-    faltantes = [c for c in requeridas if c not in df_editado.columns]
+def importar_snapshot_objetivos_tp_desde_excel(archivo):
+    """
+    Reemplaza de forma transaccional un snapshot TP ya generado a partir de un Excel
+    descargado desde Parametros. El Excel debe contener la hoja Objetivos_TP_Vendedor.
+    El periodo se toma exclusivamente de las columnas Anio y Mes del archivo.
+    No consulta ni recalcula contra universo.
+    """
+    asegurar_tablas_objetivos_tp()
+    try:
+        xls = pd.ExcelFile(archivo)
+    except Exception as exc:
+        return False, f"No se pudo leer el Excel de snapshot TP: {exc}"
+
+    if "Objetivos_TP_Vendedor" not in xls.sheet_names:
+        return False, "El archivo debe contener la hoja 'Objetivos_TP_Vendedor'."
+
+    try:
+        df = pd.read_excel(archivo, sheet_name="Objetivos_TP_Vendedor")
+    except Exception as exc:
+        return False, f"No se pudo leer la hoja Objetivos_TP_Vendedor: {exc}"
+
+    requeridas = [
+        "Anio",
+        "Mes",
+        "CodVendedor",
+        "Vendedor_Snapshot",
+        "Supervisor_Snapshot",
+        "Taxonomia",
+        "Clientes_Potenciales_Snapshot",
+        "Objetivo_Taxonomia_Final",
+        "Obj_TP_Asignado",
+    ]
+    faltantes = [c for c in requeridas if c not in df.columns]
     if faltantes:
-        return False, "Faltan columnas: " + ", ".join(faltantes)
-    anio_int, mes_int = int(float(anio)), int(float(mes))
-    actual = obtener_snapshot_objetivos_tp(anio_int, mes_int)
-    if actual.empty:
-        return False, "No existe snapshot TP para el período seleccionado."
+        return False, "Faltan columnas obligatorias: " + ", ".join(faltantes)
+    if df.empty:
+        return False, "La hoja Objetivos_TP_Vendedor está vacía."
 
-    cambios = df_editado[requeridas].copy()
-    cambios["CodVendedor"] = pd.to_numeric(
-        cambios["CodVendedor"], errors="coerce"
-    ).astype("Int64")
-    cambios["Taxonomia"] = cambios["Taxonomia"].astype(str).str.strip().str.upper()
-    cambios["Obj_TP_Manual"] = pd.to_numeric(cambios["Obj_TP_Manual"], errors="coerce")
-    if cambios.duplicated(["CodVendedor", "Taxonomia"]).any():
-        return False, "La edición contiene claves vendedor-taxonomía duplicadas."
+    trabajo = df.copy()
+    for col in [
+        "Anio",
+        "Mes",
+        "CodVendedor",
+        "Clientes_Potenciales_Snapshot",
+        "Objetivo_Taxonomia_Final",
+        "Obj_TP_Asignado",
+    ]:
+        trabajo[col] = pd.to_numeric(trabajo[col], errors="coerce")
+    if (
+        trabajo[
+            [
+                "Anio",
+                "Mes",
+                "CodVendedor",
+                "Clientes_Potenciales_Snapshot",
+                "Objetivo_Taxonomia_Final",
+                "Obj_TP_Asignado",
+            ]
+        ]
+        .isna()
+        .any()
+        .any()
+    ):
+        return (
+            False,
+            "El snapshot contiene valores vacíos o no numéricos en campos obligatorios.",
+        )
+    for col in [
+        "Anio",
+        "Mes",
+        "CodVendedor",
+        "Clientes_Potenciales_Snapshot",
+        "Objetivo_Taxonomia_Final",
+        "Obj_TP_Asignado",
+    ]:
+        if not (trabajo[col] % 1 == 0).all():
+            return False, f"La columna {col} debe contener valores enteros."
+        trabajo[col] = trabajo[col].astype(int)
 
-    claves = ["CodVendedor", "Taxonomia"]
-    referencia = actual[claves + ["Clientes_Potenciales_Snapshot", "Obj_TP_Asignado"]]
-    cambios = cambios.merge(referencia, on=claves, how="left")
-    if cambios["Clientes_Potenciales_Snapshot"].isna().any():
-        return False, "Hay filas editadas que no pertenecen al snapshot persistido."
-    final_cambio = cambios["Obj_TP_Manual"].fillna(cambios["Obj_TP_Asignado"])
-    if (final_cambio < 0).any() or not (final_cambio % 1 == 0).all():
-        return False, "Los objetivos finales deben ser enteros no negativos."
-    if (final_cambio > cambios["Clientes_Potenciales_Snapshot"]).any():
-        malos = cambios.loc[
-            final_cambio > cambios["Clientes_Potenciales_Snapshot"],
+    periodos = trabajo[["Anio", "Mes"]].drop_duplicates()
+    if len(periodos) != 1:
+        return False, "El archivo debe contener un único período Anio/Mes."
+    anio_int = int(periodos.iloc[0]["Anio"])
+    mes_int = int(periodos.iloc[0]["Mes"])
+    if mes_int < 1 or mes_int > 12:
+        return False, "Mes debe estar comprendido entre 1 y 12."
+
+    trabajo["Taxonomia"] = trabajo["Taxonomia"].astype(str).str.strip().str.upper()
+    if not trabajo["Taxonomia"].isin(["A", "B", "C", "D"]).all():
+        return False, "Taxonomia solo admite A, B, C o D."
+    if trabajo.duplicated(["Anio", "Mes", "CodVendedor", "Taxonomia"]).any():
+        return (
+            False,
+            "El archivo contiene claves duplicadas Anio/Mes/CodVendedor/Taxonomia.",
+        )
+    if (trabajo["Obj_TP_Asignado"] < 0).any():
+        return False, "Obj_TP_Asignado no puede contener valores negativos."
+    if (trabajo["Clientes_Potenciales_Snapshot"] < 0).any():
+        return (
+            False,
+            "Clientes_Potenciales_Snapshot no puede contener valores negativos.",
+        )
+    if (trabajo["Obj_TP_Asignado"] > trabajo["Clientes_Potenciales_Snapshot"]).any():
+        malos = trabajo.loc[
+            trabajo["Obj_TP_Asignado"] > trabajo["Clientes_Potenciales_Snapshot"],
             [
                 "CodVendedor",
                 "Taxonomia",
                 "Clientes_Potenciales_Snapshot",
-                "Obj_TP_Manual",
+                "Obj_TP_Asignado",
             ],
         ].to_dict("records")
-        return False, f"Objetivos manuales superiores al potencial snapshot: {malos}."
-    modificadas = cambios["Obj_TP_Manual"].notna()
-    motivo = cambios["Motivo_Modificacion"].fillna("").astype(str).str.strip()
-    if (modificadas & motivo.eq("")).any():
-        return False, "Toda modificación manual requiere Motivo_Modificacion."
+        return False, f"Hay objetivos superiores al potencial congelado: {malos}."
 
-    # Simulación completa antes de escribir: solo reemplaza las claves editadas.
-    simulado = actual.copy().set_index(claves)
-    for _, fila in cambios.iterrows():
-        clave = (int(fila["CodVendedor"]), fila["Taxonomia"])
-        manual = pd.NA if pd.isna(fila["Obj_TP_Manual"]) else int(fila["Obj_TP_Manual"])
-        simulado.loc[clave, "Obj_TP_Manual"] = manual
-        simulado.loc[clave, "Motivo_Modificacion"] = (
-            pd.NA if pd.isna(manual) else str(fila["Motivo_Modificacion"]).strip()
-        )
-    simulado = simulado.reset_index()
-    simulado["Obj_TP_Final"] = (
-        pd.to_numeric(simulado["Obj_TP_Manual"], errors="coerce")
-        .fillna(simulado["Obj_TP_Asignado"])
-        .astype(int)
+    # Al volver a cargar el Excel, Obj_TP_Asignado pasa a ser el nuevo valor fijado.
+    # Los campos de override anteriores se limpian para evitar doble capa de ajuste.
+    trabajo["Obj_TP_Manual"] = pd.NA
+    trabajo["Motivo_Modificacion"] = pd.NA
+    trabajo["FechaModificacion"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if "FechaGeneracion" not in trabajo.columns:
+        trabajo["FechaGeneracion"] = trabajo["FechaModificacion"]
+    trabajo["Vendedor_Snapshot"] = (
+        trabajo["Vendedor_Snapshot"].fillna("").astype(str).str.strip()
     )
+    trabajo["Supervisor_Snapshot"] = (
+        trabajo["Supervisor_Snapshot"].fillna("").astype(str).str.strip()
+    )
+
+    suma_tax = trabajo.groupby("Taxonomia")["Obj_TP_Asignado"].sum().astype(int)
+    objetivo_tax = (
+        trabajo.groupby("Taxonomia")["Objetivo_Taxonomia_Final"].first().astype(int)
+    )
+    # El Excel es la nueva fuente fijada: se recalibra la cabecera a la suma realmente cargada.
+    trabajo["Objetivo_Taxonomia_Final"] = trabajo["Taxonomia"].map(suma_tax).astype(int)
 
     conn = obtener_conexion()
     try:
-        maestro_total = (
-            conn.execute(
-                "SELECT SUM(Obj_TP_Pepsico) FROM maestro_tp WHERE Anio=? AND Mes=?",
-                (anio_int, mes_int),
-            ).fetchone()[0]
-            or 0
+        existente = conn.execute(
+            "SELECT COUNT(*) FROM objetivos_tp_vendedor WHERE Anio=? AND Mes=?",
+            (anio_int, mes_int),
+        ).fetchone()[0]
+        if not existente:
+            return False, (
+                f"No existe un snapshot previo para {mes_int:02d}/{anio_int}. "
+                "Primero debe generarse desde Parametros."
+            )
+
+        maestro = pd.read_sql_query(
+            "SELECT Taxonomia, Obj_TP_Pepsico FROM maestro_tp WHERE Anio=? AND Mes=?",
+            conn,
+            params=(anio_int, mes_int),
         )
-        minimo = int(round(float(maestro_total) * 1.20))
-        suma_final = int(simulado["Obj_TP_Final"].sum())
+        if set(maestro.get("Taxonomia", pd.Series(dtype=str)).astype(str)) != {
+            "A",
+            "B",
+            "C",
+            "D",
+        }:
+            return (
+                False,
+                "maestro_tp no contiene A, B, C y D para el período del archivo.",
+            )
+        minimo = int(
+            round(
+                float(
+                    pd.to_numeric(maestro["Obj_TP_Pepsico"], errors="coerce")
+                    .fillna(0)
+                    .sum()
+                )
+                * 1.20
+            )
+        )
+        total_final = int(trabajo["Obj_TP_Asignado"].sum())
+        estado = "CONCILIADO" if total_final >= minimo else "OBSERVADO"
         ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        estado = "CONCILIADO" if suma_final >= minimo else "OBSERVADO"
+
+        columnas_destino = [
+            "Anio",
+            "Mes",
+            "CodVendedor",
+            "Vendedor_Snapshot",
+            "Supervisor_Snapshot",
+            "Taxonomia",
+            "Clientes_Potenciales_Snapshot",
+            "Objetivo_Taxonomia_Final",
+            "Obj_TP_Asignado",
+            "Obj_TP_Manual",
+            "Motivo_Modificacion",
+            "FechaGeneracion",
+            "FechaModificacion",
+        ]
+        trabajo = trabajo[columnas_destino].copy()
+
+        periodo_actual = pd.read_sql_query(
+            "SELECT * FROM objetivos_tp_periodo WHERE Anio=? AND Mes=? ORDER BY Taxonomia",
+            conn,
+            params=(anio_int, mes_int),
+        )
+        if periodo_actual.empty:
+            return False, "No existe la cabecera objetivos_tp_periodo del snapshot."
+        periodo_actual["Objetivo_Final_Taxonomia"] = (
+            periodo_actual["Taxonomia"].map(suma_tax).fillna(0).astype(int)
+        )
+        periodo_actual["Adicional_Global"] = (
+            (
+                periodo_actual["Objetivo_Final_Taxonomia"]
+                - periodo_actual["Objetivo_Base_Ajustado"]
+            )
+            .clip(lower=0)
+            .astype(int)
+        )
+        periodo_actual["EstadoSnapshot"] = estado
+        periodo_actual["FechaModificacion"] = ahora
+
         try:
             conn.execute("BEGIN IMMEDIATE")
-            for _, fila in cambios.iterrows():
-                manual = (
-                    None
-                    if pd.isna(fila["Obj_TP_Manual"])
-                    else int(fila["Obj_TP_Manual"])
-                )
-                mot = (
-                    None if manual is None else str(fila["Motivo_Modificacion"]).strip()
-                )
-                fecha_mod = None if manual is None else ahora
-                conn.execute(
-                    """
-                    UPDATE objetivos_tp_vendedor
-                    SET Obj_TP_Manual=?, Motivo_Modificacion=?, FechaModificacion=?
-                    WHERE Anio=? AND Mes=? AND CodVendedor=? AND Taxonomia=?
-                    """,
-                    (
-                        manual,
-                        mot,
-                        fecha_mod,
-                        anio_int,
-                        mes_int,
-                        int(fila["CodVendedor"]),
-                        fila["Taxonomia"],
-                    ),
-                )
             conn.execute(
-                "UPDATE objetivos_tp_periodo SET EstadoSnapshot=?, FechaModificacion=? WHERE Anio=? AND Mes=?",
-                (estado, ahora, anio_int, mes_int),
+                "DELETE FROM objetivos_tp_vendedor WHERE Anio=? AND Mes=?",
+                (anio_int, mes_int),
+            )
+            trabajo.to_sql(
+                "objetivos_tp_vendedor", conn, if_exists="append", index=False
+            )
+            conn.execute(
+                "DELETE FROM objetivos_tp_periodo WHERE Anio=? AND Mes=?",
+                (anio_int, mes_int),
+            )
+            periodo_actual.to_sql(
+                "objetivos_tp_periodo", conn, if_exists="append", index=False
             )
             conn.commit()
         except Exception:
             conn.rollback()
             raise
+
         return True, (
-            f"Modificaciones TP guardadas. Estado={estado}; total final={suma_final}; "
-            f"mínimo global={minimo}."
+            f"Snapshot TP {mes_int:02d}/{anio_int} reemplazado y fijado desde Excel. "
+            f"Total objetivo={total_final}; mínimo global={minimo}; estado={estado}."
         )
     except Exception as exc:
-        return False, f"Error al guardar modificaciones TP: {exc}"
+        return False, f"Error al importar snapshot TP: {exc}"
     finally:
         conn.close()
 

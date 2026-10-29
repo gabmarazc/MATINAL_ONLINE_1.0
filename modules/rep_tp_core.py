@@ -30,7 +30,15 @@ def render_fragmento_interactivo_tp(br_data):
     Aplica filtros visuales locales sobre el dataset maestro (detalle_tp) en memoria
     sin volver a ejecutar la lógica de negocio ni consultar el Core.
     """
-    detalle_tp = br_data.get("detalle_tp", pd.DataFrame())
+    detalle_tp = br_data.get(
+        "detalle_tp",
+        br_data.get("df_filtrado", pd.DataFrame()),
+    )
+    ranking_vendedor_taxonomia_snapshot = br_data.get(
+        "ranking_vendedor_taxonomia", pd.DataFrame()
+    )
+    if ranking_vendedor_taxonomia_snapshot is None:
+        ranking_vendedor_taxonomia_snapshot = pd.DataFrame()
 
     vendedores_disp = (
         sorted(detalle_tp["Vendedor"].dropna().unique().tolist())
@@ -99,7 +107,28 @@ def render_fragmento_interactivo_tp(br_data):
         elif estado_tp_sel == "Entre 70% y 80%":
             df = df[(df["Score"] >= 70) & (df["Score"] < 80)]
 
-    # Recálculo local en memoria de KPIs
+    # Objetivo congelado: solo Vendedor y Taxonomía acotan el objetivo.
+    # SubCanal, Estado TP y bandas de Score solo filtran el realizado.
+    objetivos_scope = ranking_vendedor_taxonomia_snapshot.copy()
+    if not objetivos_scope.empty:
+        if v_sel and "Vendedor" in objetivos_scope.columns:
+            objetivos_scope = objetivos_scope[objetivos_scope["Vendedor"].isin(v_sel)]
+        if tx_sel and "Taxonomia" in objetivos_scope.columns:
+            objetivos_scope = objetivos_scope[objetivos_scope["Taxonomia"].isin(tx_sel)]
+    objetivo_total = (
+        int(
+            pd.to_numeric(
+                objetivos_scope.get("Objetivo_TP", pd.Series(dtype=float)),
+                errors="coerce",
+            )
+            .fillna(0)
+            .sum()
+        )
+        if not objetivos_scope.empty
+        else 0
+    )
+
+    # Recálculo local en memoria de KPIs realizados
     total_censados = int(
         df["Cliente_id"].nunique()
         if not df.empty
@@ -121,11 +150,21 @@ def render_fragmento_interactivo_tp(br_data):
         float(df["Score"].mean()) if not df.empty and "Score" in df.columns else 0.0, 2
     )
 
+    cumplimiento_objetivo = round(
+        (total_tp / objetivo_total * 100.0) if objetivo_total > 0 else 0.0, 2
+    )
+    gap_tp = max(objetivo_total - total_tp, 0)
+    excedente_tp = max(total_tp - objetivo_total, 0)
     kpis = {
         "Clientes_Censados": total_censados,
         "Clientes_TP": total_tp,
         "Porcentaje_Cumplimiento_TP": pct_tp_global,
+        "Porcentaje_TP_Sobre_Censados": pct_tp_global,
         "Puntuacion_Promedio": promedio_score,
+        "Objetivo_TP": objetivo_total,
+        "Cumplimiento_Objetivo_TP_Pct": cumplimiento_objetivo,
+        "Gap_TP": gap_tp,
+        "Excedente_TP": excedente_tp,
     }
 
     # Recálculo local en memoria de Rankings y Tabla de Oportunidades
@@ -157,6 +196,36 @@ def render_fragmento_interactivo_tp(br_data):
                 by=["Porcentaje_Cumplimiento_TP", "Censados"], ascending=[False, False]
             )
             .reset_index(drop=True)
+        )
+
+    if not ranking_vendedor.empty and not objetivos_scope.empty:
+        obj_vendedor = objetivos_scope.groupby("Vendedor", as_index=False)[
+            "Objetivo_TP"
+        ].sum()
+        ranking_vendedor = ranking_vendedor.merge(
+            obj_vendedor, on="Vendedor", how="left"
+        )
+        ranking_vendedor["Objetivo_TP"] = (
+            pd.to_numeric(ranking_vendedor["Objetivo_TP"], errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
+        ranking_vendedor["Cumplimiento_Objetivo_TP_Pct"] = (
+            ranking_vendedor["Clientes_TP"]
+            .div(ranking_vendedor["Objetivo_TP"].replace(0, pd.NA))
+            .mul(100)
+            .fillna(0)
+            .round(2)
+        )
+        ranking_vendedor["Gap_TP"] = (
+            (ranking_vendedor["Objetivo_TP"] - ranking_vendedor["Clientes_TP"])
+            .clip(lower=0)
+            .astype(int)
+        )
+        ranking_vendedor["Excedente_TP"] = (
+            (ranking_vendedor["Clientes_TP"] - ranking_vendedor["Objetivo_TP"])
+            .clip(lower=0)
+            .astype(int)
         )
 
     ranking_subcanal = pd.DataFrame()
@@ -215,6 +284,36 @@ def render_fragmento_interactivo_tp(br_data):
             .reset_index(drop=True)
         )
 
+    if not ranking_taxonomia.empty and not objetivos_scope.empty:
+        obj_taxonomia = objetivos_scope.groupby("Taxonomia", as_index=False)[
+            "Objetivo_TP"
+        ].sum()
+        ranking_taxonomia = ranking_taxonomia.merge(
+            obj_taxonomia, on="Taxonomia", how="left"
+        )
+        ranking_taxonomia["Objetivo_TP"] = (
+            pd.to_numeric(ranking_taxonomia["Objetivo_TP"], errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
+        ranking_taxonomia["Cumplimiento_Objetivo_TP_Pct"] = (
+            ranking_taxonomia["Clientes_TP"]
+            .div(ranking_taxonomia["Objetivo_TP"].replace(0, pd.NA))
+            .mul(100)
+            .fillna(0)
+            .round(2)
+        )
+        ranking_taxonomia["Gap_TP"] = (
+            (ranking_taxonomia["Objetivo_TP"] - ranking_taxonomia["Clientes_TP"])
+            .clip(lower=0)
+            .astype(int)
+        )
+        ranking_taxonomia["Excedente_TP"] = (
+            (ranking_taxonomia["Clientes_TP"] - ranking_taxonomia["Objetivo_TP"])
+            .clip(lower=0)
+            .astype(int)
+        )
+
     tabla_oportunidades = pd.DataFrame()
     if not df.empty:
         cols_op = [
@@ -266,7 +365,7 @@ def render_fragmento_interactivo_tp(br_data):
     with sc3:
         st.markdown(
             tarjeta_metrica_html(
-                "% CUMPLIMIENTO TP",
+                "% TP SOBRE CENSADOS",
                 f"{kpis['Porcentaje_Cumplimiento_TP']:,.2f}%",
                 "#8b5cf6",
                 "1.3rem",
@@ -284,6 +383,52 @@ def render_fragmento_interactivo_tp(br_data):
                 "0.7rem",
             ),
             unsafe_allow_html=True,
+        )
+
+    sc5, sc6, sc7, sc8 = st.columns(4)
+    with sc5:
+        st.markdown(
+            tarjeta_metrica_html(
+                "OBJETIVO TP FIJADO",
+                f"{kpis['Objetivo_TP']:,.0f}",
+                "#f59e0b",
+                "1.3rem",
+                "0.7rem",
+            ),
+            unsafe_allow_html=True,
+        )
+    with sc6:
+        st.markdown(
+            tarjeta_metrica_html(
+                "% CUMPLIMIENTO OBJETIVO",
+                f"{kpis['Cumplimiento_Objetivo_TP_Pct']:.2f}%",
+                "#10b981",
+                "1.3rem",
+                "0.7rem",
+            ),
+            unsafe_allow_html=True,
+        )
+    with sc7:
+        st.markdown(
+            tarjeta_metrica_html(
+                "GAP TP", f"{kpis['Gap_TP']:,.0f}", "#ef4444", "1.3rem", "0.7rem"
+            ),
+            unsafe_allow_html=True,
+        )
+    with sc8:
+        st.markdown(
+            tarjeta_metrica_html(
+                "EXCEDENTE TP",
+                f"{kpis['Excedente_TP']:,.0f}",
+                "#14b8a6",
+                "1.3rem",
+                "0.7rem",
+            ),
+            unsafe_allow_html=True,
+        )
+    if sc_sel or estado_tp_sel != "Todos":
+        st.caption(
+            "El objetivo permanece como referencia del snapshot congelado por vendedor y taxonomía; SubCanal y Estado TP solo filtran el realizado."
         )
 
     st.divider()
@@ -309,10 +454,24 @@ def render_fragmento_interactivo_tp(br_data):
             gb_v.configure_column("Clientes_TP", headerName="Clientes TP", width=120)
             gb_v.configure_column(
                 "Porcentaje_Cumplimiento_TP",
-                headerName="% Cumplimiento TP",
+                headerName="% TP sobre Censados",
                 width=140,
                 valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'",
             )
+            if "Objetivo_TP" in ranking_vendedor.columns:
+                gb_v.configure_column(
+                    "Objetivo_TP", headerName="Objetivo TP", width=115
+                )
+                gb_v.configure_column(
+                    "Cumplimiento_Objetivo_TP_Pct",
+                    headerName="% Cumplimiento Objetivo",
+                    width=175,
+                    valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'",
+                )
+                gb_v.configure_column("Gap_TP", headerName="Gap TP", width=95)
+                gb_v.configure_column(
+                    "Excedente_TP", headerName="Excedente TP", width=115
+                )
             gb_v.configure_column(
                 "Puntuacion_Promedio",
                 headerName="Puntuación Promedio",
@@ -342,7 +501,7 @@ def render_fragmento_interactivo_tp(br_data):
             gb_sc.configure_column("SubCanal", minWidth=180)
             gb_sc.configure_column(
                 "Porcentaje_Cumplimiento_TP",
-                headerName="% Cumplimiento TP",
+                headerName="% TP sobre Censados",
                 width=140,
                 valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'",
             )
@@ -375,10 +534,24 @@ def render_fragmento_interactivo_tp(br_data):
             gb_tx.configure_column("Taxonomia", headerName="Taxonomía", width=120)
             gb_tx.configure_column(
                 "Porcentaje_Cumplimiento_TP",
-                headerName="% Cumplimiento TP",
+                headerName="% TP sobre Censados",
                 width=140,
                 valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'",
             )
+            if "Objetivo_TP" in ranking_taxonomia.columns:
+                gb_tx.configure_column(
+                    "Objetivo_TP", headerName="Objetivo TP", width=115
+                )
+                gb_tx.configure_column(
+                    "Cumplimiento_Objetivo_TP_Pct",
+                    headerName="% Cumplimiento Objetivo",
+                    width=175,
+                    valueFormatter="x != null ? Number(x).toFixed(2) + '%' : '0.00%'",
+                )
+                gb_tx.configure_column("Gap_TP", headerName="Gap TP", width=95)
+                gb_tx.configure_column(
+                    "Excedente_TP", headerName="Excedente TP", width=115
+                )
             gb_tx.configure_column(
                 "Puntuacion_Promedio",
                 headerName="Puntuación Promedio",

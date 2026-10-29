@@ -959,26 +959,20 @@ def render_parametros_view(filtros_globales: dict = None):
     st.dataframe(df_tp_actual, width="stretch", hide_index=True)
     st.divider()
     # =========================================================================
-    # 3.D SECCIÓN: GENERACIÓN Y ADMINISTRACIÓN DEL SNAPSHOT TP
+    # 3.D SECCIÓN: SNAPSHOT TP - DESCARGA / EDICIÓN EXTERNA / RECARGA
     # =========================================================================
     st.markdown("### 🎯 3.D Objetivos TP por Vendedor - Snapshot Congelado")
     st.markdown(
-        "Genera una única vez los objetivos por vendedor y taxonomía usando el universo "
-        "vigente como fotografía. Después de generados, los cambios del universo no "
-        "recalculan el objetivo. Las modificaciones posteriores son exclusivamente manuales."
+        "El snapshot se genera una única vez. Para modificarlo, descargue el Excel, "
+        "edite exclusivamente `Obj_TP_Asignado` y vuelva a cargar el archivo. "
+        "La recarga reemplaza el snapshot del mismo período y vuelve a dejarlo fijado."
     )
-    col_obj_tp1, col_obj_tp2 = st.columns(2)
-    with col_obj_tp1:
-        sel_anio_obj_tp = st.text_input(
-            "Año del Snapshot TP", value=anio_def, key="anio_obj_tp_snapshot"
-        )
-    with col_obj_tp2:
-        sel_mes_obj_tp = st.text_input(
-            "Mes del Snapshot TP", value=mes_def, key="mes_obj_tp_snapshot"
-        )
+
+    sel_anio_obj_tp = anio_def
+    sel_mes_obj_tp = mes_def
 
     if st.button(
-        "⚙️ Generar y congelar objetivos TP del período",
+        "⚙️ Generar y congelar objetivos TP del período actual",
         key="btn_generar_snapshot_obj_tp",
     ):
         exito_snapshot, mensaje_snapshot = db.generar_snapshot_objetivos_tp(
@@ -999,133 +993,105 @@ def render_parametros_view(filtros_globales: dict = None):
     )
 
     if df_obj_tp_snapshot.empty:
-        st.info("No existe un snapshot TP para el período seleccionado.")
+        st.info("No existe un snapshot TP para el período operativo actual.")
     else:
-        if not df_obj_tp_periodo.empty:
-            total_crudo_tp = int(df_obj_tp_periodo["Obj_TP_Pepsico"].sum())
-            minimo_tp = int(round(total_crudo_tp * 1.20))
-            total_original_tp = int(df_obj_tp_snapshot["Obj_TP_Asignado"].sum())
-            total_final_tp = int(df_obj_tp_snapshot["Obj_TP_Final"].sum())
-            estado_tp = str(df_obj_tp_periodo["EstadoSnapshot"].iloc[0])
-            ctp1, ctp2, ctp3, ctp4, ctp5 = st.columns(5)
-            ctp1.metric("Objetivo crudo PepsiCo", f"{total_crudo_tp:,.0f}")
-            ctp2.metric("Mínimo global +20%", f"{minimo_tp:,.0f}")
-            ctp3.metric("Asignación original", f"{total_original_tp:,.0f}")
-            ctp4.metric("Objetivo final vigente", f"{total_final_tp:,.0f}")
-            ctp5.metric("Estado snapshot", estado_tp)
-            st.dataframe(
-                df_obj_tp_periodo[
-                    [
-                        "Taxonomia",
-                        "Obj_TP_Pepsico",
-                        "Factor_Ajuste",
-                        "Objetivo_Base_Ajustado",
-                        "Adicional_Global",
-                        "Objetivo_Final_Taxonomia",
-                        "Potencial_Taxonomia",
-                        "EstadoSnapshot",
-                    ]
-                ],
-                width="stretch",
-                hide_index=True,
-            )
-
-        supervisores_tp = sorted(
-            df_obj_tp_snapshot["Supervisor_Snapshot"]
-            .dropna()
-            .astype(str)
-            .unique()
-            .tolist()
+        total_crudo_tp = (
+            int(df_obj_tp_periodo["Obj_TP_Pepsico"].sum())
+            if not df_obj_tp_periodo.empty
+            else 0
         )
-        vendedores_tp = sorted(
-            df_obj_tp_snapshot["Vendedor_Snapshot"]
-            .dropna()
-            .astype(str)
-            .unique()
-            .tolist()
+        minimo_tp = int(round(total_crudo_tp * 1.20))
+        total_final_tp = int(df_obj_tp_snapshot["Obj_TP_Final"].sum())
+        estado_tp = (
+            str(df_obj_tp_periodo["EstadoSnapshot"].iloc[0])
+            if not df_obj_tp_periodo.empty
+            else "SIN CONTROL"
         )
-        f_tp1, f_tp2, f_tp3 = st.columns(3)
-        with f_tp1:
-            filtro_sup_tp = st.multiselect(
-                "Supervisor snapshot", supervisores_tp, key="filtro_sup_obj_tp"
-            )
-        with f_tp2:
-            filtro_vend_tp = st.multiselect(
-                "Vendedor snapshot", vendedores_tp, key="filtro_vend_obj_tp"
-            )
-        with f_tp3:
-            filtro_tax_tp = st.multiselect(
-                "Taxonomía snapshot", ["A", "B", "C", "D"], key="filtro_tax_obj_tp"
-            )
+        ctp1, ctp2, ctp3, ctp4 = st.columns(4)
+        ctp1.metric("Objetivo crudo PepsiCo", f"{total_crudo_tp:,.0f}")
+        ctp2.metric("Mínimo global +20%", f"{minimo_tp:,.0f}")
+        ctp3.metric("Objetivo fijado", f"{total_final_tp:,.0f}")
+        ctp4.metric("Estado snapshot", estado_tp)
 
-        df_obj_tp_vista = df_obj_tp_snapshot.copy()
-        if filtro_sup_tp:
-            df_obj_tp_vista = df_obj_tp_vista[
-                df_obj_tp_vista["Supervisor_Snapshot"].astype(str).isin(filtro_sup_tp)
-            ]
-        if filtro_vend_tp:
-            df_obj_tp_vista = df_obj_tp_vista[
-                df_obj_tp_vista["Vendedor_Snapshot"].astype(str).isin(filtro_vend_tp)
-            ]
-        if filtro_tax_tp:
-            df_obj_tp_vista = df_obj_tp_vista[
-                df_obj_tp_vista["Taxonomia"].isin(filtro_tax_tp)
-            ]
-
-        columnas_editor_tp = [
+        st.markdown("#### Snapshot TP fijado")
+        columnas_vista_tp = [
+            "Anio",
+            "Mes",
             "CodVendedor",
             "Vendedor_Snapshot",
             "Supervisor_Snapshot",
             "Taxonomia",
             "Clientes_Potenciales_Snapshot",
             "Obj_TP_Asignado",
-            "Obj_TP_Manual",
-            "Obj_TP_Final",
-            "Motivo_Modificacion",
         ]
-        df_obj_tp_editado = st.data_editor(
-            df_obj_tp_vista[columnas_editor_tp],
-            num_rows="fixed",
-            disabled=[
+        st.dataframe(
+            df_obj_tp_snapshot[columnas_vista_tp],
+            width="stretch",
+            hide_index=True,
+        )
+
+        output_snapshot_tp = BytesIO()
+        with pd.ExcelWriter(output_snapshot_tp, engine="openpyxl") as writer:
+            df_descarga_tp = df_obj_tp_snapshot.copy()
+            df_descarga_tp["Obj_TP_Asignado"] = df_descarga_tp["Obj_TP_Final"]
+            columnas_descarga_tp = [
+                "Anio",
+                "Mes",
                 "CodVendedor",
                 "Vendedor_Snapshot",
                 "Supervisor_Snapshot",
                 "Taxonomia",
                 "Clientes_Potenciales_Snapshot",
+                "Objetivo_Taxonomia_Final",
                 "Obj_TP_Asignado",
-                "Obj_TP_Final",
-            ],
-            column_config={
-                "Obj_TP_Manual": st.column_config.NumberColumn(
-                    "Obj_TP_Manual", min_value=0, step=1, format="%d"
-                ),
-                "Motivo_Modificacion": st.column_config.TextColumn(
-                    "Motivo_Modificacion",
-                    help="Obligatorio cuando se informa Obj_TP_Manual.",
-                ),
-            },
-            key="editor_snapshot_obj_tp",
-            width="stretch",
-            hide_index=True,
+                "FechaGeneracion",
+            ]
+            df_descarga_tp[columnas_descarga_tp].to_excel(
+                writer, index=False, sheet_name="Objetivos_TP_Vendedor"
+            )
+            df_obj_tp_periodo.to_excel(
+                writer, index=False, sheet_name="Objetivos_TP_Periodo"
+            )
+
+        st.download_button(
+            label="📥 Descargar snapshot TP para modificar",
+            data=output_snapshot_tp.getvalue(),
+            file_name=f"snapshot_objetivos_tp_{sel_anio_obj_tp}_{int(float(sel_mes_obj_tp)):02d}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_descargar_snapshot_obj_tp",
         )
 
-        if st.button(
-            "💾 Guardar modificaciones manuales del snapshot TP",
-            key="btn_guardar_modificaciones_obj_tp",
-        ):
-            exito_manual, mensaje_manual = db.guardar_modificaciones_objetivos_tp(
-                df_obj_tp_editado,
-                sel_anio_obj_tp,
-                sel_mes_obj_tp,
-            )
-            if exito_manual:
-                st.success(mensaje_manual)
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.error(mensaje_manual)
+        archivo_snapshot_tp = st.file_uploader(
+            "📂 Cargar snapshot TP modificado",
+            type=["xlsx", "xls"],
+            key="up_snapshot_obj_tp",
+            help="Edite Obj_TP_Asignado en la hoja Objetivos_TP_Vendedor y vuelva a cargar el mismo archivo.",
+        )
+        if archivo_snapshot_tp is not None:
+            try:
+                vista_previa_tp = pd.read_excel(
+                    archivo_snapshot_tp, sheet_name="Objetivos_TP_Vendedor"
+                )
+                st.markdown("#### Vista previa del archivo a fijar")
+                st.dataframe(vista_previa_tp, width="stretch", hide_index=True)
+                if st.button(
+                    "🔒 Cargar y fijar nuevamente snapshot TP",
+                    key="btn_importar_snapshot_obj_tp",
+                ):
+                    exito_import, mensaje_import = (
+                        db.importar_snapshot_objetivos_tp_desde_excel(
+                            archivo_snapshot_tp
+                        )
+                    )
+                    if exito_import:
+                        st.success(mensaje_import)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(mensaje_import)
+            except Exception as e:
+                st.error(f"Error al leer el snapshot TP: {e}")
     st.divider()
-
     # =========================================================================
     # 4. SECCIÓN: MAESTRO DE INNOVACIONES
     # =========================================================================
