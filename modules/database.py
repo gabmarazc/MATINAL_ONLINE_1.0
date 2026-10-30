@@ -12,6 +12,12 @@ logger = get_logger("database")
 
 DB_PATH = "data/matinal.db"
 
+COMPROMISOS_URL = (
+    "https://docs.google.com/spreadsheets/d/e/"
+    "2PACX-1vTnTMFNXF_soK3l-B71bZrmAdJGX6y4YNDByX_92hNjSWlrxCikbkVTbTI0Y47msrkfipjzS_wsN2x3/"
+    "pub?output=csv"
+)
+
 # VTA se sincroniza automáticamente por versión de archivo.
 # Cada AAAA-MM.csv representa la foto completa vigente de ese período físico.
 # Si el archivo es nuevo o cambió, el período correspondiente se reemplaza
@@ -34,17 +40,16 @@ def sincronizar_parametros_desde_filtros(filtros_globales: dict) -> dict:
     Fuente de verdad temporal:
     - Dia Matinal: filtros_globales["dia_matinal"]
     - Dia Venta: filtros_globales["dia_venta"]
-    - Dia Anterior: filtros_globales["dia_anterior"]
     - Año y Mes: se derivan exclusivamente de Dia Venta.
 
-    La funcion actualiza solo las cinco claves anteriores. Compara primero los
+    La funcion actualiza solo las cuatro claves anteriores. Compara primero los
     valores vigentes y no escribe si no existen cambios. La persistencia se
     ejecuta dentro de una unica transaccion SQLite.
     """
     if not isinstance(filtros_globales, dict):
         raise TypeError("filtros_globales debe ser un diccionario.")
 
-    claves_requeridas = ["dia_matinal", "dia_venta", "dia_anterior"]
+    claves_requeridas = ["dia_matinal", "dia_venta"]
     faltantes = [
         clave
         for clave in claves_requeridas
@@ -72,14 +77,12 @@ def sincronizar_parametros_desde_filtros(filtros_globales: dict) -> dict:
 
     fecha_matinal = normalizar_fecha(filtros_globales["dia_matinal"], "dia_matinal")
     fecha_venta = normalizar_fecha(filtros_globales["dia_venta"], "dia_venta")
-    fecha_anterior = normalizar_fecha(filtros_globales["dia_anterior"], "dia_anterior")
 
     valores_objetivo = {
         "Año": str(int(fecha_venta.year)),
         "Mes": str(int(fecha_venta.month)),
         "Dia Matinal": fecha_matinal.strftime("%d/%m/%Y"),
         "Dia Venta": fecha_venta.strftime("%d/%m/%Y"),
-        "Dia Anterior": fecha_anterior.strftime("%d/%m/%Y"),
     }
 
     conn = obtener_conexion()
@@ -279,6 +282,121 @@ def guardar_dataframe_sql(df: pd.DataFrame, nombre_tabla: str, if_exists="replac
         )
     finally:
         conn.close()
+
+
+def actualizar_compromisos_desde_google_sheet() -> dict:
+    """
+    Descarga la fotografia completa vigente del Google Sheet publicado
+    de COMPROMISOS y reemplaza integramente SQLite.compromisos.
+
+    Responsabilidad exclusiva RAW -> SQLITE:
+    - Descarga siempre la tabla completa.
+    - Conserva exactamente una fila por respuesta del Google Sheet.
+    - No deduplica.
+    - No interpreta modificaciones.
+    - No determina versiones vigentes.
+    - No aplica reglas comerciales.
+    - No modifica otras tablas de MATINAL.
+    """
+    columnas_esperadas = [
+        "Marca temporal",
+        "CodVend",
+        "PLAT_GOLD",
+        "SILVER_BRZ",
+        "VARIOS ($)",
+        "CCC (Efect)",
+        "NC",
+        "PORC SELLOUT MN",
+        "ADOPCIÓN MN",
+        "TIENDAS PERFECTAS",
+    ]
+    tabla_destino = "compromisos"
+    tabla_temporal = "compromisos_actualizacion_tmp"
+    t0 = time.perf_counter()
+    logger.info(
+        "[COMPROMISOS] Iniciando descarga de fotografia RAW desde Google Sheets."
+    )
+    try:
+        df = pd.read_csv(COMPROMISOS_URL, dtype=object)
+    except Exception as exc:
+        logger.exception("[COMPROMISOS] Error al descargar Google Sheets.")
+        raise RuntimeError(
+            f"No se pudo descargar COMPROMISOS desde Google Sheets: {exc}"
+        ) from exc
+    df.columns = [str(columna).strip() for columna in df.columns]
+    faltantes = [columna for columna in columnas_esperadas if columna not in df.columns]
+    extras = [columna for columna in df.columns if columna not in columnas_esperadas]
+    if faltantes or extras:
+        raise ValueError(
+            "Google Sheet COMPROMISOS no cumple el contrato RAW. "
+            f"Faltantes={faltantes}; Extras={extras}; "
+            f"Columnas encontradas={list(df.columns)}."
+        )
+    df = df[columnas_esperadas].copy()
+    if df.empty:
+        raise ValueError(
+            "Google Sheet COMPROMISOS esta vacio. "
+            "Por seguridad no se reemplazo SQLite.compromisos."
+        )
+    filas_origen = int(len(df))
+    logger.info(
+        f"[COMPROMISOS] Fotografia descargada correctamente: {filas_origen} filas."
+    )
+    conn = obtener_conexion()
+    try:
+        conn.execute(f'DROP TABLE IF EXISTS "{tabla_temporal}";')
+        conn.commit()
+        df.to_sql(
+            tabla_temporal, conn, if_exists="replace", index=False, chunksize=10000
+        )
+        filas_temporal = int(
+            conn.execute(f'SELECT COUNT(*) FROM "{tabla_temporal}";').fetchone()[0]
+        )
+        if filas_temporal != filas_origen:
+            conn.execute(f'DROP TABLE IF EXISTS "{tabla_temporal}";')
+            conn.commit()
+            raise AssertionError(
+                "Conciliacion previa COMPROMISOS fallida: "
+                f"Google Sheets={filas_origen}; SQLite temporal={filas_temporal}."
+            )
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute(f'DROP TABLE IF EXISTS "{tabla_destino}";')
+            conn.execute(f'ALTER TABLE "{tabla_temporal}" RENAME TO "{tabla_destino}";')
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        filas_sqlite = int(
+            conn.execute(f'SELECT COUNT(*) FROM "{tabla_destino}";').fetchone()[0]
+        )
+        if filas_sqlite != filas_origen:
+            raise AssertionError(
+                "Conciliacion final COMPROMISOS fallida: "
+                f"Google Sheets={filas_origen}; SQLite={filas_sqlite}."
+            )
+    except Exception:
+        try:
+            conn.execute(f'DROP TABLE IF EXISTS "{tabla_temporal}";')
+            conn.commit()
+        except Exception:
+            pass
+        logger.exception("[COMPROMISOS] Error al actualizar SQLite.compromisos.")
+        raise
+    finally:
+        conn.close()
+    duracion = time.perf_counter() - t0
+    resultado = {
+        "actualizado": True,
+        "filas_origen": filas_origen,
+        "filas_sqlite": filas_sqlite,
+        "duracion_segundos": round(duracion, 3),
+    }
+    logger.info(
+        "[COMPROMISOS] Fotografia RAW actualizada correctamente | "
+        f"filas={filas_sqlite} | duracion={duracion:.3f} s."
+    )
+    return resultado
 
 
 def asegurar_tabla_maestro_tp():
@@ -1429,6 +1547,45 @@ def _tabla_vta_tiene_periodo_archivo(conn) -> bool:
     return "PeriodoArchivo" in [fila[1] for fila in cursor.fetchall()]
 
 
+def _migrar_esquema_vta_cod_cliente_pad(conn):
+    """
+    Migración aditiva y no destructiva de SQLite.vta.
+
+    Incorpora CodClientePad cuando la tabla vta existente todavía
+    pertenece al contrato anterior. Los registros históricos se
+    conservan íntegramente y reciben NULL en CodClientePad.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND LOWER(name)='vta' LIMIT 1;"
+    )
+    if cursor.fetchone() is None:
+        return False
+
+    cursor.execute("PRAGMA table_info(vta);")
+    columnas = [fila[1] for fila in cursor.fetchall()]
+    if "CodClientePad" in columnas:
+        return False
+
+    logger.warning("[VTA_MIGRACION] Incorporando columna CodClientePad a SQLite.vta.")
+    try:
+        conn.execute("BEGIN IMMEDIATE;")
+        conn.execute('ALTER TABLE vta ADD COLUMN "CodClientePad" TEXT;')
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        logger.exception(
+            "[VTA_MIGRACION] Error al incorporar CodClientePad a SQLite.vta."
+        )
+        raise
+
+    logger.info(
+        "[VTA_MIGRACION] CodClientePad incorporado correctamente. "
+        "Los registros históricos existentes conservan NULL."
+    )
+    return True
+
+
 def _validar_esquema_vta_incremental(conn, df: pd.DataFrame):
     """Exige igualdad exacta entre CSV mensual y tabla vta persistida."""
     cursor = conn.cursor()
@@ -1603,6 +1760,8 @@ def sincronizar_vta_incremental(
         )
 
     carga_inicial = not _tabla_vta_tiene_periodo_archivo(conn)
+    if not carga_inicial:
+        _migrar_esquema_vta_cod_cliente_pad(conn)
     if carga_inicial:
         t0 = time.perf_counter()
         logger.warning(
@@ -2539,6 +2698,21 @@ CHKIN_COLUMNAS = [
     "Tiempo en PDV",
     "Valido",
 ]
+CHKIN_MAPEO_COLUMNAS_ORIGEN = {
+    "Codigo": "Codigo Cliente",
+    "Cliente": "Cliente",
+    "Supervisor": "Supervisor",
+    "Vendedor": "Codigo Empleado",
+    "Es Valido": "Valido",
+    "Fecha Checkin": "Fecha Check-in",
+    "Fecha Checkout": "Fecha Check-out",
+    "Tiempo en PDV": "Tiempo en PDV",
+    "Mot. Invalidez CI": "Motivo Invalidez Check-in",
+    "Mot. Invalidez CO": "Motivo Invalidez Check-out",
+    "Coordenadas CI": "Coordenadas Check-in",
+    "Coordenadas CO": "Coordenadas Check-out",
+    "Existe Carga": "Existe Carga",
+}
 
 
 def _normalizar_timestamp_chkin(serie: pd.Series, nombre_columna: str) -> pd.Series:
@@ -2555,15 +2729,38 @@ def _normalizar_timestamp_chkin(serie: pd.Series, nombre_columna: str) -> pd.Ser
 
 
 def _leer_chkin_desde_excel(archivo) -> pd.DataFrame:
-    """Lee la hoja Data de CHKIN y valida el contrato RAW antes de persistir."""
+    """Lee CHKIN desde Data o Sheet1 y valida el contrato RAW antes de persistir."""
     xls = pd.ExcelFile(archivo)
-    if "Data" not in xls.sheet_names:
+    if "Data" in xls.sheet_names:
+        hoja_chkin = "Data"
+    elif "Sheet1" in xls.sheet_names:
+        hoja_chkin = "Sheet1"
+    else:
         raise ValueError(
-            "CHKIN.xlsx no contiene la hoja requerida 'Data'. "
+            "CHKIN.xlsx no contiene una hoja reconocida. "
+            "Se esperaba 'Data' o 'Sheet1'. "
             f"Hojas encontradas: {xls.sheet_names}."
         )
-    df = pd.read_excel(archivo, sheet_name="Data", dtype=object)
+    df = pd.read_excel(archivo, sheet_name=hoja_chkin, dtype=object)
     df.columns = [str(columna).strip() for columna in df.columns]
+
+    columnas_nuevas_presentes = [
+        columna for columna in CHKIN_MAPEO_COLUMNAS_ORIGEN if columna in df.columns
+    ]
+    if columnas_nuevas_presentes:
+        faltantes_origen = [
+            columna
+            for columna in CHKIN_MAPEO_COLUMNAS_ORIGEN
+            if columna not in df.columns
+        ]
+        if faltantes_origen:
+            raise ValueError(
+                "CHKIN.xlsx contiene parcialmente el nuevo contrato de columnas. "
+                f"Faltantes en origen: {faltantes_origen}. "
+                f"Columnas encontradas: {list(df.columns)}."
+            )
+        df = df.rename(columns=CHKIN_MAPEO_COLUMNAS_ORIGEN)
+
     faltantes = [columna for columna in CHKIN_COLUMNAS if columna not in df.columns]
     extras = [columna for columna in df.columns if columna not in CHKIN_COLUMNAS]
     if faltantes or extras:

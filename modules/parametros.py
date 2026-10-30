@@ -21,8 +21,8 @@ def obtener_tabla_parametros() -> pd.DataFrame:
     if res is None or res.empty:
         df_default = pd.DataFrame(
             {
-                "PARAMETRO": ["Año", "Mes", "Dia Matinal", "Dia Venta", "Dia Anterior"],
-                "VALOR": ["2026", "9", "02/09/2026", "01/09/2026", "31/08/2026"],
+                "PARAMETRO": ["Año", "Mes", "Dia Matinal", "Dia Venta"],
+                "VALOR": ["2026", "9", "02/09/2026", "01/09/2026"],
             }
         )
         db.guardar_dataframe_sql(df_default, "parametros", if_exists="replace")

@@ -9,6 +9,9 @@ from modules.parametros import (
     es_entorno_local,
 )
 from modules.rep_kilos_core import render_rep_kilos_core
+from modules.rep_kilos_consolidado_core import (
+    render_rep_kilos_consolidado_core,
+)
 from modules.rep_obj_kilos_core import render_rep_obj_kilos_core
 from modules.rep_ccc_core import render_rep_ccc_core
 from modules.rep_cobertura_core import render_rep_cobertura_core
@@ -53,12 +56,7 @@ def calcular_fechas_operativas_default():
     else:
         dia_vta = hoy - timedelta(days=1)
 
-    if dia_vta.weekday() == 0:
-        dia_ant = dia_vta - timedelta(days=2)
-    else:
-        dia_ant = dia_vta - timedelta(days=1)
-
-    return hoy, dia_vta, dia_ant
+    return hoy, dia_vta
 
 
 def verificar_autenticacion():
@@ -125,22 +123,21 @@ def main():
         st.session_state["nivel_usuario"] = None
         st.rerun()
 
-    def_matinal, def_vta, def_ant = calcular_fechas_operativas_default()
+    def_matinal, def_vta = calcular_fechas_operativas_default()
 
-    if "sel_dia_matinal" not in st.session_state:
-        st.session_state["sel_dia_matinal"] = def_matinal
-    if "sel_dia_venta" not in st.session_state:
-        st.session_state["sel_dia_venta"] = def_vta
-    if "sel_dia_anterior" not in st.session_state:
-        st.session_state["sel_dia_anterior"] = def_ant
+    # Fechas editables: cambiar estos campos no modifica el escenario aplicado.
+    if "input_dia_matinal" not in st.session_state:
+        st.session_state["input_dia_matinal"] = def_matinal
+    if "input_dia_venta" not in st.session_state:
+        st.session_state["input_dia_venta"] = def_vta
+
+    # Fechas aplicadas: unica fuente temporal para filtros_globales.
+    if "applied_dia_matinal" not in st.session_state:
+        st.session_state["applied_dia_matinal"] = def_matinal
+    if "applied_dia_venta" not in st.session_state:
+        st.session_state["applied_dia_venta"] = def_vta
 
     st.sidebar.header("⚙️ Control de Datos")
-
-    if st.sidebar.button("🧹 Limpiar Caché", width="stretch"):
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        st.sidebar.success("¡Caché purgada con éxito!")
-        st.rerun()
 
     if st.sidebar.button("🔄 Recargar Bases", width="stretch"):
         t_inicio = time.time()
@@ -258,39 +255,73 @@ def main():
     st.sidebar.header("🎛️ Filtros Globales")
 
     with st.sidebar.expander("📅 Fechas de Referencia", expanded=True):
-        sel_dia_matinal = st.date_input(
+        input_dia_matinal = st.date_input(
             "Día Matinal",
             min_value=date(2020, 1, 1),
             format="DD/MM/YYYY",
-            key="sel_dia_matinal",
+            key="input_dia_matinal",
         )
-        sel_dia_venta = st.date_input(
+        input_dia_venta = st.date_input(
             "Día Venta",
             min_value=date(2020, 1, 1),
             format="DD/MM/YYYY",
-            key="sel_dia_venta",
-        )
-        sel_dia_anterior = st.date_input(
-            "Día Anterior",
-            min_value=date(2020, 1, 1),
-            format="DD/MM/YYYY",
-            key="sel_dia_anterior",
+            key="input_dia_venta",
         )
 
-    anio_sugerido = sel_dia_venta.year
-    mes_sugerido = sel_dia_venta.month
+        if st.button("🧪 Aplicar Fechas y Recalcular", width="stretch"):
+            if input_dia_venta > input_dia_matinal:
+                st.error("Día Venta no puede ser posterior a Día Matinal.")
+            else:
+                filtros_aplicados = {
+                    "anio": int(input_dia_venta.year),
+                    "mes": int(input_dia_venta.month),
+                    "dia_matinal": input_dia_matinal.strftime("%d/%m/%Y"),
+                    "dia_venta": input_dia_venta.strftime("%d/%m/%Y"),
+                }
+                try:
+                    db.sincronizar_parametros_desde_filtros(filtros_aplicados)
+                except Exception as e:
+                    st.error(
+                        f"Error al sincronizar parámetros globales con SQLite: {e}"
+                    )
+                else:
+                    st.session_state["applied_dia_matinal"] = input_dia_matinal
+                    st.session_state["applied_dia_venta"] = input_dia_venta
+                    st.cache_data.clear()
+                    st.cache_resource.clear()
+                    st.rerun()
+
+        st.caption(
+            "Escenario aplicado: "
+            f"Matinal {st.session_state['applied_dia_matinal'].strftime('%d/%m/%Y')} | "
+            f"Venta {st.session_state['applied_dia_venta'].strftime('%d/%m/%Y')}"
+        )
+
+    applied_dia_matinal = st.session_state["applied_dia_matinal"]
+    applied_dia_venta = st.session_state["applied_dia_venta"]
+
+    anio_sugerido = applied_dia_venta.year
+    mes_sugerido = applied_dia_venta.month
 
     opciones_anio = [2023, 2024, 2025, 2026, 2027, 2028]
     idx_anio = (
         opciones_anio.index(anio_sugerido) if anio_sugerido in opciones_anio else 3
     )
     anio_operativo = st.sidebar.selectbox(
-        "Año Operativo", opciones_anio, index=idx_anio, key="sel_anio_op"
+        "Año Operativo",
+        opciones_anio,
+        index=idx_anio,
+        key="sel_anio_op",
+        disabled=True,
     )
 
     opciones_mes = list(range(1, 13))
     mes_operativo = st.sidebar.selectbox(
-        "Mes Operativo", opciones_mes, index=mes_sugerido - 1, key="sel_mes_op"
+        "Mes Operativo",
+        opciones_mes,
+        index=mes_sugerido - 1,
+        key="sel_mes_op",
+        disabled=True,
     )
 
     sel_supervisor = st.sidebar.selectbox(
@@ -298,12 +329,11 @@ def main():
     )
 
     filtros_globales = {
-        "anio": int(sel_dia_venta.year),
-        "mes": int(sel_dia_venta.month),
+        "anio": int(applied_dia_venta.year),
+        "mes": int(applied_dia_venta.month),
         "supervisor": sel_supervisor,
-        "dia_matinal": sel_dia_matinal.strftime("%d/%m/%Y"),
-        "dia_venta": sel_dia_venta.strftime("%d/%m/%Y"),
-        "dia_anterior": sel_dia_anterior.strftime("%d/%m/%Y"),
+        "dia_matinal": applied_dia_matinal.strftime("%d/%m/%Y"),
+        "dia_venta": applied_dia_venta.strftime("%d/%m/%Y"),
     }
 
     try:
@@ -349,9 +379,13 @@ def main():
         titulos_tabs_maestro.append("📈 Tablero Gerencial")
         claves_tabs_maestro.append("GERENCIAL")
 
-    # Avance Kilos (Todos los niveles)
-    titulos_tabs_maestro.append("📊 Avance Kilos")
-    claves_tabs_maestro.append("KILOS")
+    # Kilos Consolidado (Todos los niveles)
+    titulos_tabs_maestro.append("📊 Kilos Consolidado")
+    claves_tabs_maestro.append("KILOS_CONSOLIDADO")
+    # Avance Kilos actual (Exclusivo Administrador)
+    if "Nivel 1" in nivel_actual:
+        titulos_tabs_maestro.append("📊 Avance Kilos")
+        claves_tabs_maestro.append("KILOS")
 
     # Composición Objetivos Kilos (Nivel 1 y Nivel 2 exclusivamente)
     if "Nivel 1" in nivel_actual or "Nivel 2" in nivel_actual:
@@ -391,6 +425,15 @@ def main():
                 render_rep_gerencial_core(filtros_globales)
                 print(
                     f"[PERF] render_rep_gerencial_core: {time.perf_counter() - t0_gc:.2f} s"
+                )
+        if "KILOS_CONSOLIDADO" in mapping_tabs:
+            with mapping_tabs["KILOS_CONSOLIDADO"]:
+                t0_kcc = time.perf_counter()
+                render_rep_kilos_consolidado_core(
+                    df_vta, df_rutas, df_ausencias, filtros_globales
+                )
+                print(
+                    f"[PERF] render_rep_kilos_consolidado_core: {time.perf_counter() - t0_kcc:.2f} s"
                 )
         if "KILOS" in mapping_tabs:
             with mapping_tabs["KILOS"]:
@@ -446,12 +489,14 @@ def main():
                 print(
                     f"[PERF] render_rep_gerencial_core: {time.perf_counter() - t0_gc:.2f} s"
                 )
-        if "KILOS" in mapping_tabs:
-            with mapping_tabs["KILOS"]:
-                t0_kc = time.perf_counter()
-                render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
+        if "KILOS_CONSOLIDADO" in mapping_tabs:
+            with mapping_tabs["KILOS_CONSOLIDADO"]:
+                t0_kcc = time.perf_counter()
+                render_rep_kilos_consolidado_core(
+                    df_vta, df_rutas, df_ausencias, filtros_globales
+                )
                 print(
-                    f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s"
+                    f"[PERF] render_rep_kilos_consolidado_core: {time.perf_counter() - t0_kcc:.2f} s"
                 )
         if "OBJ_KILOS" in mapping_tabs:
             with mapping_tabs["OBJ_KILOS"]:
@@ -491,12 +536,14 @@ def main():
 
     else:
         # Nivel 3: Supervisión (Simétrico: sin tabs huérfanas ni vacías)
-        if "KILOS" in mapping_tabs:
-            with mapping_tabs["KILOS"]:
-                t0_kc = time.perf_counter()
-                render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
+        if "KILOS_CONSOLIDADO" in mapping_tabs:
+            with mapping_tabs["KILOS_CONSOLIDADO"]:
+                t0_kcc = time.perf_counter()
+                render_rep_kilos_consolidado_core(
+                    df_vta, df_rutas, df_ausencias, filtros_globales
+                )
                 print(
-                    f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s"
+                    f"[PERF] render_rep_kilos_consolidado_core: {time.perf_counter() - t0_kcc:.2f} s"
                 )
         if "CCC" in mapping_tabs:
             with mapping_tabs["CCC"]:
