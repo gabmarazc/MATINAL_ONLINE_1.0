@@ -1,9 +1,13 @@
 # modules/business_rules/business_rules_compromisos.py
 import pandas as pd
+import streamlit as st
 
 from modules.core.core_compromisos import (
     COLUMNAS_COMPROMISOS,
     obtener_core_compromisos,
+)
+from modules.business_rules.business_rules_sugerido_mesa import (
+    construir_sugerido_mesa_ocho_reglas,
 )
 
 
@@ -175,10 +179,73 @@ def _calcular_comparacion(
     return pd.DataFrame(filas)
 
 
+def _agregar_sugerido_mesa_supervisor(
+    tablero_sugerido: pd.DataFrame,
+    vendedores: pd.DataFrame,
+) -> dict:
+    """Agrega SUGERIDO MESA solo para los vendedores del supervisor solicitado."""
+    codigos = set(
+        pd.to_numeric(vendedores["CodVend"], errors="coerce")
+        .dropna()
+        .astype(int)
+        .tolist()
+    )
+    base = tablero_sugerido.copy()
+    base["CodVendedor"] = pd.to_numeric(base["CodVendedor"], errors="coerce").astype(
+        "Int64"
+    )
+    base["SUGERIDO_MESA"] = pd.to_numeric(base["SUGERIDO_MESA"], errors="coerce")
+    base = base.loc[base["CodVendedor"].isin(codigos)].copy()
+
+    resultado = {}
+    for indicador in COLUMNAS_COMPROMISOS:
+        serie = base.loc[base["INDICADOR"].eq(indicador), "SUGERIDO_MESA"].dropna()
+        if indicador == INDICADOR_PROMEDIO:
+            resultado[indicador] = float(serie.iloc[0]) if not serie.empty else pd.NA
+        else:
+            resultado[indicador] = float(serie.sum()) if not serie.empty else 0.0
+    return resultado
+
+
+def _integrar_sugerido_en_tablero(
+    tablero: pd.DataFrame, sugerido: dict
+) -> pd.DataFrame:
+    resultado = tablero.copy()
+    resultado.insert(1, "SUGERIDO_MESA", resultado["INDICADOR"].map(sugerido))
+    return resultado
+
+
+@st.cache_data(show_spinner=False)
+def _obtener_sugerido_mesa_cacheado(
+    dia_sugerido: str,
+    anio_sugerido: int,
+    mes_sugerido: int,
+    dia_venta: str,
+) -> dict:
+    """
+    Cache exclusiva de SUGERIDO MESA por escenario operativo.
+    La version de SQLite.compromisos NO forma parte de la clave, por lo que
+    una recarga del formulario no recalcula VTA/CCC/MN/TP/SUGERIDO MESA.
+    """
+    filtros_sugerido = {
+        "anio": int(anio_sugerido),
+        "mes": int(mes_sugerido),
+        "dia_matinal": dia_sugerido,
+        "dia_venta": dia_venta,
+    }
+    return construir_sugerido_mesa_ocho_reglas(
+        dia_matinal=dia_sugerido,
+        anio=int(anio_sugerido),
+        mes=int(mes_sugerido),
+        filtros_globales=filtros_sugerido,
+    )
+
+
 def obtener_business_rules_compromisos(
     supervisor,
     dia_matinal=None,
     version_compromisos=None,
+    filtros_globales=None,
 ) -> dict:
     """
     Punto de entrada de BUSINESS_RULES_COMPROMISOS.
@@ -195,7 +262,7 @@ def obtener_business_rules_compromisos(
       ADOPCIÓN MN y TIENDAS PERFECTAS;
     - promedio: PORC SELLOUT MN.
 
-    Esta capa no calcula SUGERIDO_MESA y no renderiza UI.
+    Integra SUGERIDO_MESA desde BUSINESS_RULES_SUGERIDO_MESA y no renderiza UI.
     """
     supervisor_int = _normalizar_supervisor(supervisor)
 
@@ -213,6 +280,41 @@ def obtener_business_rules_compromisos(
 
     compromisos_vendedores = _agregar_compromisos_vendedores(vendedores)
     tablero = _calcular_comparacion(compromisos_vendedores, fila_supervisor)
+
+    # SUGERIDO MESA utiliza el mismo Dia Matinal y el mismo contexto operativo
+    # recibido desde app.py. No redefine ninguna de sus ocho reglas.
+    filtros_sugerido = dict(filtros_globales or {})
+    if dia_matinal is not None:
+        filtros_sugerido["dia_matinal"] = dia_matinal
+    dia_sugerido = filtros_sugerido.get("dia_matinal")
+    if not dia_sugerido:
+        raise BusinessRulesCompromisosError(
+            "Se requiere dia_matinal para integrar SUGERIDO_MESA."
+        )
+    fecha_sugerido = pd.to_datetime(dia_sugerido, errors="coerce", dayfirst=True)
+    if pd.isna(fecha_sugerido):
+        raise BusinessRulesCompromisosError(
+            f"Dia Matinal invalido para SUGERIDO_MESA: {dia_sugerido!r}."
+        )
+    anio_sugerido = int(filtros_sugerido.get("anio", fecha_sugerido.year))
+    mes_sugerido = int(filtros_sugerido.get("mes", fecha_sugerido.month))
+    filtros_sugerido.setdefault("anio", anio_sugerido)
+    filtros_sugerido.setdefault("mes", mes_sugerido)
+    filtros_sugerido.setdefault(
+        "dia_venta", pd.Timestamp(fecha_sugerido).strftime("%d/%m/%Y")
+    )
+
+    motor_sugerido = _obtener_sugerido_mesa_cacheado(
+        dia_sugerido=pd.Timestamp(fecha_sugerido).strftime("%d/%m/%Y"),
+        anio_sugerido=anio_sugerido,
+        mes_sugerido=mes_sugerido,
+        dia_venta=str(filtros_sugerido["dia_venta"]),
+    )
+    sugerido_supervisor = _agregar_sugerido_mesa_supervisor(
+        motor_sugerido["tablero"], vendedores
+    )
+    tablero = _integrar_sugerido_en_tablero(tablero, sugerido_supervisor)
+
     control_carga = _estado_carga_vendedores(vendedores)
 
     dia_valores = (
@@ -242,5 +344,7 @@ def obtener_business_rules_compromisos(
         "control_carga": control_carga,
         "vendedores": vendedores.drop(columns=["SUP_Numerico"]).reset_index(drop=True),
         "supervisor": fila_supervisor.drop(labels=["SUP_Numerico"]),
+        "sugerido_mesa": sugerido_supervisor,
+        "sugerido_mesa_detalle": motor_sugerido,
         "metadata": metadata,
     }

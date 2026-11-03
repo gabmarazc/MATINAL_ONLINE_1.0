@@ -1,32 +1,28 @@
 # modules/business_rules/business_rules_sugerido_mesa.py
 """
-Motor analitico de SUGERIDO MESA para COMPROMISOS.
+Motor analitico SUGERIDO MESA V1 para COMPROMISOS.
 
 Arquitectura:
     CORE_CLIENTES + CORE_VENTAS_BASE -> BUSINESS_RULES_SUGERIDO_MESA
 
-Principios institucionales:
+Regla V1:
 - CORE_CLIENTES determina la cartera actual Cliente -> CodVendedor.
-- La historia de ventas pertenece al cliente, no al vendedor historico.
-- El sugerido solo se calcula para clientes de la cartera actual cuyo DiaVisita
-  coincide con el Dia Matinal.
-- La historia utiliza exclusivamente compras positivas de los tres meses
-  anteriores al Dia Matinal.
-- La unidad analitica es Cliente x Segmento.
-- Los segmentos iniciales son PLAT_GOLD y SILVER_BRZ.
-- El patron principal buscado es LLENADO_REPOSICION, pero no se impone.
-- Si existe otro patron, se identifica y se aplica un modelo compatible.
+- Solo se consideran clientes cuya visita corresponde al Dia Matinal.
+- La historia pertenece al cliente, no al vendedor historico de VTA.
+- Se utilizan exclusivamente compras positivas de los tres meses anteriores.
+- La unidad historica es Cliente x FechaCompra x Segmento.
+- Los segmentos son PLAT_GOLD y SILVER_BRZ.
+- SugeridoKgCliente es la mediana de KgCompra positivos.
+- Sin historia positiva, el sugerido es 0.0.
 - Esta capa no lee SQLite, Excel, RAW ni STAGING directamente.
 - Esta capa no renderiza Streamlit ni modifica COMPROMISOS.
 """
 
 from __future__ import annotations
 
-import math
 import time
 import unicodedata
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -35,10 +31,6 @@ import streamlit as st
 from modules.core.core_clientes import obtener_core_clientes
 from modules.core.core_ventas_base import obtener_core_ventas_base
 
-
-# =============================================================================
-# CONTRATOS Y CONSTANTES
-# =============================================================================
 
 SEGMENTOS_SUGERIDO = ("PLAT_GOLD", "SILVER_BRZ")
 
@@ -59,23 +51,7 @@ MAPEO_DIA_SEMANA = {
     6: "DOMINGO",
 }
 
-PATRON_LLENADO_REPOSICION = "LLENADO_REPOSICION"
-PATRON_ESTABLE = "ESTABLE"
-PATRON_TENDENCIA_CRECIENTE = "TENDENCIA_CRECIENTE"
-PATRON_TENDENCIA_DECRECIENTE = "TENDENCIA_DECRECIENTE"
-PATRON_ERRATICO = "ERRATICO"
-PATRON_HISTORIA_INSUFICIENTE = "HISTORIA_INSUFICIENTE"
-PATRON_SIN_HISTORIA = "SIN_HISTORIA"
-
-MODELO_ALTERNANCIA = "ALTERNANCIA_LLENADO_REPOSICION"
 MODELO_MEDIANA = "MEDIANA"
-MODELO_PROMEDIO = "PROMEDIO"
-MODELO_PENULTIMA = "PENULTIMA_COMPRA"
-MODELO_PONDERADO_PENULTIMA = "PONDERADO_PENULTIMA"
-MODELO_PONDERADO_RECIENTE = "PONDERADO_RECIENTE"
-MODELO_TENDENCIA = "TENDENCIA_CONTROLADA"
-MODELO_UNICA_COMPRA = "UNICA_COMPRA"
-MODELO_DOS_COMPRAS = "PROMEDIO_DOS_COMPRAS"
 MODELO_SIN_HISTORIA = "SIN_HISTORIA"
 
 COLUMNAS_DETALLE = [
@@ -93,18 +69,7 @@ COLUMNAS_DETALLE = [
     "PenultimaCompraKg",
     "MediaKg",
     "MedianaKg",
-    "DesvioKg",
-    "CoeficienteVariacion",
-    "PendienteTendencia",
-    "ProporcionAlternancia",
-    "PromedioNivelAlto",
-    "PromedioNivelBajo",
-    "RelacionAltoBajo",
-    "PatronDetectado",
-    "FaseUltimaCompra",
-    "FaseProximaEsperada",
     "ModeloSeleccionado",
-    "ErrorHistoricoMAE",
     "NivelConfianza",
     "SugeridoKgCliente",
 ]
@@ -130,26 +95,12 @@ class BusinessRulesSugeridoMesaError(RuntimeError):
 
 @dataclass(frozen=True)
 class ConfiguracionSugeridoMesa:
-    """Parametros controlados de clasificacion y modelado."""
+    """Parametros controlados de Sugerido Mesa V1."""
 
     meses_historia: int = 3
-    minimo_compras_clasificacion: int = 4
-    minimo_compras_backtesting: int = 5
-    cv_estable_max: float = 0.25
-    proporcion_alternancia_min: float = 0.75
-    relacion_alto_bajo_min: float = 1.50
-    correlacion_alternancia_max: float = -0.30
-    tendencia_relativa_min: float = 0.08
-    recorte_tendencia_inferior: float = 0.50
-    recorte_tendencia_superior: float = 1.50
 
 
 CONFIG_DEFAULT = ConfiguracionSugeridoMesa()
-
-
-# =============================================================================
-# UTILIDADES DE NORMALIZACION Y CONTRATO
-# =============================================================================
 
 
 def _normalizar_texto(valor) -> str:
@@ -197,11 +148,6 @@ def _dataframe_resumen_vacio() -> pd.DataFrame:
     return pd.DataFrame(columns=COLUMNAS_RESUMEN)
 
 
-# =============================================================================
-# CARTERA ACTUAL DEL DIA MATINAL
-# =============================================================================
-
-
 def _obtener_nombre_cliente(df: pd.DataFrame) -> pd.Series:
     columna = _resolver_columna(
         df,
@@ -218,27 +164,24 @@ def obtener_cartera_dia_matinal(
 ) -> pd.DataFrame:
     """
     Devuelve la cartera actual que corresponde gestionar en el Dia Matinal.
-
-    La apropiacion Cliente -> CodVendedor proviene exclusivamente de
-    CORE_CLIENTES. No se utiliza el vendedor historico de VTA ni el vendedor
-    historico de CORE_RUTAS.
+    La apropiacion Cliente -> CodVendedor proviene de CORE_CLIENTES.
     """
     fecha_matinal = _normalizar_fecha_unica(dia_matinal, "dia_matinal")
     clientes = (
         obtener_core_clientes() if core_clientes is None else core_clientes.copy()
     )
 
+    columnas_salida = [
+        "DiaMatinal",
+        "Cliente",
+        "NombreCliente",
+        "CodVendedor",
+        "Ruta",
+        "DiaVisita",
+    ]
+
     if clientes is None or clientes.empty:
-        return pd.DataFrame(
-            columns=[
-                "DiaMatinal",
-                "Cliente",
-                "NombreCliente",
-                "CodVendedor",
-                "Ruta",
-                "DiaVisita",
-            ]
-        )
+        return pd.DataFrame(columns=columnas_salida)
 
     _validar_columnas(
         clientes,
@@ -254,8 +197,8 @@ def obtener_cartera_dia_matinal(
         trabajo["CodVendedor"], errors="coerce"
     ).astype("Int64")
     trabajo["DiaVisitaNormalizado"] = _normalizar_serie_texto(trabajo["DiaVisita"])
-    dia_objetivo = MAPEO_DIA_SEMANA[int(fecha_matinal.weekday())]
 
+    dia_objetivo = MAPEO_DIA_SEMANA[int(fecha_matinal.weekday())]
     trabajo = trabajo.loc[
         trabajo["Cliente"].notna()
         & trabajo["CodVendedor"].notna()
@@ -263,16 +206,7 @@ def obtener_cartera_dia_matinal(
     ].copy()
 
     if trabajo.empty:
-        return pd.DataFrame(
-            columns=[
-                "DiaMatinal",
-                "Cliente",
-                "NombreCliente",
-                "CodVendedor",
-                "Ruta",
-                "DiaVisita",
-            ]
-        )
+        return pd.DataFrame(columns=columnas_salida)
 
     contradicciones = (
         trabajo.groupby("Cliente", dropna=False)["CodVendedor"]
@@ -288,30 +222,14 @@ def obtener_cartera_dia_matinal(
     trabajo["NombreCliente"] = _obtener_nombre_cliente(trabajo)
     if "Ruta" not in trabajo.columns:
         trabajo["Ruta"] = pd.NA
-
     trabajo["DiaMatinal"] = fecha_matinal
-    resultado = trabajo[
-        [
-            "DiaMatinal",
-            "Cliente",
-            "NombreCliente",
-            "CodVendedor",
-            "Ruta",
-            "DiaVisita",
-        ]
-    ].copy()
 
-    resultado = (
-        resultado.sort_values(["CodVendedor", "Cliente"], kind="stable")
+    return (
+        trabajo[columnas_salida]
+        .sort_values(["CodVendedor", "Cliente"], kind="stable")
         .drop_duplicates(subset=["Cliente"], keep="first")
         .reset_index(drop=True)
     )
-    return resultado
-
-
-# =============================================================================
-# HISTORIA POSITIVA DE COMPRAS
-# =============================================================================
 
 
 def _asegurar_segmento_comercial(df: pd.DataFrame) -> pd.DataFrame:
@@ -361,6 +279,7 @@ def _asegurar_segmento_comercial(df: pd.DataFrame) -> pd.DataFrame:
         "SILVER_BRZ CRACKERS": "SILVER_BRZ",
         "SILVER_BRZ CEREALS": "SILVER_BRZ",
     }
+
     trabajo["Segmento"] = segmento_origen.map(mapeo).astype("string")
     return trabajo
 
@@ -386,29 +305,20 @@ def preparar_historia_compras_positivas(
     configuracion: ConfiguracionSugeridoMesa = CONFIG_DEFAULT,
 ) -> tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
     """
-    Construye compras positivas agregadas por Cliente x FechaCompra x Segmento.
-
-    La historia se filtra por Cliente, no por vendedor historico. De este modo,
-    un cambio de cartera no elimina el comportamiento previo del cliente.
+    Construye compras positivas por Cliente x FechaCompra x Segmento.
+    Los dias sin compra no se incorporan como cero.
     """
     fecha_matinal = _normalizar_fecha_unica(dia_matinal, "dia_matinal")
     fecha_desde = fecha_matinal - pd.DateOffset(months=configuracion.meses_historia)
     fecha_hasta = fecha_matinal - pd.Timedelta(days=1)
+    columnas_historia = ["Cliente", "FechaCompra", "Segmento", "KgCompra"]
 
     if cartera_dia is None or cartera_dia.empty:
-        return (
-            pd.DataFrame(columns=["Cliente", "FechaCompra", "Segmento", "KgCompra"]),
-            fecha_desde,
-            fecha_hasta,
-        )
+        return pd.DataFrame(columns=columnas_historia), fecha_desde, fecha_hasta
 
     ventas = obtener_core_ventas_base() if core_ventas is None else core_ventas.copy()
     if ventas is None or ventas.empty:
-        return (
-            pd.DataFrame(columns=["Cliente", "FechaCompra", "Segmento", "KgCompra"]),
-            fecha_desde,
-            fecha_hasta,
-        )
+        return pd.DataFrame(columns=columnas_historia), fecha_desde, fecha_hasta
 
     _validar_columnas(
         ventas,
@@ -428,7 +338,11 @@ def preparar_historia_compras_positivas(
     clientes_dia = set(cartera_dia["Cliente"].dropna().astype("Int64").tolist())
     trabajo = trabajo.loc[
         trabajo["Cliente"].isin(clientes_dia)
-        & trabajo["FechaCompra"].between(fecha_desde, fecha_hasta, inclusive="both")
+        & trabajo["FechaCompra"].between(
+            fecha_desde,
+            fecha_hasta,
+            inclusive="both",
+        )
     ].copy()
 
     trabajo = _filtrar_universo_ventas(trabajo)
@@ -438,11 +352,7 @@ def preparar_historia_compras_positivas(
     ].copy()
 
     if trabajo.empty:
-        return (
-            pd.DataFrame(columns=["Cliente", "FechaCompra", "Segmento", "KgCompra"]),
-            fecha_desde,
-            fecha_hasta,
-        )
+        return pd.DataFrame(columns=columnas_historia), fecha_desde, fecha_hasta
 
     historia = (
         trabajo.groupby(
@@ -455,387 +365,59 @@ def preparar_historia_compras_positivas(
     )
     historia = historia.loc[historia["KgCompra"].gt(0)].copy()
     historia = historia.sort_values(
-        ["Cliente", "Segmento", "FechaCompra"], kind="stable"
+        ["Cliente", "Segmento", "FechaCompra"],
+        kind="stable",
     ).reset_index(drop=True)
+
     return historia, fecha_desde, fecha_hasta
 
 
-# =============================================================================
-# CARACTERISTICAS Y DETECCION DE PATRONES
-# =============================================================================
-
-
-def _pendiente_lineal(valores: np.ndarray) -> float:
-    if len(valores) < 2:
-        return 0.0
-    x = np.arange(len(valores), dtype=float)
-    return float(np.polyfit(x, valores.astype(float), 1)[0])
-
-
-def _alternancias(valores: np.ndarray) -> tuple[float, float]:
-    """Devuelve proporcion de alternancia y correlacion lag-1."""
-    if len(valores) < 3:
-        return 0.0, 0.0
-
-    dif = np.diff(valores.astype(float))
-    signos = np.sign(dif)
-    signos = signos[signos != 0]
-    if len(signos) < 2:
-        proporcion = 0.0
-    else:
-        proporcion = float(np.mean(signos[1:] != signos[:-1]))
-
-    x = valores[:-1].astype(float)
-    y = valores[1:].astype(float)
-    if len(x) < 2 or np.std(x) == 0 or np.std(y) == 0:
-        correlacion = 0.0
-    else:
-        correlacion = float(np.corrcoef(x, y)[0, 1])
-        if not np.isfinite(correlacion):
-            correlacion = 0.0
-    return proporcion, correlacion
-
-
-def _niveles_alto_bajo(valores: np.ndarray) -> tuple[float, float, float]:
-    if len(valores) == 0:
-        return 0.0, 0.0, 0.0
-    mediana = float(np.median(valores))
-    altos = valores[valores > mediana]
-    bajos = valores[valores <= mediana]
-    promedio_alto = float(np.mean(altos)) if len(altos) else mediana
-    promedio_bajo = float(np.mean(bajos)) if len(bajos) else mediana
-    relacion = promedio_alto / promedio_bajo if promedio_bajo > 0 else 0.0
-    return promedio_alto, promedio_bajo, float(relacion)
-
-
-def extraer_caracteristicas_patron(valores: np.ndarray) -> dict:
-    valores = np.asarray(valores, dtype=float)
-    valores = valores[np.isfinite(valores) & (valores > 0)]
-
-    if len(valores) == 0:
-        return {
-            "cantidad": 0,
-            "ultima": 0.0,
-            "penultima": 0.0,
-            "media": 0.0,
-            "mediana": 0.0,
-            "desvio": 0.0,
-            "cv": 0.0,
-            "pendiente": 0.0,
-            "pendiente_relativa": 0.0,
-            "proporcion_alternancia": 0.0,
-            "correlacion_lag1": 0.0,
-            "promedio_alto": 0.0,
-            "promedio_bajo": 0.0,
-            "relacion_alto_bajo": 0.0,
-        }
-
-    media = float(np.mean(valores))
-    mediana = float(np.median(valores))
-    desvio = float(np.std(valores, ddof=1)) if len(valores) > 1 else 0.0
-    cv = desvio / media if media > 0 else 0.0
-    pendiente = _pendiente_lineal(valores)
-    pendiente_relativa = pendiente / media if media > 0 else 0.0
-    proporcion, correlacion = _alternancias(valores)
-    promedio_alto, promedio_bajo, relacion = _niveles_alto_bajo(valores)
-
-    return {
-        "cantidad": int(len(valores)),
-        "ultima": float(valores[-1]),
-        "penultima": float(valores[-2]) if len(valores) >= 2 else 0.0,
-        "media": media,
-        "mediana": mediana,
-        "desvio": desvio,
-        "cv": float(cv),
-        "pendiente": pendiente,
-        "pendiente_relativa": float(pendiente_relativa),
-        "proporcion_alternancia": proporcion,
-        "correlacion_lag1": correlacion,
-        "promedio_alto": promedio_alto,
-        "promedio_bajo": promedio_bajo,
-        "relacion_alto_bajo": relacion,
-    }
-
-
-def detectar_patron_compra(
-    caracteristicas: dict,
-    configuracion: ConfiguracionSugeridoMesa = CONFIG_DEFAULT,
-) -> str:
-    n = int(caracteristicas["cantidad"])
-    if n == 0:
-        return PATRON_SIN_HISTORIA
-    if n < configuracion.minimo_compras_clasificacion:
-        return PATRON_HISTORIA_INSUFICIENTE
-
-    es_alternancia = (
-        caracteristicas["proporcion_alternancia"]
-        >= configuracion.proporcion_alternancia_min
-        and caracteristicas["relacion_alto_bajo"]
-        >= configuracion.relacion_alto_bajo_min
-        and caracteristicas["correlacion_lag1"]
-        <= configuracion.correlacion_alternancia_max
-        and abs(caracteristicas["pendiente_relativa"])
-        < configuracion.tendencia_relativa_min
-    )
-    if es_alternancia:
-        return PATRON_LLENADO_REPOSICION
-
-    if caracteristicas["cv"] <= configuracion.cv_estable_max:
-        if (
-            caracteristicas["pendiente_relativa"]
-            >= configuracion.tendencia_relativa_min
-        ):
-            return PATRON_TENDENCIA_CRECIENTE
-        if (
-            caracteristicas["pendiente_relativa"]
-            <= -configuracion.tendencia_relativa_min
-        ):
-            return PATRON_TENDENCIA_DECRECIENTE
-        return PATRON_ESTABLE
-
-    if caracteristicas["pendiente_relativa"] >= configuracion.tendencia_relativa_min:
-        return PATRON_TENDENCIA_CRECIENTE
-    if caracteristicas["pendiente_relativa"] <= -configuracion.tendencia_relativa_min:
-        return PATRON_TENDENCIA_DECRECIENTE
-    return PATRON_ERRATICO
-
-
-def _fase_valor(valor: float, mediana: float) -> str:
-    if valor <= 0:
-        return "SIN_FASE"
-    return "LLENADO" if valor > mediana else "REPOSICION"
-
-
-# =============================================================================
-# MODELOS CANDIDATOS
-# =============================================================================
-
-
-def _modelo_mediana(historia: np.ndarray) -> float:
-    return float(np.median(historia))
-
-
-def _modelo_promedio(historia: np.ndarray) -> float:
-    return float(np.mean(historia))
-
-
-def _modelo_penultima(historia: np.ndarray) -> float:
-    if len(historia) < 2:
-        return float(historia[-1])
-    return float(historia[-2])
-
-
-def _modelo_ponderado_penultima(historia: np.ndarray) -> float:
-    if len(historia) == 1:
-        return float(historia[-1])
-    if len(historia) == 2:
-        return float(0.60 * historia[-2] + 0.40 * historia[-1])
-    resto = float(np.mean(historia[:-2]))
-    return float(0.50 * historia[-2] + 0.25 * historia[-1] + 0.25 * resto)
-
-
-def _modelo_ponderado_reciente(historia: np.ndarray) -> float:
-    if len(historia) == 1:
-        return float(historia[-1])
-    if len(historia) == 2:
-        return float(0.60 * historia[-1] + 0.40 * historia[-2])
-    resto = float(np.mean(historia[:-2]))
-    return float(0.50 * historia[-1] + 0.30 * historia[-2] + 0.20 * resto)
-
-
-def _modelo_alternancia(historia: np.ndarray) -> float:
-    if len(historia) < 2:
-        return float(historia[-1])
-
-    mediana = float(np.median(historia))
-    ultima_fase = _fase_valor(float(historia[-1]), mediana)
-    fase_esperada = "REPOSICION" if ultima_fase == "LLENADO" else "LLENADO"
-
-    if fase_esperada == "LLENADO":
-        misma_fase = historia[historia > mediana]
-    else:
-        misma_fase = historia[historia <= mediana]
-
-    promedio_fase = (
-        float(np.mean(misma_fase)) if len(misma_fase) else float(historia[-2])
-    )
-    return float(0.50 * historia[-2] + 0.30 * promedio_fase + 0.20 * mediana)
-
-
-def _modelo_tendencia_controlada(
-    historia: np.ndarray,
-    configuracion: ConfiguracionSugeridoMesa = CONFIG_DEFAULT,
-) -> float:
-    if len(historia) < 2:
-        return float(historia[-1])
-    pendiente = _pendiente_lineal(historia)
-    proyectado = float(historia[-1] + pendiente)
-    mediana = float(np.median(historia))
-    piso = mediana * configuracion.recorte_tendencia_inferior
-    techo = mediana * configuracion.recorte_tendencia_superior
-    return float(np.clip(proyectado, piso, techo))
-
-
-MODELOS_BASE: dict[str, Callable[[np.ndarray], float]] = {
-    MODELO_MEDIANA: _modelo_mediana,
-    MODELO_PROMEDIO: _modelo_promedio,
-    MODELO_PENULTIMA: _modelo_penultima,
-    MODELO_PONDERADO_PENULTIMA: _modelo_ponderado_penultima,
-    MODELO_PONDERADO_RECIENTE: _modelo_ponderado_reciente,
-    MODELO_ALTERNANCIA: _modelo_alternancia,
-}
-
-
-def _modelos_compatibles(patron: str) -> list[str]:
-    if patron == PATRON_LLENADO_REPOSICION:
-        return [
-            MODELO_ALTERNANCIA,
-            MODELO_PONDERADO_PENULTIMA,
-            MODELO_PENULTIMA,
-            MODELO_MEDIANA,
-        ]
-    if patron == PATRON_ESTABLE:
-        return [MODELO_MEDIANA, MODELO_PROMEDIO, MODELO_PONDERADO_RECIENTE]
-    if patron in {PATRON_TENDENCIA_CRECIENTE, PATRON_TENDENCIA_DECRECIENTE}:
-        return [MODELO_TENDENCIA, MODELO_PONDERADO_RECIENTE, MODELO_MEDIANA]
-    if patron == PATRON_ERRATICO:
-        return [MODELO_MEDIANA, MODELO_PONDERADO_PENULTIMA, MODELO_PROMEDIO]
-    return [MODELO_MEDIANA]
-
-
-def _predecir_modelo(
-    nombre_modelo: str,
-    historia: np.ndarray,
-    configuracion: ConfiguracionSugeridoMesa,
-) -> float:
-    if nombre_modelo == MODELO_TENDENCIA:
-        valor = _modelo_tendencia_controlada(historia, configuracion)
-    else:
-        funcion = MODELOS_BASE[nombre_modelo]
-        valor = funcion(historia)
-    if not np.isfinite(valor):
-        return 0.0
-    return max(0.0, float(valor))
-
-
-def evaluar_modelos_historicos(
-    valores: np.ndarray,
-    patron: str,
-    configuracion: ConfiguracionSugeridoMesa = CONFIG_DEFAULT,
-) -> tuple[str, float | pd._libs.missing.NAType]:
-    """Selecciona modelo mediante backtesting cronologico con error MAE."""
-    historia = np.asarray(valores, dtype=float)
-    historia = historia[np.isfinite(historia) & (historia > 0)]
-
-    if len(historia) == 0:
-        return MODELO_SIN_HISTORIA, pd.NA
-    if len(historia) == 1:
-        return MODELO_UNICA_COMPRA, pd.NA
-    if len(historia) == 2:
-        return MODELO_DOS_COMPRAS, pd.NA
-
-    candidatos = _modelos_compatibles(patron)
-    if len(historia) < configuracion.minimo_compras_backtesting:
-        preferido = candidatos[0]
-        return preferido, pd.NA
-
-    errores: dict[str, list[float]] = {modelo: [] for modelo in candidatos}
-    inicio = max(3, configuracion.minimo_compras_clasificacion - 1)
-
-    for posicion in range(inicio, len(historia)):
-        entrenamiento = historia[:posicion]
-        real = float(historia[posicion])
-        patron_parcial = detectar_patron_compra(
-            extraer_caracteristicas_patron(entrenamiento),
-            configuracion,
-        )
-        compatibles_parciales = _modelos_compatibles(patron_parcial)
-
-        for modelo in candidatos:
-            if modelo not in compatibles_parciales and modelo not in {
-                MODELO_MEDIANA,
-                MODELO_PROMEDIO,
-            }:
-                continue
-            predicho = _predecir_modelo(modelo, entrenamiento, configuracion)
-            errores[modelo].append(abs(real - predicho))
-
-    mae = {
-        modelo: float(np.mean(valores_error))
-        for modelo, valores_error in errores.items()
-        if valores_error
-    }
-    if not mae:
-        return candidatos[0], pd.NA
-
-    prioridad = {modelo: i for i, modelo in enumerate(candidatos)}
-    ganador = min(mae, key=lambda modelo: (mae[modelo], prioridad[modelo]))
-    return ganador, float(mae[ganador])
-
-
-def _nivel_confianza(cantidad: int, error_mae, media: float) -> str:
-    if cantidad == 0:
+def _nivel_confianza_por_cantidad(cantidad: int) -> str:
+    if cantidad <= 0:
         return "SIN_HISTORIA"
-    if cantidad < 4:
+    if cantidad <= 2:
         return "BAJA"
-    if pd.isna(error_mae):
+    if cantidad <= 5:
         return "MEDIA"
-    error_relativo = float(error_mae) / media if media > 0 else math.inf
-    if cantidad >= 6 and error_relativo <= 0.25:
-        return "ALTA"
-    if error_relativo <= 0.50:
-        return "MEDIA"
-    return "BAJA"
+    return "ALTA"
 
 
 def calcular_sugerido_serie(
     valores: np.ndarray,
     configuracion: ConfiguracionSugeridoMesa = CONFIG_DEFAULT,
 ) -> dict:
+    """Calcula Sugerido Mesa V1 usando exclusivamente la mediana."""
+    del configuracion
+
     historia = np.asarray(valores, dtype=float)
     historia = historia[np.isfinite(historia) & (historia > 0)]
-    caracteristicas = extraer_caracteristicas_patron(historia)
-    patron = detectar_patron_compra(caracteristicas, configuracion)
-    modelo, error_mae = evaluar_modelos_historicos(
-        historia,
-        patron,
-        configuracion,
-    )
+    cantidad = int(len(historia))
 
-    if modelo == MODELO_SIN_HISTORIA:
-        sugerido = 0.0
-    elif modelo == MODELO_UNICA_COMPRA:
-        sugerido = float(historia[-1])
-    elif modelo == MODELO_DOS_COMPRAS:
-        sugerido = float(np.mean(historia))
-    else:
-        sugerido = _predecir_modelo(modelo, historia, configuracion)
+    if cantidad == 0:
+        return {
+            "cantidad": 0,
+            "ultima": 0.0,
+            "penultima": 0.0,
+            "media": 0.0,
+            "mediana": 0.0,
+            "modelo": MODELO_SIN_HISTORIA,
+            "nivel_confianza": "SIN_HISTORIA",
+            "sugerido": 0.0,
+        }
 
-    fase_ultima = "SIN_FASE"
-    fase_proxima = "SIN_FASE"
-    if patron == PATRON_LLENADO_REPOSICION and len(historia):
-        fase_ultima = _fase_valor(float(historia[-1]), caracteristicas["mediana"])
-        fase_proxima = "REPOSICION" if fase_ultima == "LLENADO" else "LLENADO"
+    mediana = float(np.median(historia))
+    media = float(np.mean(historia))
 
     return {
-        "caracteristicas": caracteristicas,
-        "patron": patron,
-        "modelo": modelo,
-        "error_mae": error_mae,
-        "nivel_confianza": _nivel_confianza(
-            caracteristicas["cantidad"],
-            error_mae,
-            caracteristicas["media"],
-        ),
-        "fase_ultima": fase_ultima,
-        "fase_proxima": fase_proxima,
-        "sugerido": round(float(sugerido), 3),
+        "cantidad": cantidad,
+        "ultima": float(historia[-1]),
+        "penultima": float(historia[-2]) if cantidad >= 2 else 0.0,
+        "media": media,
+        "mediana": mediana,
+        "modelo": MODELO_MEDIANA,
+        "nivel_confianza": _nivel_confianza_por_cantidad(cantidad),
+        "sugerido": round(mediana, 3),
     }
-
-
-# =============================================================================
-# DETALLE Y RESUMEN COMERCIAL
-# =============================================================================
 
 
 def construir_detalle_sugerido_mesa(
@@ -854,10 +436,13 @@ def construir_detalle_sugerido_mesa(
     segmentos["_k"] = 1
     universo = base.merge(segmentos, on="_k", how="inner").drop(columns="_k")
 
-    grupos_historia = {}
+    grupos_historia: dict[tuple, pd.DataFrame] = {}
     if historia is not None and not historia.empty:
         for clave, grupo in historia.groupby(["Cliente", "Segmento"], sort=False):
-            grupos_historia[clave] = grupo.sort_values("FechaCompra", kind="stable")
+            grupos_historia[clave] = grupo.sort_values(
+                "FechaCompra",
+                kind="stable",
+            )
 
     filas = []
     for fila in universo.itertuples(index=False):
@@ -872,8 +457,6 @@ def construir_detalle_sugerido_mesa(
             valores = grupo["KgCompra"].to_numpy(dtype=float)
 
         calculo = calcular_sugerido_serie(valores, configuracion)
-        car = calculo["caracteristicas"]
-
         filas.append(
             {
                 "DiaMatinal": fecha_matinal,
@@ -883,25 +466,14 @@ def construir_detalle_sugerido_mesa(
                 "Ruta": fila.Ruta,
                 "DiaVisita": fila.DiaVisita,
                 "Segmento": fila.Segmento,
-                "CantidadCompras3M": car["cantidad"],
+                "CantidadCompras3M": calculo["cantidad"],
                 "PrimeraCompraFecha": fechas.min() if not fechas.empty else pd.NaT,
                 "UltimaCompraFecha": fechas.max() if not fechas.empty else pd.NaT,
-                "UltimaCompraKg": car["ultima"],
-                "PenultimaCompraKg": car["penultima"],
-                "MediaKg": car["media"],
-                "MedianaKg": car["mediana"],
-                "DesvioKg": car["desvio"],
-                "CoeficienteVariacion": car["cv"],
-                "PendienteTendencia": car["pendiente"],
-                "ProporcionAlternancia": car["proporcion_alternancia"],
-                "PromedioNivelAlto": car["promedio_alto"],
-                "PromedioNivelBajo": car["promedio_bajo"],
-                "RelacionAltoBajo": car["relacion_alto_bajo"],
-                "PatronDetectado": calculo["patron"],
-                "FaseUltimaCompra": calculo["fase_ultima"],
-                "FaseProximaEsperada": calculo["fase_proxima"],
+                "UltimaCompraKg": calculo["ultima"],
+                "PenultimaCompraKg": calculo["penultima"],
+                "MediaKg": calculo["media"],
+                "MedianaKg": calculo["mediana"],
                 "ModeloSeleccionado": calculo["modelo"],
-                "ErrorHistoricoMAE": calculo["error_mae"],
                 "NivelConfianza": calculo["nivel_confianza"],
                 "SugeridoKgCliente": calculo["sugerido"],
             }
@@ -909,7 +481,8 @@ def construir_detalle_sugerido_mesa(
 
     detalle = pd.DataFrame(filas, columns=COLUMNAS_DETALLE)
     return detalle.sort_values(
-        ["CodVendedor", "Cliente", "Segmento"], kind="stable"
+        ["CodVendedor", "Cliente", "Segmento"],
+        kind="stable",
     ).reset_index(drop=True)
 
 
@@ -918,6 +491,7 @@ def _confianza_agregada(serie: pd.Series) -> str:
     con_historia = valores.loc[~valores.eq("SIN_HISTORIA")]
     if con_historia.empty:
         return "SIN_HISTORIA"
+
     pesos = {"BAJA": 1.0, "MEDIA": 2.0, "ALTA": 3.0}
     promedio = con_historia.map(pesos).dropna().mean()
     if pd.isna(promedio):
@@ -1004,16 +578,21 @@ def construir_resumen_sugerido_mesa(
         col_confianza = f"Confianza_{segmento}"
 
         resumen[col_sugerido] = pd.to_numeric(
-            resumen.get(col_sugerido, 0.0), errors="coerce"
+            resumen.get(col_sugerido, 0.0),
+            errors="coerce",
         ).fillna(0.0)
         resumen[col_historia] = (
-            pd.to_numeric(resumen.get(col_historia, 0), errors="coerce")
+            pd.to_numeric(
+                resumen.get(col_historia, 0),
+                errors="coerce",
+            )
             .fillna(0)
             .astype(int)
         )
         resumen[col_sin] = (resumen["ClientesRuta"] - resumen[col_historia]).clip(
             lower=0
         )
+
         if col_confianza not in resumen.columns:
             resumen[col_confianza] = "SIN_HISTORIA"
         else:
@@ -1026,11 +605,6 @@ def construir_resumen_sugerido_mesa(
     )
 
 
-# =============================================================================
-# PUNTO DE ENTRADA OFICIAL
-# =============================================================================
-
-
 @st.cache_data(show_spinner=False)
 def obtener_sugerido_mesa(
     dia_matinal,
@@ -1038,24 +612,20 @@ def obtener_sugerido_mesa(
     configuracion: ConfiguracionSugeridoMesa = CONFIG_DEFAULT,
 ) -> dict:
     """
-    Punto de entrada oficial del motor Sugerido Mesa.
+    Punto de entrada oficial Sugerido Mesa V1.
 
-    Devuelve:
-    - detalle: una fila por Cliente actual x Segmento;
-    - resumen: sugeridos agregados por CodVendedor;
-    - historia: compras positivas utilizadas;
-    - cartera_dia: clientes actuales correspondientes al Dia Matinal;
-    - metadata: trazabilidad del procesamiento.
-
-    No integra aun BUSINESS_RULES_COMPROMISOS. Esa integracion debe realizarse
-    despues de auditar y aprobar este motor de forma independiente.
+    Devuelve detalle, resumen, historia, cartera del dia y metadata.
+    No integra todavia BUSINESS_RULES_COMPROMISOS.
     """
     t0 = time.perf_counter()
     fecha_matinal = _normalizar_fecha_unica(dia_matinal, "dia_matinal")
-
     cartera_dia = obtener_cartera_dia_matinal(fecha_matinal)
+
     if cod_vendedor is not None:
-        vendedor = pd.to_numeric(pd.Series([cod_vendedor]), errors="coerce").iloc[0]
+        vendedor = pd.to_numeric(
+            pd.Series([cod_vendedor]),
+            errors="coerce",
+        ).iloc[0]
         if pd.isna(vendedor):
             raise BusinessRulesSugeridoMesaError(
                 f"cod_vendedor invalido: {cod_vendedor!r}."
@@ -1087,26 +657,28 @@ def obtener_sugerido_mesa(
         "fecha_historia_desde": fecha_desde,
         "fecha_historia_hasta": fecha_hasta,
         "meses_historia": configuracion.meses_historia,
-        "cantidad_clientes_ruta": int(cartera_dia["Cliente"].nunique())
-        if not cartera_dia.empty
-        else 0,
-        "cantidad_vendedores": int(cartera_dia["CodVendedor"].nunique())
-        if not cartera_dia.empty
-        else 0,
+        "modelo": MODELO_MEDIANA,
+        "cantidad_clientes_ruta": (
+            int(cartera_dia["Cliente"].nunique()) if not cartera_dia.empty else 0
+        ),
+        "cantidad_vendedores": (
+            int(cartera_dia["CodVendedor"].nunique()) if not cartera_dia.empty else 0
+        ),
         "compras_positivas_agregadas": int(len(historia)),
         "clientes_segmento_evaluados": int(len(detalle)),
-        "clientes_segmento_con_historia": int(detalle["CantidadCompras3M"].gt(0).sum())
-        if not detalle.empty
-        else 0,
-        "clientes_segmento_sin_historia": int(detalle["CantidadCompras3M"].eq(0).sum())
-        if not detalle.empty
-        else 0,
+        "clientes_segmento_con_historia": (
+            int(detalle["CantidadCompras3M"].gt(0).sum()) if not detalle.empty else 0
+        ),
+        "clientes_segmento_sin_historia": (
+            int(detalle["CantidadCompras3M"].eq(0).sum()) if not detalle.empty else 0
+        ),
         "duracion_segundos": round(time.perf_counter() - t0, 4),
     }
 
     print(
         "[PERF_BR] obtener_sugerido_mesa -> "
         f"{metadata['duracion_segundos']:.4f} s | "
+        f"modelo={metadata['modelo']} | "
         f"clientes={metadata['cantidad_clientes_ruta']} | "
         f"vendedores={metadata['cantidad_vendedores']} | "
         f"detalle={metadata['clientes_segmento_evaluados']}"
@@ -1117,5 +689,333 @@ def obtener_sugerido_mesa(
         "resumen": resumen,
         "historia": historia,
         "cartera_dia": cartera_dia.reset_index(drop=True),
+        "metadata": metadata,
+    }
+
+
+# =============================================================================
+# SUGERIDO MESA V2 - OCHO REGLAS DE COMPROMISOS
+# =============================================================================
+
+INDICADORES_SUGERIDO_MESA = (
+    "PLAT_GOLD",
+    "SILVER_BRZ",
+    "VARIOS ($)",
+    "CCC (Efect)",
+    "NC",
+    "PORC SELLOUT MN",
+    "ADOPCIÓN MN",
+    "TIENDAS PERFECTAS",
+)
+
+PORCENTAJE_CCC_EFECT = 0.70
+PORCENTAJE_SELLOUT_MN = 90.0
+
+
+def _importe_varios_por_cliente(
+    cartera_dia: pd.DataFrame,
+    dia_matinal,
+    core_ventas: pd.DataFrame | None = None,
+    configuracion: ConfiguracionSugeridoMesa = CONFIG_DEFAULT,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Mediana de venta diaria no-PepsiCo en $ por cliente de la ruta."""
+    fecha_matinal = _normalizar_fecha_unica(dia_matinal, "dia_matinal")
+    fecha_desde = fecha_matinal - pd.DateOffset(months=configuracion.meses_historia)
+    fecha_hasta = fecha_matinal - pd.Timedelta(days=1)
+
+    columnas_hist = ["Cliente", "FechaCompra", "ImporteVariosDia"]
+    columnas_med = ["Cliente", "CantidadComprasVarios3M", "MedianaVariosCliente"]
+
+    if cartera_dia is None or cartera_dia.empty:
+        return pd.DataFrame(columns=columnas_hist), pd.DataFrame(columns=columnas_med)
+
+    ventas = obtener_core_ventas_base() if core_ventas is None else core_ventas.copy()
+    if ventas is None or ventas.empty:
+        return pd.DataFrame(columns=columnas_hist), pd.DataFrame(columns=columnas_med)
+
+    _validar_columnas(
+        ventas,
+        ["Cliente", "ImporteNetoItem", "FechaCarga_dt", "Proveedor"],
+        "CORE_VENTAS_BASE",
+    )
+
+    trabajo = ventas.copy()
+    trabajo["Cliente"] = pd.to_numeric(trabajo["Cliente"], errors="coerce").astype(
+        "Int64"
+    )
+    trabajo["ImporteNetoItem"] = pd.to_numeric(
+        trabajo["ImporteNetoItem"], errors="coerce"
+    ).fillna(0.0)
+    trabajo["FechaCompra"] = pd.to_datetime(
+        trabajo["FechaCarga_dt"], errors="coerce"
+    ).dt.normalize()
+
+    clientes_dia = set(cartera_dia["Cliente"].dropna().astype("Int64").tolist())
+    proveedor = _normalizar_serie_texto(trabajo["Proveedor"])
+
+    trabajo = trabajo.loc[
+        trabajo["Cliente"].isin(clientes_dia)
+        & trabajo["FechaCompra"].between(fecha_desde, fecha_hasta, inclusive="both")
+        & ~proveedor.str.contains("PEPSICO", na=False)
+    ].copy()
+
+    if "TipoDeVenta" in trabajo.columns:
+        tipo = _normalizar_serie_texto(trabajo["TipoDeVenta"])
+        trabajo = trabajo.loc[~tipo.isin(TIPOS_VENTA_EXCLUIDOS)].copy()
+
+    if trabajo.empty:
+        return pd.DataFrame(columns=columnas_hist), pd.DataFrame(columns=columnas_med)
+
+    historia = (
+        trabajo.groupby(["Cliente", "FechaCompra"], as_index=False, dropna=False)[
+            "ImporteNetoItem"
+        ]
+        .sum()
+        .rename(columns={"ImporteNetoItem": "ImporteVariosDia"})
+    )
+    historia = historia.loc[historia["ImporteVariosDia"].gt(0)].copy()
+
+    if historia.empty:
+        return pd.DataFrame(columns=columnas_hist), pd.DataFrame(columns=columnas_med)
+
+    por_cliente = historia.groupby("Cliente", as_index=False).agg(
+        CantidadComprasVarios3M=("ImporteVariosDia", "size"),
+        MedianaVariosCliente=("ImporteVariosDia", "median"),
+    )
+    por_cliente["MedianaVariosCliente"] = pd.to_numeric(
+        por_cliente["MedianaVariosCliente"], errors="coerce"
+    ).fillna(0.0)
+
+    return historia.reset_index(drop=True), por_cliente.reset_index(drop=True)
+
+
+def _normalizar_cliente_serie(serie: pd.Series) -> pd.Series:
+    return pd.to_numeric(serie, errors="coerce").astype("Int64")
+
+
+def _construir_estado_oportunidades(
+    cartera_dia: pd.DataFrame,
+    anio: int,
+    mes: int,
+    filtros_globales: dict,
+) -> pd.DataFrame:
+    """Cruza la cartera del dia contra los estados productivos CCC, MN y TP."""
+    if cartera_dia is None or cartera_dia.empty:
+        return pd.DataFrame(
+            columns=[
+                "Cliente",
+                "CodVendedor",
+                "Es_NC",
+                "Es_NoDigital",
+                "Es_TP",
+            ]
+        )
+
+    from modules.business_rules.business_rules_ccc import obtener_detalle_clientes_ccc
+    from modules.business_rules.business_rules_mn import obtener_matriz_mn_comercial
+    from modules.business_rules.business_rules_tp import generar_business_rules_tp
+
+    base = cartera_dia[["Cliente", "CodVendedor"]].copy()
+    base["Cliente"] = _normalizar_cliente_serie(base["Cliente"])
+    base["CodVendedor"] = _normalizar_cliente_serie(base["CodVendedor"])
+    base = base.dropna(subset=["Cliente", "CodVendedor"]).drop_duplicates("Cliente")
+
+    # NC: cliente de la ruta que aun no es CCC del vendedor.
+    df_ccc = obtener_detalle_clientes_ccc(anio, mes, filtros_globales)
+    if df_ccc is not None and not df_ccc.empty and "Cliente" in df_ccc.columns:
+        ccc = df_ccc.copy()
+        ccc["Cliente"] = _normalizar_cliente_serie(ccc["Cliente"])
+        if "Es_CCC_Vendedor" in ccc.columns:
+            ccc_estado = (
+                ccc.groupby("Cliente", as_index=False)["Es_CCC_Vendedor"]
+                .max()
+                .rename(columns={"Es_CCC_Vendedor": "Es_CCC_Vendedor"})
+            )
+            ccc_estado["Es_CCC_Vendedor"] = (
+                ccc_estado["Es_CCC_Vendedor"].fillna(False).astype(bool)
+            )
+            base = base.merge(ccc_estado, on="Cliente", how="left")
+        else:
+            base["Es_CCC_Vendedor"] = False
+    else:
+        base["Es_CCC_Vendedor"] = False
+    base["Es_CCC_Vendedor"] = base["Es_CCC_Vendedor"].fillna(False).astype(bool)
+    base["Es_NC"] = ~base["Es_CCC_Vendedor"]
+
+    # MiNegocio: oportunidad = cliente clasificado como No Digital.
+    df_mn = obtener_matriz_mn_comercial(anio, mes, filtros_globales)
+    if df_mn is not None and not df_mn.empty and "Cliente" in df_mn.columns:
+        mn = df_mn.copy()
+        mn["Cliente"] = _normalizar_cliente_serie(mn["Cliente"])
+        if "Es_NoDigital" in mn.columns:
+            mn_estado = mn[["Cliente", "Es_NoDigital"]].drop_duplicates("Cliente")
+            mn_estado["Es_NoDigital"] = (
+                mn_estado["Es_NoDigital"].fillna(False).astype(bool)
+            )
+            base = base.merge(mn_estado, on="Cliente", how="left")
+        else:
+            base["Es_NoDigital"] = False
+    else:
+        base["Es_NoDigital"] = False
+    base["Es_NoDigital"] = base["Es_NoDigital"].fillna(False).astype(bool)
+
+    # Tienda Perfecta: oportunidad = cliente visitable que aun no es TP.
+    resultado_tp = generar_business_rules_tp()
+    df_tp = (
+        resultado_tp.get("tabla_oportunidades", pd.DataFrame())
+        if isinstance(resultado_tp, dict)
+        else pd.DataFrame()
+    )
+    if df_tp is not None and not df_tp.empty and "Cliente_id" in df_tp.columns:
+        tp = df_tp.copy()
+        tp["Cliente"] = _normalizar_cliente_serie(tp["Cliente_id"])
+        if "Es_TP" in tp.columns:
+            tp_estado = tp.groupby("Cliente", as_index=False)["Es_TP"].max()
+            tp_estado["Es_TP"] = tp_estado["Es_TP"].fillna(False).astype(bool)
+            base = base.merge(tp_estado, on="Cliente", how="left")
+        else:
+            base["Es_TP"] = False
+    else:
+        base["Es_TP"] = False
+    base["Es_TP"] = base["Es_TP"].fillna(False).astype(bool)
+    base["Es_NoTP"] = ~base["Es_TP"]
+
+    return base.reset_index(drop=True)
+
+
+def construir_sugerido_mesa_ocho_reglas(
+    dia_matinal,
+    anio: int,
+    mes: int,
+    filtros_globales: dict,
+    cod_vendedor: int | None = None,
+    configuracion: ConfiguracionSugeridoMesa = CONFIG_DEFAULT,
+) -> dict:
+    """Construye los ocho indicadores oficiales de SUGERIDO MESA por vendedor."""
+    fecha_matinal = _normalizar_fecha_unica(dia_matinal, "dia_matinal")
+
+    # Reutiliza el motor V1 ya aprobado empíricamente para kilos.
+    base_kilos = obtener_sugerido_mesa(
+        fecha_matinal,
+        cod_vendedor=cod_vendedor,
+        configuracion=configuracion,
+    )
+    cartera = base_kilos["cartera_dia"].copy()
+    resumen_kilos = base_kilos["resumen"].copy()
+
+    if cartera.empty:
+        return {
+            "tablero": pd.DataFrame(
+                columns=["CodVendedor", "INDICADOR", "SUGERIDO_MESA"]
+            ),
+            "resumen_vendedor": pd.DataFrame(),
+            "cartera_dia": cartera,
+            "historia_varios": pd.DataFrame(),
+            "detalle_varios": pd.DataFrame(),
+            "oportunidades": pd.DataFrame(),
+            "metadata": {
+                "dia_matinal": fecha_matinal,
+                "cantidad_clientes_ruta": 0,
+                "cantidad_vendedores": 0,
+            },
+        }
+
+    historia_varios, varios_cliente = _importe_varios_por_cliente(
+        cartera,
+        fecha_matinal,
+        configuracion=configuracion,
+    )
+
+    cartera_varios = cartera[["Cliente", "CodVendedor"]].copy()
+    cartera_varios["Cliente"] = _normalizar_cliente_serie(cartera_varios["Cliente"])
+    cartera_varios = cartera_varios.merge(varios_cliente, on="Cliente", how="left")
+    cartera_varios["MedianaVariosCliente"] = pd.to_numeric(
+        cartera_varios.get("MedianaVariosCliente", 0.0), errors="coerce"
+    ).fillna(0.0)
+
+    varios_vendedor = (
+        cartera_varios.groupby("CodVendedor", as_index=False)["MedianaVariosCliente"]
+        .sum()
+        .rename(columns={"MedianaVariosCliente": "Sugerido_VARIOS"})
+    )
+
+    oportunidades = _construir_estado_oportunidades(
+        cartera,
+        int(anio),
+        int(mes),
+        filtros_globales,
+    )
+
+    opp_vendedor = oportunidades.groupby("CodVendedor", as_index=False).agg(
+        ClientesRuta=("Cliente", "nunique"),
+        Sugerido_NC=("Es_NC", lambda s: int(s.sum())),
+        Sugerido_ADOPCION_MN=("Es_NoDigital", lambda s: int(s.sum())),
+        Sugerido_TIENDAS_PERFECTAS=("Es_NoTP", lambda s: int(s.sum())),
+    )
+
+    # CCC: al menos 70% de la cartera del dia, siempre redondeando hacia arriba.
+    opp_vendedor["Sugerido_CCC_Efect"] = np.ceil(
+        opp_vendedor["ClientesRuta"] * PORCENTAJE_CCC_EFECT
+    ).astype(int)
+    opp_vendedor["Sugerido_PORC_SELLOUT_MN"] = PORCENTAJE_SELLOUT_MN
+
+    resumen = resumen_kilos[
+        [
+            "CodVendedor",
+            "ClientesRuta",
+            "Sugerido_PLAT_GOLD",
+            "Sugerido_SILVER_BRZ",
+        ]
+    ].copy()
+    resumen = resumen.rename(columns={"ClientesRuta": "ClientesRuta_Kilos"})
+    resumen = resumen.merge(varios_vendedor, on="CodVendedor", how="left")
+    resumen = resumen.merge(opp_vendedor, on="CodVendedor", how="left")
+    resumen["Sugerido_VARIOS"] = pd.to_numeric(
+        resumen["Sugerido_VARIOS"], errors="coerce"
+    ).fillna(0.0)
+
+    filas = []
+    for fila in resumen.itertuples(index=False):
+        valores = {
+            "PLAT_GOLD": float(fila.Sugerido_PLAT_GOLD),
+            "SILVER_BRZ": float(fila.Sugerido_SILVER_BRZ),
+            "VARIOS ($)": float(fila.Sugerido_VARIOS),
+            "CCC (Efect)": int(fila.Sugerido_CCC_Efect),
+            "NC": int(fila.Sugerido_NC),
+            "PORC SELLOUT MN": float(fila.Sugerido_PORC_SELLOUT_MN),
+            "ADOPCIÓN MN": int(fila.Sugerido_ADOPCION_MN),
+            "TIENDAS PERFECTAS": int(fila.Sugerido_TIENDAS_PERFECTAS),
+        }
+        for indicador in INDICADORES_SUGERIDO_MESA:
+            filas.append(
+                {
+                    "DiaMatinal": fecha_matinal,
+                    "CodVendedor": int(fila.CodVendedor),
+                    "INDICADOR": indicador,
+                    "SUGERIDO_MESA": valores[indicador],
+                }
+            )
+
+    tablero = pd.DataFrame(filas)
+    metadata = {
+        "dia_matinal": fecha_matinal,
+        "anio": int(anio),
+        "mes": int(mes),
+        "cantidad_clientes_ruta": int(cartera["Cliente"].nunique()),
+        "cantidad_vendedores": int(cartera["CodVendedor"].nunique()),
+        "porcentaje_ccc": PORCENTAJE_CCC_EFECT,
+        "porcentaje_sellout_mn": PORCENTAJE_SELLOUT_MN,
+        "meses_historia": configuracion.meses_historia,
+    }
+
+    return {
+        "tablero": tablero.sort_values(["CodVendedor", "INDICADOR"]).reset_index(
+            drop=True
+        ),
+        "resumen_vendedor": resumen.sort_values("CodVendedor").reset_index(drop=True),
+        "cartera_dia": cartera.reset_index(drop=True),
+        "historia_varios": historia_varios.reset_index(drop=True),
+        "detalle_varios": cartera_varios.reset_index(drop=True),
+        "oportunidades": oportunidades.reset_index(drop=True),
         "metadata": metadata,
     }

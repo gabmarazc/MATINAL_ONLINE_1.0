@@ -18,6 +18,7 @@ from modules.rep_cobertura_core import render_rep_cobertura_core
 from modules.rep_MN_core import render_rep_mn_core
 from modules.rep_gerencial_core import render_rep_gerencial_core
 from modules.rep_tp_core import render_rep_tp_core
+from modules.rep_compromisos_core import render_rep_compromisos_core
 from modules import database as db
 from modules.core.core_validacion_periodo import validar_integridad_periodo_operativo
 
@@ -407,6 +408,9 @@ def main():
     # Tienda Perfecta (Todos los niveles)
     titulos_tabs_maestro.append("⭐ Tienda Perfecta")
     claves_tabs_maestro.append("TP")
+    # Compromisos (Todos los niveles)
+    titulos_tabs_maestro.append("🤝 Compromisos")
+    claves_tabs_maestro.append("COMPROMISOS")
 
     # Parámetros (Exclusivo Administrador en entorno local)
     if "Nivel 1" in nivel_actual and es_local:
@@ -418,161 +422,197 @@ def main():
     mapping_tabs = dict(zip(claves_tabs_maestro, objetos_tabs))
 
     # Renderizado oficial de módulos según perfil
-    if "Nivel 1" in nivel_actual:
-        if "GERENCIAL" in mapping_tabs:
-            with mapping_tabs["GERENCIAL"]:
-                t0_gc = time.perf_counter()
-                render_rep_gerencial_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_gerencial_core: {time.perf_counter() - t0_gc:.2f} s"
-                )
-        if "KILOS_CONSOLIDADO" in mapping_tabs:
-            with mapping_tabs["KILOS_CONSOLIDADO"]:
-                t0_kcc = time.perf_counter()
-                render_rep_kilos_consolidado_core(
-                    df_vta, df_rutas, df_ausencias, filtros_globales
-                )
-                print(
-                    f"[PERF] render_rep_kilos_consolidado_core: {time.perf_counter() - t0_kcc:.2f} s"
-                )
-        if "KILOS" in mapping_tabs:
-            with mapping_tabs["KILOS"]:
-                t0_kc = time.perf_counter()
-                render_rep_kilos_core(df_vta, df_rutas, df_ausencias, filtros_globales)
-                print(
-                    f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s"
-                )
-        if "OBJ_KILOS" in mapping_tabs:
-            with mapping_tabs["OBJ_KILOS"]:
-                t0_okc = time.perf_counter()
-                render_rep_obj_kilos_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_obj_kilos_core: {time.perf_counter() - t0_okc:.2f} s"
-                )
-        if "CCC" in mapping_tabs:
-            with mapping_tabs["CCC"]:
-                t0_cccc = time.perf_counter()
-                render_rep_ccc_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s"
-                )
-        if "COBERTURA" in mapping_tabs:
-            with mapping_tabs["COBERTURA"]:
-                t0_cob = time.perf_counter()
-                render_rep_cobertura_core()
-                print(
-                    f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
-                )
-        if "MN" in mapping_tabs:
-            with mapping_tabs["MN"]:
-                t0_mnc = time.perf_counter()
-                render_rep_mn_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s"
-                )
-        if "TP" in mapping_tabs:
-            with mapping_tabs["TP"]:
-                t0_tpc = time.perf_counter()
-                render_rep_tp_core(filtros_globales=filtros_globales)
-                print(
-                    f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s"
-                )
-        if "PARAMETROS" in mapping_tabs:
-            with mapping_tabs["PARAMETROS"]:
-                render_parametros_view(filtros_globales)
-
-    elif "Nivel 2" in nivel_actual:
-        if "GERENCIAL" in mapping_tabs:
-            with mapping_tabs["GERENCIAL"]:
-                t0_gc = time.perf_counter()
-                render_rep_gerencial_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_gerencial_core: {time.perf_counter() - t0_gc:.2f} s"
-                )
-        if "KILOS_CONSOLIDADO" in mapping_tabs:
-            with mapping_tabs["KILOS_CONSOLIDADO"]:
-                t0_kcc = time.perf_counter()
-                render_rep_kilos_consolidado_core(
-                    df_vta, df_rutas, df_ausencias, filtros_globales
-                )
-                print(
-                    f"[PERF] render_rep_kilos_consolidado_core: {time.perf_counter() - t0_kcc:.2f} s"
-                )
-        if "OBJ_KILOS" in mapping_tabs:
-            with mapping_tabs["OBJ_KILOS"]:
-                t0_okc = time.perf_counter()
-                render_rep_obj_kilos_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_obj_kilos_core: {time.perf_counter() - t0_okc:.2f} s"
-                )
-        if "CCC" in mapping_tabs:
-            with mapping_tabs["CCC"]:
-                t0_cccc = time.perf_counter()
-                render_rep_ccc_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s"
-                )
-        if "COBERTURA" in mapping_tabs:
-            with mapping_tabs["COBERTURA"]:
-                t0_cob = time.perf_counter()
-                render_rep_cobertura_core()
-                print(
-                    f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
-                )
-        if "MN" in mapping_tabs:
-            with mapping_tabs["MN"]:
-                t0_mnc = time.perf_counter()
-                render_rep_mn_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s"
-                )
-        if "TP" in mapping_tabs:
-            with mapping_tabs["TP"]:
-                t0_tpc = time.perf_counter()
-                render_rep_tp_core(filtros_globales=filtros_globales)
-                print(
-                    f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s"
-                )
-
+    # Un periodo incompleto NO debe abortar la aplicación: Parámetros queda
+    # siempre operativo para que el administrador pueda completar las bases.
+    if not estado_periodo["completo"]:
+        for clave_tab, objeto_tab in mapping_tabs.items():
+            with objeto_tab:
+                if clave_tab == "PARAMETROS":
+                    render_parametros_view(filtros_globales)
+                else:
+                    st.info(
+                        "⚠️ Período operativo incompleto. "
+                        "Complete las bases faltantes desde la pestaña Parámetros."
+                    )
     else:
-        # Nivel 3: Supervisión (Simétrico: sin tabs huérfanas ni vacías)
-        if "KILOS_CONSOLIDADO" in mapping_tabs:
-            with mapping_tabs["KILOS_CONSOLIDADO"]:
-                t0_kcc = time.perf_counter()
-                render_rep_kilos_consolidado_core(
-                    df_vta, df_rutas, df_ausencias, filtros_globales
-                )
-                print(
-                    f"[PERF] render_rep_kilos_consolidado_core: {time.perf_counter() - t0_kcc:.2f} s"
-                )
-        if "CCC" in mapping_tabs:
-            with mapping_tabs["CCC"]:
-                t0_cccc = time.perf_counter()
-                render_rep_ccc_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s"
-                )
-        if "COBERTURA" in mapping_tabs:
-            with mapping_tabs["COBERTURA"]:
-                t0_cob = time.perf_counter()
-                render_rep_cobertura_core()
-                print(
-                    f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
-                )
-        if "MN" in mapping_tabs:
-            with mapping_tabs["MN"]:
-                t0_mnc = time.perf_counter()
-                render_rep_mn_core(filtros_globales)
-                print(
-                    f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s"
-                )
-        if "TP" in mapping_tabs:
-            with mapping_tabs["TP"]:
-                t0_tpc = time.perf_counter()
-                render_rep_tp_core(filtros_globales=filtros_globales)
-                print(
-                    f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s"
-                )
+        if "Nivel 1" in nivel_actual:
+            if "GERENCIAL" in mapping_tabs:
+                with mapping_tabs["GERENCIAL"]:
+                    t0_gc = time.perf_counter()
+                    render_rep_gerencial_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_gerencial_core: {time.perf_counter() - t0_gc:.2f} s"
+                    )
+            if "KILOS_CONSOLIDADO" in mapping_tabs:
+                with mapping_tabs["KILOS_CONSOLIDADO"]:
+                    t0_kcc = time.perf_counter()
+                    render_rep_kilos_consolidado_core(
+                        df_vta, df_rutas, df_ausencias, filtros_globales
+                    )
+                    print(
+                        f"[PERF] render_rep_kilos_consolidado_core: {time.perf_counter() - t0_kcc:.2f} s"
+                    )
+            if "KILOS" in mapping_tabs:
+                with mapping_tabs["KILOS"]:
+                    t0_kc = time.perf_counter()
+                    render_rep_kilos_core(
+                        df_vta, df_rutas, df_ausencias, filtros_globales
+                    )
+                    print(
+                        f"[PERF] render_rep_kilos_core: {time.perf_counter() - t0_kc:.2f} s"
+                    )
+            if "OBJ_KILOS" in mapping_tabs:
+                with mapping_tabs["OBJ_KILOS"]:
+                    t0_okc = time.perf_counter()
+                    render_rep_obj_kilos_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_obj_kilos_core: {time.perf_counter() - t0_okc:.2f} s"
+                    )
+            if "CCC" in mapping_tabs:
+                with mapping_tabs["CCC"]:
+                    t0_cccc = time.perf_counter()
+                    render_rep_ccc_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s"
+                    )
+            if "COBERTURA" in mapping_tabs:
+                with mapping_tabs["COBERTURA"]:
+                    t0_cob = time.perf_counter()
+                    render_rep_cobertura_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
+                    )
+            if "MN" in mapping_tabs:
+                with mapping_tabs["MN"]:
+                    t0_mnc = time.perf_counter()
+                    render_rep_mn_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s"
+                    )
+            if "TP" in mapping_tabs:
+                with mapping_tabs["TP"]:
+                    t0_tpc = time.perf_counter()
+                    render_rep_tp_core(filtros_globales=filtros_globales)
+                    print(
+                        f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s"
+                    )
+            if "COMPROMISOS" in mapping_tabs:
+                with mapping_tabs["COMPROMISOS"]:
+                    t0_comp = time.perf_counter()
+                    render_rep_compromisos_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_compromisos_core: {time.perf_counter() - t0_comp:.2f} s"
+                    )
+            if "PARAMETROS" in mapping_tabs:
+                with mapping_tabs["PARAMETROS"]:
+                    render_parametros_view(filtros_globales)
+
+        elif "Nivel 2" in nivel_actual:
+            if "GERENCIAL" in mapping_tabs:
+                with mapping_tabs["GERENCIAL"]:
+                    t0_gc = time.perf_counter()
+                    render_rep_gerencial_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_gerencial_core: {time.perf_counter() - t0_gc:.2f} s"
+                    )
+            if "KILOS_CONSOLIDADO" in mapping_tabs:
+                with mapping_tabs["KILOS_CONSOLIDADO"]:
+                    t0_kcc = time.perf_counter()
+                    render_rep_kilos_consolidado_core(
+                        df_vta, df_rutas, df_ausencias, filtros_globales
+                    )
+                    print(
+                        f"[PERF] render_rep_kilos_consolidado_core: {time.perf_counter() - t0_kcc:.2f} s"
+                    )
+            if "OBJ_KILOS" in mapping_tabs:
+                with mapping_tabs["OBJ_KILOS"]:
+                    t0_okc = time.perf_counter()
+                    render_rep_obj_kilos_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_obj_kilos_core: {time.perf_counter() - t0_okc:.2f} s"
+                    )
+            if "CCC" in mapping_tabs:
+                with mapping_tabs["CCC"]:
+                    t0_cccc = time.perf_counter()
+                    render_rep_ccc_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s"
+                    )
+            if "COBERTURA" in mapping_tabs:
+                with mapping_tabs["COBERTURA"]:
+                    t0_cob = time.perf_counter()
+                    render_rep_cobertura_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
+                    )
+            if "MN" in mapping_tabs:
+                with mapping_tabs["MN"]:
+                    t0_mnc = time.perf_counter()
+                    render_rep_mn_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s"
+                    )
+            if "TP" in mapping_tabs:
+                with mapping_tabs["TP"]:
+                    t0_tpc = time.perf_counter()
+                    render_rep_tp_core(filtros_globales=filtros_globales)
+                    print(
+                        f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s"
+                    )
+            if "COMPROMISOS" in mapping_tabs:
+                with mapping_tabs["COMPROMISOS"]:
+                    t0_comp = time.perf_counter()
+                    render_rep_compromisos_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_compromisos_core: {time.perf_counter() - t0_comp:.2f} s"
+                    )
+
+        else:
+            # Nivel 3: Supervisión (Simétrico: sin tabs huérfanas ni vacías)
+            if "KILOS_CONSOLIDADO" in mapping_tabs:
+                with mapping_tabs["KILOS_CONSOLIDADO"]:
+                    t0_kcc = time.perf_counter()
+                    render_rep_kilos_consolidado_core(
+                        df_vta, df_rutas, df_ausencias, filtros_globales
+                    )
+                    print(
+                        f"[PERF] render_rep_kilos_consolidado_core: {time.perf_counter() - t0_kcc:.2f} s"
+                    )
+            if "CCC" in mapping_tabs:
+                with mapping_tabs["CCC"]:
+                    t0_cccc = time.perf_counter()
+                    render_rep_ccc_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_ccc_core: {time.perf_counter() - t0_cccc:.2f} s"
+                    )
+            if "COBERTURA" in mapping_tabs:
+                with mapping_tabs["COBERTURA"]:
+                    t0_cob = time.perf_counter()
+                    render_rep_cobertura_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
+                    )
+            if "MN" in mapping_tabs:
+                with mapping_tabs["MN"]:
+                    t0_mnc = time.perf_counter()
+                    render_rep_mn_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_mn_core: {time.perf_counter() - t0_mnc:.2f} s"
+                    )
+            if "TP" in mapping_tabs:
+                with mapping_tabs["TP"]:
+                    t0_tpc = time.perf_counter()
+                    render_rep_tp_core(filtros_globales=filtros_globales)
+                    print(
+                        f"[PERF] render_rep_tp_core: {time.perf_counter() - t0_tpc:.2f} s"
+                    )
+            if "COMPROMISOS" in mapping_tabs:
+                with mapping_tabs["COMPROMISOS"]:
+                    t0_comp = time.perf_counter()
+                    render_rep_compromisos_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_compromisos_core: {time.perf_counter() - t0_comp:.2f} s"
+                    )
 
     t_rerun_total = time.perf_counter() - t_rerun_start
     print(

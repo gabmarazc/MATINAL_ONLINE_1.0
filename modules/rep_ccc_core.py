@@ -33,6 +33,112 @@ def _tarjeta_metrica_compacta_html(
     """
 
 
+def _reconstruir_resumen_desde_detalle(
+    detalle_filtrado: pd.DataFrame, resumen_referencia: pd.DataFrame
+) -> pd.DataFrame:
+    """Reconstruye KPIs y resumen desde el detalle cuando DiaVisita esta filtrado."""
+    columnas = [
+        "CodVendedor",
+        "Nombre",
+        "SUP",
+        "Taxonomia",
+        "Cartera_Total",
+        "Altas",
+        "Reactivaciones",
+        "Cartera_Neta",
+        "CCC_Vendedor",
+        "CCC_Gerencia",
+        "NC",
+        "Objetivo_CCC",
+        "Pct_Cartera",
+        "Pct_Objetivo",
+    ]
+    if detalle_filtrado is None or detalle_filtrado.empty:
+        return pd.DataFrame(columns=columnas)
+    df = detalle_filtrado.copy()
+    df["CodVendedor_Titular"] = pd.to_numeric(
+        df["CodVendedor_Titular"], errors="coerce"
+    ).astype("Int64")
+    for col, default in [
+        ("Nombre", "SIN ASIGNAR"),
+        ("SUP", "GENERAL"),
+        ("Taxonomia", "A"),
+    ]:
+        if col not in df.columns:
+            df[col] = default
+        df[col] = df[col].fillna(default).astype(str).str.strip()
+    for col in [
+        "Es_Alta_Periodo",
+        "Es_Reactivacion",
+        "Es_CCC_Vendedor",
+        "Es_CCC_Gerencia",
+    ]:
+        if col not in df.columns:
+            df[col] = False
+        df[col] = df[col].fillna(False).astype(bool)
+    df["_excluido"] = df["Es_Alta_Periodo"] | df["Es_Reactivacion"]
+    resumen = (
+        df.groupby(
+            ["CodVendedor_Titular", "Nombre", "SUP", "Taxonomia"],
+            as_index=False,
+            dropna=False,
+        )
+        .agg(
+            Cartera_Total=("Cliente", "nunique"),
+            Altas=("Es_Alta_Periodo", lambda x: int(x.sum())),
+            Reactivaciones=("Es_Reactivacion", lambda x: int(x.sum())),
+            Excluidos=("_excluido", lambda x: int(x.sum())),
+            CCC_Vendedor=("Es_CCC_Vendedor", lambda x: int(x.sum())),
+            CCC_Gerencia=("Es_CCC_Gerencia", lambda x: int(x.sum())),
+        )
+        .rename(columns={"CodVendedor_Titular": "CodVendedor"})
+    )
+    resumen["Cartera_Neta"] = (
+        (resumen["Cartera_Total"] - resumen["Excluidos"]).clip(lower=0).astype(int)
+    )
+    resumen["NC"] = (
+        (resumen["Cartera_Neta"] - resumen["CCC_Vendedor"]).clip(lower=0).astype(int)
+    )
+    ref = resumen_referencia.copy()
+    ref["CodVendedor"] = pd.to_numeric(ref["CodVendedor"], errors="coerce").astype(
+        "Int64"
+    )
+    ref["Taxonomia"] = ref["Taxonomia"].fillna("A").astype(str).str.strip()
+    ref["_tasa_obj"] = (
+        pd.to_numeric(ref["Objetivo_CCC"], errors="coerce")
+        .div(pd.to_numeric(ref["Cartera_Neta"], errors="coerce").replace(0, pd.NA))
+        .fillna(0.0)
+    )
+    tasas = ref[["CodVendedor", "Taxonomia", "_tasa_obj"]].drop_duplicates(
+        ["CodVendedor", "Taxonomia"]
+    )
+    resumen = resumen.merge(tasas, on=["CodVendedor", "Taxonomia"], how="left")
+    resumen["Objetivo_CCC"] = (
+        (resumen["Cartera_Neta"] * resumen["_tasa_obj"].fillna(0.0))
+        .round(0)
+        .astype(int)
+    )
+    resumen["Pct_Cartera"] = (
+        resumen["CCC_Vendedor"]
+        .div(resumen["Cartera_Neta"].replace(0, pd.NA))
+        .mul(100)
+        .fillna(0.0)
+        .round(2)
+    )
+    resumen["Pct_Objetivo"] = (
+        resumen["CCC_Vendedor"]
+        .div(resumen["Objetivo_CCC"].replace(0, pd.NA))
+        .mul(100)
+        .fillna(0.0)
+        .round(2)
+    )
+    return (
+        resumen[columnas]
+        .sort_values(["CodVendedor", "Taxonomia"], kind="stable")
+        .reset_index(drop=True)
+    )
+
+
 @st.fragment
 def render_fragmento_interactivo_ccc_core(
     matriz_ccc: pd.DataFrame,
@@ -145,6 +251,7 @@ def render_fragmento_interactivo_ccc_core(
         v_selec = v_dispo
     if not tax_selec:
         tax_selec = tax_dispo
+    filtro_dia_activo = bool(dia_visita_selec)
     if not dia_visita_selec:
         dia_visita_selec = dia_visita_dispo
 
@@ -171,6 +278,13 @@ def render_fragmento_interactivo_ccc_core(
         df_detalle_filtrado = df_detalle_base[mask_det].copy()
     else:
         df_detalle_filtrado = pd.DataFrame()
+
+    # DiaVisita solo existe en detalle. Si el usuario selecciona uno o mas dias,
+    # KPIs y Resumen se reconstruyen desde el mismo universo filtrado de Batalla.
+    if filtro_dia_activo:
+        df_resumen_filtrado = _reconstruir_resumen_desde_detalle(
+            df_detalle_filtrado, df_resumen_base
+        )
 
     # Lógica ES_DEL_DIA basada estrictamente en la tabla rutas (Fecha, Codigo)
     clientes_del_dia_set = set()

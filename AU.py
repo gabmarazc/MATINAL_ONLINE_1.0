@@ -1,305 +1,230 @@
-"""
-PRUEBA CONTROLADA READ ONLY DEL LABORATORIO V2
-
-Objetivo:
-- Confirmar que los tres CORE cargan correctamente.
-- Construir una muestra pequena RUTAS x VTA.
-- Validar el contrato de oportunidades, compras y fechas.
-- No ejecutar clustering ni modelos pesados.
-- No escribir en SQLite, Excel ni archivos productivos.
-"""
-
 from __future__ import annotations
 
+"""AUDITORIA EMPIRICA READ ONLY - deteccion robusta de columnas + filtro supervisor TP/Cobertura."""
+
+import sqlite3
 import sys
-import traceback
 import unicodedata
 from pathlib import Path
 
 import pandas as pd
 
-from modules.core.core_clientes import obtener_core_clientes
-from modules.core.core_rutas import obtener_core_rutas
-from modules.core.core_ventas_base import obtener_core_ventas_base
-
-DIA_CORTE = "30/10/2026"
-DIAS_PRUEBA = 45
-MAX_CLIENTES = 150
-SEGMENTOS = ("PLAT_GOLD", "SILVER_BRZ")
-TIPOS_VENTA_EXCLUIDOS = {
-    "COMODATO DEVOLUCION",
-    "COMODATO FICTICIO",
-    "COMODATO FICTICIO DEVOLUCION",
-    "COMODATO PRESTAMO",
-}
-ANCHO = 130
+ROOT = Path(__file__).resolve().parent
+DB = ROOT / "data" / "matinal.db"
+SUPS = (60, 70)
 
 
 def titulo(texto: str) -> None:
-    print("\n" + "=" * ANCHO)
+    print("\n" + "=" * 120)
     print(texto)
-    print("=" * ANCHO)
+    print("=" * 120)
 
 
-def seccion(numero: int, texto: str) -> None:
-    print(f"\n{numero}. {texto}")
-    print("-" * ANCHO)
+def conectar_ro() -> sqlite3.Connection:
+    if not DB.exists():
+        raise FileNotFoundError(f"No existe {DB}")
+    con = sqlite3.connect(DB.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+    con.execute("PRAGMA query_only=ON;")
+    return con
 
 
-def normalizar_texto(valor) -> str:
-    if valor is None or pd.isna(valor):
-        return ""
-    texto = unicodedata.normalize("NFKD", str(valor).strip().upper())
-    return " ".join("".join(c for c in texto if not unicodedata.combining(c)).split())
+def normalizar_nombre(valor) -> str:
+    texto = str(valor).strip().lower()
+    texto = unicodedata.normalize("NFKD", texto)
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    return "".join(c for c in texto if c.isalnum())
 
 
-def normalizar_serie(serie: pd.Series) -> pd.Series:
-    return serie.map(normalizar_texto).astype("object")
+def detectar_columna(
+    df: pd.DataFrame, candidatos: list[str], contiene: list[str] | None = None
+) -> str | None:
+    if df is None or df.empty and len(df.columns) == 0:
+        return None
+    mapa = {normalizar_nombre(c): c for c in df.columns}
+    for candidato in candidatos:
+        clave = normalizar_nombre(candidato)
+        if clave in mapa:
+            return mapa[clave]
+    if contiene:
+        tokens = [normalizar_nombre(x) for x in contiene]
+        for c in df.columns:
+            nc = normalizar_nombre(c)
+            if any(token in nc for token in tokens):
+                return c
+    return None
 
 
-def validar_columnas(df: pd.DataFrame, requeridas: list[str], origen: str) -> None:
-    faltantes = [c for c in requeridas if c not in df.columns]
-    if faltantes:
-        raise RuntimeError(f"{origen}: faltan columnas {faltantes}")
-
-
-def resolver_columna(df: pd.DataFrame, candidatos: list[str]) -> str | None:
-    return next((c for c in candidatos if c in df.columns), None)
-
-
-def asegurar_segmento(df: pd.DataFrame) -> pd.DataFrame:
-    x = df.copy()
-    if "SEGMENTO" in x.columns and x["SEGMENTO"].notna().any():
-        origen = normalizar_serie(x["SEGMENTO"])
-    else:
-        rent = resolver_columna(x, ["SegmentoRentabilidad", "SEGMENTORENTABILIDAD"])
-        rubro = resolver_columna(x, ["Rubro", "RUBRO"])
-        if rent is None or rubro is None:
-            raise RuntimeError("No se puede construir SEGMENTO desde CORE_VENTAS_BASE")
-        origen = (
-            normalizar_serie(x[rent]) + " " + normalizar_serie(x[rubro])
-        ).str.strip()
-
-    mapa = {
-        "PLATINUM SALTY": "PLAT_GOLD",
-        "PLATINUM CRAKERS": "PLAT_GOLD",
-        "PLATINUM CRACKERS": "PLAT_GOLD",
-        "GOLD SALTY": "PLAT_GOLD",
-        "GOLD CRAKERS": "PLAT_GOLD",
-        "GOLD CRACKERS": "PLAT_GOLD",
-        "PLAT_GOLD": "PLAT_GOLD",
-        "PLAT_GOLD SALTY": "PLAT_GOLD",
-        "PLAT_GOLD CRAKERS": "PLAT_GOLD",
-        "PLAT_GOLD CRACKERS": "PLAT_GOLD",
-        "SILVER SALTY": "SILVER_BRZ",
-        "SILVER CRAKERS": "SILVER_BRZ",
-        "SILVER CRACKERS": "SILVER_BRZ",
-        "SILVER CEREALS": "SILVER_BRZ",
-        "BRONZE SALTY": "SILVER_BRZ",
-        "BRONZE CRAKERS": "SILVER_BRZ",
-        "BRONZE CRACKERS": "SILVER_BRZ",
-        "BRONZE CEREALS": "SILVER_BRZ",
-        "SILVER_BRZ": "SILVER_BRZ",
-    }
-    x["Segmento"] = origen.map(mapa).astype("object")
-    return x
+def parametros() -> tuple[int, int, pd.Timestamp, pd.Timestamp]:
+    con = conectar_ro()
+    try:
+        quick = con.execute("PRAGMA quick_check;").fetchone()[0]
+        filas = con.execute("SELECT PARAMETRO, VALOR FROM parametros").fetchall()
+    finally:
+        con.close()
+    p = {str(k).strip(): v for k, v in filas}
+    dm = pd.to_datetime(p.get("Dia Matinal"), dayfirst=True, errors="coerce")
+    dv = pd.to_datetime(p.get("Dia Venta"), dayfirst=True, errors="coerce")
+    if pd.isna(dm) or pd.isna(dv):
+        raise RuntimeError(
+            f"Fechas invalidas: Dia Matinal={p.get('Dia Matinal')!r}, Dia Venta={p.get('Dia Venta')!r}"
+        )
+    anio = int(float(p.get("Año", p.get("Anio", dv.year))))
+    mes = int(float(p.get("Mes", dv.month)))
+    print(f"SQLite quick_check: {quick}")
+    return anio, mes, pd.Timestamp(dm).normalize(), pd.Timestamp(dv).normalize()
 
 
 def main() -> None:
-    titulo("PRUEBA CONTROLADA READ ONLY - LABORATORIO V2")
-    print(f"Proyecto: {Path.cwd()}")
+    titulo("AUDITORIA EMPIRICA READ ONLY - SUPERVISOR GLOBAL - TP Y COBERTURA")
+    print(f"Proyecto: {ROOT}")
+    print(f"Base: {DB}")
+    print("Modo: SQLite mode=ro + PRAGMA query_only=ON")
+    print("Escrituras: NINGUNA")
+
+    anio, mes, dm, dv = parametros()
     print(
-        f"Corte: {DIA_CORTE} | Ventana: {DIAS_PRUEBA} dias | Max clientes: {MAX_CLIENTES}"
+        f"Escenario: Matinal={dm:%d/%m/%Y} | Venta={dv:%d/%m/%Y} | periodo={mes:02d}/{anio}"
     )
-    print("Escrituras productivas: NINGUNA")
 
-    corte = pd.to_datetime(DIA_CORTE, dayfirst=True).normalize()
-    desde = corte - pd.Timedelta(days=DIAS_PRUEBA)
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
 
-    seccion(1, "CARGA DE CORE")
-    clientes = obtener_core_clientes().copy()
-    rutas = obtener_core_rutas().copy()
-    ventas = obtener_core_ventas_base().copy()
+    from modules import database as db
+    from modules.business_rules.business_rules_tp import generar_business_rules_tp
+    from modules.core.core_cobertura import obtener_base_cobertura
 
-    validar_columnas(clientes, ["Cliente", "CodVendedor"], "CORE_CLIENTES")
-    validar_columnas(rutas, ["Cliente", "FechaRuta"], "CORE_RUTAS")
-    validar_columnas(ventas, ["Cliente", "FechaCarga_dt", "PesoKg"], "CORE_VENTAS_BASE")
+    titulo("1. DETECCION EMPIRICA DE MAESTRO_VENDEDORES")
+    mv = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
+    print(f"Filas maestro_vendedores: {len(mv):,}")
+    print("Columnas reales:")
+    for i, c in enumerate(mv.columns, 1):
+        print(f"  {i:02d}. {c}")
 
-    print(f"CORE_CLIENTES: {len(clientes):,} filas")
-    print(f"CORE_RUTAS: {len(rutas):,} filas")
-    print(f"CORE_VENTAS_BASE: {len(ventas):,} filas")
-
-    seccion(2, "MUESTRA CONTROLADA DE CLIENTES")
-    clientes["Cliente"] = pd.to_numeric(clientes["Cliente"], errors="coerce").astype(
-        "Int64"
+    cod_col = detectar_columna(
+        mv,
+        [
+            "CodVend",
+            "CodVendedor",
+            "Codigo",
+            "CodigoVendedor",
+            "IDVEND",
+            "IdVendedor",
+            "Cod_Vendedor",
+        ],
+        contiene=["codvend", "codigovend", "idvend"],
     )
-    clientes = clientes.dropna(subset=["Cliente"]).drop_duplicates("Cliente")
-
-    rutas["Cliente"] = pd.to_numeric(rutas["Cliente"], errors="coerce").astype("Int64")
-    rutas["FechaOportunidad"] = pd.to_datetime(
-        rutas["FechaRuta"], errors="coerce"
-    ).dt.normalize()
-    rutas = rutas.loc[
-        rutas["FechaOportunidad"].between(desde, corte, inclusive="left")
-    ].copy()
-
-    conteo = (
-        rutas.groupby("Cliente")["FechaOportunidad"]
-        .nunique()
-        .sort_values(ascending=False)
+    sup_col = detectar_columna(
+        mv,
+        ["SUP", "Supervisor", "CodSupervisor", "Cod_Supervisor", "SUPERVISOR"],
+        contiene=["supervisor", "codsup"],
     )
-    muestra_clientes = conteo.head(MAX_CLIENTES).index
-    rutas = rutas.loc[
-        rutas["Cliente"].isin(muestra_clientes), ["Cliente", "FechaOportunidad"]
+    print(f"Columna vendedor detectada  : {cod_col!r}")
+    print(f"Columna supervisor detectada: {sup_col!r}")
+
+    if cod_col is None or sup_col is None:
+        print("\nRESULTADO: NO CONCLUYENTE")
+        print(
+            "No se pudieron detectar de forma segura las columnas de vendedor/supervisor."
+        )
+        print(
+            "La lista de columnas reales queda impresa arriba para ajustar la AU sin inferencias."
+        )
+        raise SystemExit(2)
+
+    mv = mv.copy()
+    mv["_cod"] = pd.to_numeric(mv[cod_col], errors="coerce").astype("Int64")
+    mv["_sup"] = pd.to_numeric(mv[sup_col], errors="coerce").astype("Int64")
+    print("\nUniverso detectado por supervisor:")
+    for sup in SUPS:
+        cods = sorted(
+            mv.loc[mv["_sup"].eq(sup), "_cod"].dropna().astype(int).unique().tolist()
+        )
+        print(f"  SUP {sup}: vendedores={len(cods)} | codigos={cods}")
+
+    titulo("2. TIENDA PERFECTA - PRUEBA REAL")
+    tp_all = generar_business_rules_tp()
+    detalle_all = tp_all.get("detalle_tp", tp_all.get("df_filtrado", pd.DataFrame()))
+    cli_all = (
+        detalle_all["Cliente_id"].nunique()
+        if "Cliente_id" in detalle_all.columns
+        else len(detalle_all)
+    )
+    print(f"TP TODOS | filas={len(detalle_all):,} | clientes={cli_all:,}")
+
+    for sup in SUPS:
+        cods = sorted(
+            mv.loc[mv["_sup"].eq(sup), "_cod"].dropna().astype(int).unique().tolist()
+        )
+        tp_sup = generar_business_rules_tp(vendedores=cods)
+        ds = tp_sup.get("detalle_tp", tp_sup.get("df_filtrado", pd.DataFrame()))
+        clientes = ds["Cliente_id"].nunique() if "Cliente_id" in ds.columns else len(ds)
+        cod_presentes = sorted(
+            pd.to_numeric(
+                ds.get("CodVendedor", pd.Series(dtype=float)), errors="coerce"
+            )
+            .dropna()
+            .astype(int)
+            .unique()
+            .tolist()
+        )
+        fuera = sorted(set(cod_presentes) - set(cods))
+        print(
+            f"TP SUP {sup} | vendedores_esperados={len(cods)} | filas={len(ds):,} | clientes={clientes:,} | vendedores_fuera={fuera}"
+        )
+
+    titulo("3. COBERTURA - PRUEBA REAL")
+    cob = obtener_base_cobertura(
+        anio_op=anio,
+        mes_op=mes,
+        dia_matinal=dm.strftime("%Y-%m-%d"),
+        dia_venta=dv.strftime("%Y-%m-%d"),
+    )
+    cartera = cob.get("cartera", pd.DataFrame()).copy()
+    print(f"Cobertura TODOS | filas cartera={len(cartera):,}")
+    print("Columnas reales de cartera relacionadas con vendedor/supervisor:")
+    candidatas = [
+        c
+        for c in cartera.columns
+        if any(x in normalizar_nombre(c) for x in ["vend", "sup", "supervisor"])
     ]
-    rutas = (
-        rutas.dropna().drop_duplicates().sort_values(["Cliente", "FechaOportunidad"])
+    for c in candidatas:
+        print(f"  - {c}")
+
+    cob_cod = detectar_columna(
+        cartera,
+        ["CodVendedor", "CodVend", "CodigoVendedor", "_join_vend", "IDVEND"],
+        contiene=["codvend", "idvend", "joinvend"],
     )
-    rutas["SiguienteFechaRuta"] = rutas.groupby("Cliente")["FechaOportunidad"].shift(-1)
-
-    print(f"Clientes de prueba: {rutas['Cliente'].nunique():,}")
-    print(f"Oportunidades de prueba: {len(rutas):,}")
-    print(f"Fecha minima: {rutas['FechaOportunidad'].min()}")
-    print(f"Fecha maxima: {rutas['FechaOportunidad'].max()}")
-
-    seccion(3, "PREPARACION DE VTA")
-    ventas["Cliente"] = pd.to_numeric(ventas["Cliente"], errors="coerce").astype(
-        "Int64"
+    cob_sup = detectar_columna(
+        cartera,
+        ["SUP", "Supervisor", "SUPERVISOR", "CodSupervisor"],
+        contiene=["supervisor", "codsup"],
     )
-    ventas["FechaVenta"] = pd.to_datetime(
-        ventas["FechaCarga_dt"], errors="coerce"
-    ).dt.normalize()
-    ventas["PesoKg"] = pd.to_numeric(ventas["PesoKg"], errors="coerce").fillna(0.0)
-    ventas = ventas.loc[
-        ventas["Cliente"].isin(muestra_clientes)
-        & ventas["FechaVenta"].between(desde, corte, inclusive="left")
-        & ventas["PesoKg"].gt(0)
-    ].copy()
+    print(f"Columna vendedor cobertura  : {cob_cod!r}")
+    print(f"Columna supervisor cobertura: {cob_sup!r}")
 
-    if "Proveedor" in ventas.columns:
-        ventas = ventas.loc[
-            normalizar_serie(ventas["Proveedor"]).str.contains("PEPSICO", na=False)
-        ]
-    if "TipoDeVenta" in ventas.columns:
-        ventas = ventas.loc[
-            ~normalizar_serie(ventas["TipoDeVenta"]).isin(TIPOS_VENTA_EXCLUIDOS)
-        ]
-
-    ventas = asegurar_segmento(ventas)
-    ventas = ventas.loc[ventas["Segmento"].isin(SEGMENTOS)].copy()
-    ventas = (
-        ventas.groupby(["Cliente", "FechaVenta", "Segmento"], as_index=False)["PesoKg"]
-        .sum()
-        .rename(columns={"PesoKg": "KgVenta"})
-    )
-    print(f"Compras positivas agregadas: {len(ventas):,}")
-
-    seccion(4, "ASOCIACION ENTRE RUTAS Y VTA")
-    asignadas = []
-    fuera = []
-    for (cliente, segmento), gv in ventas.groupby(["Cliente", "Segmento"], sort=False):
-        calendario = rutas.loc[
-            rutas["Cliente"].eq(cliente),
-            ["FechaOportunidad", "SiguienteFechaRuta"],
-        ].sort_values("FechaOportunidad")
-
-        if calendario.empty:
-            fuera.append(gv.assign(Motivo="SIN_RUTA"))
-            continue
-
-        z = pd.merge_asof(
-            gv.sort_values("FechaVenta"),
-            calendario,
-            left_on="FechaVenta",
-            right_on="FechaOportunidad",
-            direction="backward",
-            allow_exact_matches=True,
-        )
-        z["DiasDesdeRuta"] = (z["FechaVenta"] - z["FechaOportunidad"]).dt.days
-        valido = z["FechaOportunidad"].notna() & (
-            z["SiguienteFechaRuta"].isna() | z["FechaVenta"].lt(z["SiguienteFechaRuta"])
-        )
-        asignadas.append(z.loc[valido].copy())
-        fuera.append(z.loc[~valido].assign(Motivo="FUERA_DE_VENTANA"))
-
-    asignadas_df = (
-        pd.concat(asignadas, ignore_index=True) if asignadas else pd.DataFrame()
-    )
-    fuera_df = pd.concat(fuera, ignore_index=True) if fuera else pd.DataFrame()
-
-    segmentos = pd.DataFrame({"Segmento": list(SEGMENTOS)})
-    oportunidades = (
-        rutas.assign(_k=1).merge(segmentos.assign(_k=1), on="_k").drop(columns="_k")
-    )
-
-    if asignadas_df.empty:
-        oportunidades["KgCompra"] = 0.0
+    if cob_sup is not None:
+        serie_sup = pd.to_numeric(cartera[cob_sup], errors="coerce").astype("Int64")
+        for sup in SUPS:
+            sub = cartera.loc[serie_sup.eq(sup)].copy()
+            print(f"Cobertura SUP {sup} por columna {cob_sup} | filas={len(sub):,}")
+    elif cob_cod is not None:
+        serie_cod = pd.to_numeric(cartera[cob_cod], errors="coerce").astype("Int64")
+        for sup in SUPS:
+            cods = set(mv.loc[mv["_sup"].eq(sup), "_cod"].dropna().astype(int).tolist())
+            sub = cartera.loc[serie_cod.isin(cods)].copy()
+            print(f"Cobertura SUP {sup} por vendedores maestro | filas={len(sub):,}")
     else:
-        kg = (
-            asignadas_df.groupby(
-                ["Cliente", "Segmento", "FechaOportunidad"], as_index=False
-            )["KgVenta"]
-            .sum()
-            .rename(columns={"KgVenta": "KgCompra"})
+        print(
+            "Cobertura: no se detecto columna segura para segmentar por supervisor ni vendedor."
         )
-        oportunidades = oportunidades.merge(
-            kg,
-            on=["Cliente", "Segmento", "FechaOportunidad"],
-            how="left",
-            validate="one_to_one",
-        )
-        oportunidades["KgCompra"] = oportunidades["KgCompra"].fillna(0.0)
 
-    oportunidades["HuboCompra"] = oportunidades["KgCompra"].gt(0).astype(int)
-
-    print(f"Ventas asignadas: {len(asignadas_df):,}")
-    print(f"Ventas fuera: {len(fuera_df):,}")
-    print(f"Oportunidades Cliente x Segmento: {len(oportunidades):,}")
-    print(f"Con compra: {int(oportunidades['HuboCompra'].sum()):,}")
-    print(f"Sin compra: {int((oportunidades['HuboCompra'] == 0).sum()):,}")
-
-    seccion(5, "CONTROLES")
-    errores = []
-    if oportunidades.duplicated(["Cliente", "Segmento", "FechaOportunidad"]).any():
-        errores.append("Existen oportunidades duplicadas")
-    if oportunidades["Cliente"].isna().any():
-        errores.append("Existen clientes nulos")
-    if oportunidades["FechaOportunidad"].isna().any():
-        errores.append("Existen fechas de oportunidad nulas")
-    if (oportunidades["KgCompra"] < 0).any():
-        errores.append("Existen KgCompra negativos")
-    if len(oportunidades) != len(rutas) * len(SEGMENTOS):
-        errores.append("No concilia rutas x cantidad de segmentos")
-
-    muestra = oportunidades.sort_values(
-        ["Cliente", "Segmento", "FechaOportunidad"]
-    ).head(40)
+    titulo("4. VEREDICTO")
     print(
-        muestra[
-            ["Cliente", "Segmento", "FechaOportunidad", "KgCompra", "HuboCompra"]
-        ].to_string(index=False)
+        "La AU termino correctamente. Use los universos impresos para contrastar TODOS vs SUP 60 vs SUP 70."
     )
-
-    seccion(6, "DICTAMEN")
-    if errores:
-        print("NO APROBADO")
-        for error in errores:
-            print(f"- {error}")
-        raise RuntimeError("La prueba controlada detecto errores estructurales")
-
-    print("APROBADO")
-    print("CORE cargados, asociacion RUTAS x VTA construida y contratos conciliados.")
-    print("La prueba no ejecuto clustering ni modelos pesados.")
-    print("PRUEBA FINALIZADA. ESCRITURAS PRODUCTIVAS: NINGUNA.")
+    print("READ ONLY - Escrituras realizadas: NINGUNA")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as exc:
-        titulo("PRUEBA INTERRUMPIDA")
-        print(f"Tipo: {type(exc).__name__}")
-        print(f"Detalle: {exc}")
-        traceback.print_exc()
-        print("Escrituras productivas: NINGUNA")
-        sys.exit(1)
+    main()

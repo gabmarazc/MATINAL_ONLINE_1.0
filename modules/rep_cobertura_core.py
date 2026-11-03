@@ -524,7 +524,7 @@ def render_fragmento_interactivo_cobertura(
     )
 
 
-def render_rep_cobertura_core():
+def render_rep_cobertura_core(filtros_globales=None):
     """
     Punto de entrada institucional invocado por app.py.
     Ejecuta UNA ÚNICA VEZ la lectura de bases, catálogos y el pipeline de cálculo completo.
@@ -597,6 +597,88 @@ def render_rep_cobertura_core():
             "No se encontraron registros de ventas o cartera para los parámetros seleccionados."
         )
         return
+
+    # Filtro global de Supervisor: se aplica sobre la cartera antes de construir
+    # cualquier matriz, agregado, Vista Batalla, selector de vendedores o exportación.
+    supervisor_global = (
+        filtros_globales.get("supervisor", "TODOS")
+        if isinstance(filtros_globales, dict)
+        else "TODOS"
+    )
+    if supervisor_global is not None and str(supervisor_global).strip().upper() not in {
+        "",
+        "TODOS",
+    }:
+        supervisor_num = pd.to_numeric(
+            pd.Series([supervisor_global]), errors="coerce"
+        ).iloc[0]
+        if pd.isna(supervisor_num):
+            raise ValueError(
+                f"Supervisor global inválido para Cobertura: {supervisor_global!r}"
+            )
+        if "SUP" not in df_cartera.columns:
+            raise RuntimeError(
+                "La cartera de Cobertura no contiene la columna SUP requerida para "
+                "aplicar el filtro global de Supervisor."
+            )
+
+        sup_objetivo = int(supervisor_num)
+        df_cartera = df_cartera.loc[
+            pd.to_numeric(df_cartera["SUP"], errors="coerce").eq(sup_objetivo)
+        ].copy()
+
+        if df_cartera.empty:
+            st.warning(
+                f"No se encontraron clientes de Cobertura para el Supervisor {sup_objetivo}."
+            )
+            return
+
+        # Limita ventas al universo de vendedores que pertenece a la cartera filtrada.
+        if "CodVendedor" in df_cartera.columns:
+            vendedores_scope = set(
+                pd.to_numeric(df_cartera["CodVendedor"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .tolist()
+            )
+            col_vendedor_vtas = next(
+                (
+                    c
+                    for c in [
+                        "CodVendedorCore",
+                        "CodVendedor",
+                        "CodVendedorVigente",
+                        "CodVendedorHistorico",
+                        "_join_vend",
+                    ]
+                    if c in df_vtas.columns
+                ),
+                None,
+            )
+            if col_vendedor_vtas is not None:
+                df_vtas = df_vtas.loc[
+                    pd.to_numeric(df_vtas[col_vendedor_vtas], errors="coerce").isin(
+                        vendedores_scope
+                    )
+                ].copy()
+
+        # DelDia debe conservar únicamente clientes de la cartera visible.
+        col_cliente_scope = next(
+            (
+                c
+                for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente", "Codigo"]
+                if c in df_cartera.columns
+            ),
+            None,
+        )
+        if col_cliente_scope is not None:
+            clientes_scope = set(
+                pd.to_numeric(df_cartera[col_cliente_scope], errors="coerce")
+                .dropna()
+                .astype(int)
+                .tolist()
+            )
+            clientes_del_dia = set(clientes_del_dia).intersection(clientes_scope)
 
     df_marcas = obtener_maestro_marcas_cebe_sql()
     df_innov = obtener_maestro_innovaciones_sql()

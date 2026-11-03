@@ -2238,23 +2238,35 @@ def _metricas_foto_tp(df_tp: pd.DataFrame) -> tuple:
 
 
 def _guardar_snapshot_diario_tp(conn, df_tp: pd.DataFrame, fecha_carga) -> dict:
-    """Guarda o reemplaza una unica foto completa por dia del mes vigente."""
+    """
+    Guarda o reemplaza una unica foto completa por dia del mes vigente.
+
+    La tabla operativa tp ya fue persistida inmediatamente antes por
+    persistir_tp_con_ciclo_snapshots. El snapshot diario se genera
+    directamente desde esa tabla mediante INSERT ... SELECT, evitando volver
+    a materializar el mismo DataFrame en tp_snapshot_periodo_tmp mediante
+    pandas.to_sql().
+    """
     hash_tp, registros, cantidad_tp = _metricas_foto_tp(df_tp)
     periodo = fecha_carga.strftime("%Y-%m")
     fecha_snapshot = fecha_carga.strftime("%Y-%m-%d")
     fecha_sistema = fecha_carga.strftime("%Y-%m-%d %H:%M:%S")
 
-    foto = df_tp.copy()
-    foto["PeriodoTP"] = periodo
-    foto["FechaSnapshot"] = fecha_snapshot
-    foto["FechaCargaSistema"] = fecha_sistema
-    foto["HashSnapshot"] = hash_tp
-
-    tabla_tmp = "tp_snapshot_periodo_tmp"
-    foto.to_sql(tabla_tmp, conn, if_exists="replace", index=False, chunksize=10000)
+    columnas_tp = _columnas_tabla_sql(conn, "tp")
+    columnas_snapshot_esperadas = columnas_tp + [
+        "PeriodoTP",
+        "FechaSnapshot",
+        "FechaCargaSistema",
+        "HashSnapshot",
+    ]
 
     if not _tabla_sql_existe(conn, "tp_snapshot_periodo"):
-        foto.head(0).to_sql(
+        foto_vacia = df_tp.head(0).copy()
+        foto_vacia["PeriodoTP"] = pd.Series(dtype="object")
+        foto_vacia["FechaSnapshot"] = pd.Series(dtype="object")
+        foto_vacia["FechaCargaSistema"] = pd.Series(dtype="object")
+        foto_vacia["HashSnapshot"] = pd.Series(dtype="object")
+        foto_vacia.to_sql(
             "tp_snapshot_periodo",
             conn,
             if_exists="replace",
@@ -2262,16 +2274,15 @@ def _guardar_snapshot_diario_tp(conn, df_tp: pd.DataFrame, fecha_carga) -> dict:
         )
 
     columnas_destino = _columnas_tabla_sql(conn, "tp_snapshot_periodo")
-    columnas_tmp = _columnas_tabla_sql(conn, tabla_tmp)
-    if columnas_destino != columnas_tmp:
-        conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
-        conn.commit()
+    if columnas_destino != columnas_snapshot_esperadas:
         raise ValueError(
             "Cambio de esquema TP detectado en snapshots diarios. "
-            f"Destino={columnas_destino}; carga={columnas_tmp}."
+            f"Destino={columnas_destino}; esperado={columnas_snapshot_esperadas}."
         )
 
-    columnas_sql = _columnas_sql_quoted(columnas_destino)
+    columnas_tp_sql = _columnas_sql_quoted(columnas_tp)
+    columnas_destino_sql = _columnas_sql_quoted(columnas_destino)
+
     try:
         conn.execute("BEGIN IMMEDIATE;")
         conn.execute(
@@ -2279,28 +2290,39 @@ def _guardar_snapshot_diario_tp(conn, df_tp: pd.DataFrame, fecha_carga) -> dict:
             (fecha_snapshot,),
         )
         conn.execute(
-            f"INSERT INTO tp_snapshot_periodo ({columnas_sql}) "
-            f'SELECT {columnas_sql} FROM "{tabla_tmp}";'
+            f"""
+            INSERT INTO tp_snapshot_periodo ({columnas_destino_sql})
+            SELECT
+                {columnas_tp_sql},
+                ?,
+                ?,
+                ?,
+                ?
+            FROM tp;
+            """,
+            (
+                periodo,
+                fecha_snapshot,
+                fecha_sistema,
+                hash_tp,
+            ),
         )
-        conn.execute(f'DROP TABLE "{tabla_tmp}";')
+
+        guardadas = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM tp_snapshot_periodo WHERE FechaSnapshot=?;",
+                (fecha_snapshot,),
+            ).fetchone()[0]
+        )
+        if guardadas != registros:
+            raise AssertionError(
+                f"Conciliacion snapshot diario TP fallida para {fecha_snapshot}: "
+                f"origen={registros}, guardadas={guardadas}."
+            )
         conn.commit()
     except Exception:
         conn.rollback()
-        conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
-        conn.commit()
         raise
-
-    guardadas = int(
-        conn.execute(
-            "SELECT COUNT(*) FROM tp_snapshot_periodo WHERE FechaSnapshot=?;",
-            (fecha_snapshot,),
-        ).fetchone()[0]
-    )
-    if guardadas != registros:
-        raise AssertionError(
-            f"Conciliacion snapshot diario TP fallida para {fecha_snapshot}: "
-            f"origen={registros}, guardadas={guardadas}."
-        )
 
     logger.info(
         f"TP_DIARIO: fecha={fecha_snapshot} | periodo={periodo} | "

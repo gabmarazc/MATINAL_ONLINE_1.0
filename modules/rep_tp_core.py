@@ -7,6 +7,7 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder
 from modules.business_rules.business_rules_tp import generar_business_rules_tp
 from modules.utils import tarjeta_metrica_html
+from modules import database as db
 
 
 @st.cache_data(show_spinner=False)
@@ -658,6 +659,66 @@ def render_fragmento_interactivo_tp(br_data):
             )
 
 
+def _obtener_vendedores_supervisor_tp(filtros_globales) -> list[int] | None:
+    """
+    Resuelve el filtro global de Supervisor contra maestro_vendedores.
+    - TODOS / vacío: devuelve None y conserva el universo TP completo.
+    - Supervisor específico: devuelve exclusivamente sus códigos de vendedor.
+    """
+    if not isinstance(filtros_globales, dict):
+        return None
+
+    supervisor = filtros_globales.get("supervisor", "TODOS")
+    if supervisor is None or str(supervisor).strip().upper() in {"", "TODOS"}:
+        return None
+
+    supervisor_num = pd.to_numeric(pd.Series([supervisor]), errors="coerce").iloc[0]
+    if pd.isna(supervisor_num):
+        raise ValueError(f"Supervisor global inválido para TP: {supervisor!r}")
+
+    maestro = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
+    if maestro is None or maestro.empty:
+        raise RuntimeError(
+            "maestro_vendedores está vacío; no puede aplicarse el filtro global de Supervisor en TP."
+        )
+
+    col_vendedor = next(
+        (
+            c
+            for c in ["Codigo_Vendedor", "CodVend", "CodVendedor", "Codigo"]
+            if c in maestro.columns
+        ),
+        None,
+    )
+    col_supervisor = next(
+        (c for c in ["Supervisor", "SUP", "SUPERVISOR"] if c in maestro.columns),
+        None,
+    )
+    if col_vendedor is None or col_supervisor is None:
+        raise RuntimeError(
+            "maestro_vendedores no contiene las columnas requeridas para filtrar TP por Supervisor. "
+            f"Columnas disponibles: {maestro.columns.tolist()}"
+        )
+
+    codigos = (
+        pd.to_numeric(
+            maestro.loc[
+                pd.to_numeric(maestro[col_supervisor], errors="coerce").eq(
+                    int(supervisor_num)
+                ),
+                col_vendedor,
+            ],
+            errors="coerce",
+        )
+        .dropna()
+        .astype(int)
+        .drop_duplicates()
+        .sort_values()
+        .tolist()
+    )
+    return codigos
+
+
 def render_rep_tp_core(bases=None, filtros_globales=None):
     """
     Módulo analítico desacoplado de Tienda Perfecta (TP) basado en la capa Business Rules.
@@ -670,8 +731,13 @@ def render_rep_tp_core(bases=None, filtros_globales=None):
         "Análisis de cumplimiento de surtido ideal, planogramas, racks y estándares de ejecución en punto de venta."
     )
 
-    # Ejecución única de Business Rules
-    br_data = generar_business_rules_tp()
+    # Ejecución única de Business Rules respetando el filtro global de Supervisor.
+    vendedores_supervisor = _obtener_vendedores_supervisor_tp(filtros_globales)
+    br_data = (
+        generar_business_rules_tp(vendedores=vendedores_supervisor)
+        if vendedores_supervisor is not None
+        else generar_business_rules_tp()
+    )
 
     if not br_data or not isinstance(br_data, dict):
         st.warning(
