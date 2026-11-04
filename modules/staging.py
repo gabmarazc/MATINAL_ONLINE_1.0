@@ -30,6 +30,7 @@ def obtener_staging_vta():
                 Codigo,
                 CantBase,
                 ImporteNetoItem,
+                PrecioCosto,
                 NetoItem,
                 CodVendedor,
                 Vendedor,
@@ -72,6 +73,8 @@ def obtener_staging_vta():
     df["ImporteNetoItem"] = (
         parsear_decimal_robusto(df[col_pesos], default=0.0) if col_pesos else 0.0
     )
+
+    df["PrecioCosto"] = parsear_decimal_robusto(df.get("PrecioCosto", 0.0), default=0.0)
 
     col_cant = next(
         (

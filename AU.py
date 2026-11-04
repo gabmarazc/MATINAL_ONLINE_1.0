@@ -1,23 +1,36 @@
 from __future__ import annotations
 
-"""AUDITORIA EMPIRICA READ ONLY - deteccion robusta de columnas + filtro supervisor TP/Cobertura."""
+"""AU READ ONLY - trazabilidad fila a fila de PrecioCosto: STAGING -> CORE_OPERACION."""
 
 import sqlite3
 import sys
-import unicodedata
 from pathlib import Path
-
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent
 DB = ROOT / "data" / "matinal.db"
-SUPS = (60, 70)
+TIPO_CANJE = "Devolución por Canje"
+TOL = 0.01
+
+# Clave transaccional compuesta exclusivamente por atributos que CORE_OPERACION
+# debe preservar. PrecioCosto queda deliberadamente FUERA de la clave para poder
+# auditarlo como valor transportado.
+CLAVE_BASE = [
+    "Cliente",
+    "CodVendedor",
+    "FechaCarga_dt",
+    "Codigo",
+    "TipoDeVenta",
+    "CantBase",
+    "ImporteNetoItem",
+    "Proveedor",
+]
 
 
 def titulo(texto: str) -> None:
-    print("\n" + "=" * 120)
+    print("\n" + "=" * 128)
     print(texto)
-    print("=" * 120)
+    print("=" * 128)
 
 
 def conectar_ro() -> sqlite3.Connection:
@@ -28,201 +41,232 @@ def conectar_ro() -> sqlite3.Connection:
     return con
 
 
-def normalizar_nombre(valor) -> str:
-    texto = str(valor).strip().lower()
-    texto = unicodedata.normalize("NFKD", texto)
-    texto = "".join(c for c in texto if not unicodedata.combining(c))
-    return "".join(c for c in texto if c.isalnum())
-
-
-def detectar_columna(
-    df: pd.DataFrame, candidatos: list[str], contiene: list[str] | None = None
-) -> str | None:
-    if df is None or df.empty and len(df.columns) == 0:
-        return None
-    mapa = {normalizar_nombre(c): c for c in df.columns}
-    for candidato in candidatos:
-        clave = normalizar_nombre(candidato)
-        if clave in mapa:
-            return mapa[clave]
-    if contiene:
-        tokens = [normalizar_nombre(x) for x in contiene]
-        for c in df.columns:
-            nc = normalizar_nombre(c)
-            if any(token in nc for token in tokens):
-                return c
-    return None
-
-
-def parametros() -> tuple[int, int, pd.Timestamp, pd.Timestamp]:
+def parametros():
     con = conectar_ro()
     try:
-        quick = con.execute("PRAGMA quick_check;").fetchone()[0]
-        filas = con.execute("SELECT PARAMETRO, VALOR FROM parametros").fetchall()
+        print("SQLite quick_check:", con.execute("PRAGMA quick_check;").fetchone()[0])
+        p = dict(con.execute("SELECT PARAMETRO, VALOR FROM parametros").fetchall())
     finally:
         con.close()
-    p = {str(k).strip(): v for k, v in filas}
     dm = pd.to_datetime(p.get("Dia Matinal"), dayfirst=True, errors="coerce")
     dv = pd.to_datetime(p.get("Dia Venta"), dayfirst=True, errors="coerce")
     if pd.isna(dm) or pd.isna(dv):
-        raise RuntimeError(
-            f"Fechas invalidas: Dia Matinal={p.get('Dia Matinal')!r}, Dia Venta={p.get('Dia Venta')!r}"
-        )
-    anio = int(float(p.get("Año", p.get("Anio", dv.year))))
-    mes = int(float(p.get("Mes", dv.month)))
-    print(f"SQLite quick_check: {quick}")
-    return anio, mes, pd.Timestamp(dm).normalize(), pd.Timestamp(dv).normalize()
+        raise RuntimeError("Dia Matinal o Dia Venta inválido.")
+    return (
+        int(float(p.get("Año", dm.year))),
+        int(float(p.get("Mes", dm.month))),
+        pd.Timestamp(dm).normalize(),
+        pd.Timestamp(dv).normalize(),
+    )
+
+
+def normalizar_para_clave(df: pd.DataFrame, capa: str) -> pd.DataFrame:
+    faltantes = [c for c in CLAVE_BASE + ["PrecioCosto"] if c not in df.columns]
+    if faltantes:
+        raise RuntimeError(f"{capa} no contiene columnas necesarias: {faltantes}")
+
+    x = df.copy()
+    for c in ["Cliente", "CodVendedor", "Codigo"]:
+        x[c] = pd.to_numeric(x[c], errors="coerce").astype("Int64")
+    x["FechaCarga_dt"] = pd.to_datetime(
+        x["FechaCarga_dt"], errors="coerce"
+    ).dt.normalize()
+    for c in ["CantBase", "ImporteNetoItem", "PrecioCosto"]:
+        x[c] = pd.to_numeric(x[c], errors="coerce")
+    for c in ["TipoDeVenta", "Proveedor"]:
+        x[c] = x[c].fillna("").astype(str).str.strip()
+
+    # Clave textual estable. Los floats se redondean solo para la CLAVE de matching;
+    # PrecioCosto se compara después con tolerancia monetaria.
+    x["_k_cliente"] = x["Cliente"].astype("string").fillna("<NA>")
+    x["_k_vend"] = x["CodVendedor"].astype("string").fillna("<NA>")
+    x["_k_fecha"] = x["FechaCarga_dt"].dt.strftime("%Y-%m-%d").fillna("<NA>")
+    x["_k_codigo"] = x["Codigo"].astype("string").fillna("<NA>")
+    x["_k_tipo"] = x["TipoDeVenta"]
+    x["_k_cant"] = x["CantBase"].round(6).astype("string").fillna("<NA>")
+    x["_k_importe"] = x["ImporteNetoItem"].round(6).astype("string").fillna("<NA>")
+    x["_k_prov"] = x["Proveedor"].str.upper()
+    kcols = [
+        "_k_cliente",
+        "_k_vend",
+        "_k_fecha",
+        "_k_codigo",
+        "_k_tipo",
+        "_k_cant",
+        "_k_importe",
+        "_k_prov",
+    ]
+    x["ClaveBase"] = x[kcols].agg("|".join, axis=1)
+
+    # Algunas líneas comerciales pueden ser idénticas. El ordinal convierte la
+    # clave base en una clave transaccional de multiconjunto sin usar PrecioCosto.
+    x = x.sort_values(CLAVE_BASE, kind="stable", na_position="last").copy()
+    x["Ordinal"] = x.groupby("ClaveBase", dropna=False).cumcount() + 1
+    x["ClaveTransaccional"] = x["ClaveBase"] + "|#" + x["Ordinal"].astype(str)
+    return x
 
 
 def main() -> None:
-    titulo("AUDITORIA EMPIRICA READ ONLY - SUPERVISOR GLOBAL - TP Y COBERTURA")
-    print(f"Proyecto: {ROOT}")
-    print(f"Base: {DB}")
-    print("Modo: SQLite mode=ro + PRAGMA query_only=ON")
-    print("Escrituras: NINGUNA")
-
+    titulo("AU READ ONLY - PRECIOCOSTO FILA A FILA CON CLAVE TRANSACCIONAL")
+    print(f"Proyecto               : {ROOT}")
+    print(f"Base                   : {DB}")
+    print("SQLite                 : mode=ro + PRAGMA query_only=ON")
+    print("Escrituras productivas : NINGUNA")
     anio, mes, dm, dv = parametros()
     print(
-        f"Escenario: Matinal={dm:%d/%m/%Y} | Venta={dv:%d/%m/%Y} | periodo={mes:02d}/{anio}"
+        f"Escenario              : Matinal={dm:%d/%m/%Y} | Venta={dv:%d/%m/%Y} | período={mes:02d}/{anio}"
     )
 
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
 
-    from modules import database as db
-    from modules.business_rules.business_rules_tp import generar_business_rules_tp
-    from modules.core.core_cobertura import obtener_base_cobertura
+    from modules.staging import obtener_staging_vta
+    from modules.core.core_operaciones import obtener_core_operacion
+    from modules.core.core_vendedores import obtener_core_vendedores
 
-    titulo("1. DETECCION EMPIRICA DE MAESTRO_VENDEDORES")
-    mv = db.cargar_tabla_sql("SELECT * FROM maestro_vendedores")
-    print(f"Filas maestro_vendedores: {len(mv):,}")
-    print("Columnas reales:")
-    for i, c in enumerate(mv.columns, 1):
-        print(f"  {i:02d}. {c}")
-
-    cod_col = detectar_columna(
-        mv,
-        [
-            "CodVend",
-            "CodVendedor",
-            "Codigo",
-            "CodigoVendedor",
-            "IDVEND",
-            "IdVendedor",
-            "Cod_Vendedor",
-        ],
-        contiene=["codvend", "codigovend", "idvend"],
+    validos = set(
+        pd.to_numeric(obtener_core_vendedores()["CodVendedor"], errors="coerce")
+        .dropna()
+        .astype(int)
+        .tolist()
     )
-    sup_col = detectar_columna(
-        mv,
-        ["SUP", "Supervisor", "CodSupervisor", "Cod_Supervisor", "SUPERVISOR"],
-        contiene=["supervisor", "codsup"],
+
+    titulo("1. CAPAS PRODUCTIVAS")
+    stg = obtener_staging_vta()
+    core = obtener_core_operacion(
+        anio,
+        mes,
+        dm.strftime("%d/%m/%Y"),
+        dv.strftime("%d/%m/%Y"),
+        modo_ajuste="AJUSTADO",
+    )["df_vta_operativa"].copy()
+    print(f"STAGING filas           : {len(stg):,}")
+    print(f"CORE operativa filas    : {len(core):,}")
+    print("PrecioCosto STAGING     :", "PrecioCosto" in stg.columns)
+    print("PrecioCosto CORE        :", "PrecioCosto" in core.columns)
+
+    # El universo a auditar se define SOLO desde CORE. No reconstruimos reglas temporales.
+    col_vig = (
+        "CodVendedorVigente" if "CodVendedorVigente" in core.columns else "CodVendedor"
     )
-    print(f"Columna vendedor detectada  : {cod_col!r}")
-    print(f"Columna supervisor detectada: {sup_col!r}")
-
-    if cod_col is None or sup_col is None:
-        print("\nRESULTADO: NO CONCLUYENTE")
-        print(
-            "No se pudieron detectar de forma segura las columnas de vendedor/supervisor."
-        )
-        print(
-            "La lista de columnas reales queda impresa arriba para ajustar la AU sin inferencias."
-        )
-        raise SystemExit(2)
-
-    mv = mv.copy()
-    mv["_cod"] = pd.to_numeric(mv[cod_col], errors="coerce").astype("Int64")
-    mv["_sup"] = pd.to_numeric(mv[sup_col], errors="coerce").astype("Int64")
-    print("\nUniverso detectado por supervisor:")
-    for sup in SUPS:
-        cods = sorted(
-            mv.loc[mv["_sup"].eq(sup), "_cod"].dropna().astype(int).unique().tolist()
-        )
-        print(f"  SUP {sup}: vendedores={len(cods)} | codigos={cods}")
-
-    titulo("2. TIENDA PERFECTA - PRUEBA REAL")
-    tp_all = generar_business_rules_tp()
-    detalle_all = tp_all.get("detalle_tp", tp_all.get("df_filtrado", pd.DataFrame()))
-    cli_all = (
-        detalle_all["Cliente_id"].nunique()
-        if "Cliente_id" in detalle_all.columns
-        else len(detalle_all)
+    vend_vig = pd.to_numeric(core[col_vig], errors="coerce").astype("Int64")
+    mask_core = (
+        core["Proveedor"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .str.contains("PEPSICO", na=False)
+        & core["TipoDeVenta"].fillna("").astype(str).str.strip().eq(TIPO_CANJE)
+        & vend_vig.isin(validos)
     )
-    print(f"TP TODOS | filas={len(detalle_all):,} | clientes={cli_all:,}")
+    if "Periodo" in core.columns:
+        mask_core &= core["Periodo"].isin(["Arrastre", "Actual"])
+    core_canje = core.loc[mask_core].copy()
 
-    for sup in SUPS:
-        cods = sorted(
-            mv.loc[mv["_sup"].eq(sup), "_cod"].dropna().astype(int).unique().tolist()
-        )
-        tp_sup = generar_business_rules_tp(vendedores=cods)
-        ds = tp_sup.get("detalle_tp", tp_sup.get("df_filtrado", pd.DataFrame()))
-        clientes = ds["Cliente_id"].nunique() if "Cliente_id" in ds.columns else len(ds)
-        cod_presentes = sorted(
-            pd.to_numeric(
-                ds.get("CodVendedor", pd.Series(dtype=float)), errors="coerce"
-            )
-            .dropna()
-            .astype(int)
-            .unique()
-            .tolist()
-        )
-        fuera = sorted(set(cod_presentes) - set(cods))
-        print(
-            f"TP SUP {sup} | vendedores_esperados={len(cods)} | filas={len(ds):,} | clientes={clientes:,} | vendedores_fuera={fuera}"
-        )
-
-    titulo("3. COBERTURA - PRUEBA REAL")
-    cob = obtener_base_cobertura(
-        anio_op=anio,
-        mes_op=mes,
-        dia_matinal=dm.strftime("%Y-%m-%d"),
-        dia_venta=dv.strftime("%Y-%m-%d"),
-    )
-    cartera = cob.get("cartera", pd.DataFrame()).copy()
-    print(f"Cobertura TODOS | filas cartera={len(cartera):,}")
-    print("Columnas reales de cartera relacionadas con vendedor/supervisor:")
-    candidatas = [
-        c
-        for c in cartera.columns
-        if any(x in normalizar_nombre(c) for x in ["vend", "sup", "supervisor"])
-    ]
-    for c in candidatas:
-        print(f"  - {c}")
-
-    cob_cod = detectar_columna(
-        cartera,
-        ["CodVendedor", "CodVend", "CodigoVendedor", "_join_vend", "IDVEND"],
-        contiene=["codvend", "idvend", "joinvend"],
-    )
-    cob_sup = detectar_columna(
-        cartera,
-        ["SUP", "Supervisor", "SUPERVISOR", "CodSupervisor"],
-        contiene=["supervisor", "codsup"],
-    )
-    print(f"Columna vendedor cobertura  : {cob_cod!r}")
-    print(f"Columna supervisor cobertura: {cob_sup!r}")
-
-    if cob_sup is not None:
-        serie_sup = pd.to_numeric(cartera[cob_sup], errors="coerce").astype("Int64")
-        for sup in SUPS:
-            sub = cartera.loc[serie_sup.eq(sup)].copy()
-            print(f"Cobertura SUP {sup} por columna {cob_sup} | filas={len(sub):,}")
-    elif cob_cod is not None:
-        serie_cod = pd.to_numeric(cartera[cob_cod], errors="coerce").astype("Int64")
-        for sup in SUPS:
-            cods = set(mv.loc[mv["_sup"].eq(sup), "_cod"].dropna().astype(int).tolist())
-            sub = cartera.loc[serie_cod.isin(cods)].copy()
-            print(f"Cobertura SUP {sup} por vendedores maestro | filas={len(sub):,}")
-    else:
-        print(
-            "Cobertura: no se detecto columna segura para segmentar por supervisor ni vendedor."
-        )
-
-    titulo("4. VEREDICTO")
+    titulo("2. UNIVERSO CORE OBJETIVO")
+    print(f"Canjes CORE a trazar    : {len(core_canje):,}")
+    print(f"Vendedores vigentes     : {vend_vig.loc[mask_core].nunique():,}")
     print(
-        "La AU termino correctamente. Use los universos impresos para contrastar TODOS vs SUP 60 vs SUP 70."
+        f"PrecioCosto suma        : {pd.to_numeric(core_canje['PrecioCosto'], errors='coerce').sum():,.2f}"
     )
+    print(
+        f"PrecioCosto suma abs    : {pd.to_numeric(core_canje['PrecioCosto'], errors='coerce').abs().sum():,.2f}"
+    )
+
+    # STAGING se limita solo por atributos comerciales amplios. El matching exacto
+    # se realiza con las claves de las filas CORE, por lo que no se reimplementa CORE.
+    mask_stg = stg["Proveedor"].fillna("").astype(
+        str
+    ).str.strip().str.upper().str.contains("PEPSICO", na=False) & stg[
+        "TipoDeVenta"
+    ].fillna("").astype(str).str.strip().eq(TIPO_CANJE)
+    stg_canje = stg.loc[mask_stg].copy()
+
+    core_k = normalizar_para_clave(core_canje, "CORE")
+    stg_k = normalizar_para_clave(stg_canje, "STAGING")
+
+    titulo("3. MATCH DE CLAVES CORE CONTRA STAGING")
+    # Para no distorsionar ordinales por historia completa, primero retenemos en STAGING
+    # únicamente claves base exigidas por CORE y luego recalculamos ordinal dentro de ellas.
+    claves_core_base = set(core_k["ClaveBase"])
+    stg_match_base = stg_k.loc[stg_k["ClaveBase"].isin(claves_core_base)].copy()
+    # Recalcular ordinal tras restringir no es necesario: la clave base representa mismas
+    # líneas; se compara como multiconjunto por ClaveBase + PrecioCosto ordenado.
+    conteo_core = core_k.groupby("ClaveBase").size().rename("Filas_CORE")
+    conteo_stg = stg_match_base.groupby("ClaveBase").size().rename("Filas_STG")
+    conteos = (
+        pd.concat([conteo_core, conteo_stg], axis=1).fillna(0).astype(int).reset_index()
+    )
+    conteos["DifFilas"] = conteos["Filas_STG"] - conteos["Filas_CORE"]
+    claves_insuficientes = conteos.loc[
+        conteos["Filas_STG"].lt(conteos["Filas_CORE"])
+    ].copy()
+    print(f"Claves base CORE        : {len(conteo_core):,}")
+    print(f"Claves halladas STAGING : {int(conteos['Filas_STG'].gt(0).sum()):,}")
+    print(f"Claves insuficientes    : {len(claves_insuficientes):,}")
+
+    # Comparación de multiconjunto por clave base: ordenar PrecioCosto dentro de cada clave
+    # y emparejar por ordinal. Esto evita usar PrecioCosto como parte de la clave auditada.
+    def rank_precio(x: pd.DataFrame, suf: str) -> pd.DataFrame:
+        y = x[["ClaveBase", "PrecioCosto"]].copy()
+        y = y.sort_values(
+            ["ClaveBase", "PrecioCosto"], kind="stable", na_position="last"
+        )
+        y["OrdinalPrecio"] = y.groupby("ClaveBase", dropna=False).cumcount() + 1
+        return y.rename(columns={"PrecioCosto": f"PrecioCosto_{suf}"})
+
+    a = rank_precio(core_k, "CORE")
+    b = rank_precio(stg_match_base, "STG")
+    comp = a.merge(
+        b, on=["ClaveBase", "OrdinalPrecio"], how="left", validate="one_to_one"
+    )
+    comp["DifPrecioCosto"] = comp["PrecioCosto_STG"] - comp["PrecioCosto_CORE"]
+    comp["MatchPrecio"] = comp["PrecioCosto_STG"].notna() & comp[
+        "DifPrecioCosto"
+    ].abs().le(TOL)
+
+    faltantes = comp["PrecioCosto_STG"].isna()
+    distintos = comp["PrecioCosto_STG"].notna() & ~comp["MatchPrecio"]
+    print(f"Filas CORE trazadas     : {len(comp):,}")
+    print(f"Filas sin match STAGING : {int(faltantes.sum()):,}")
+    print(f"PrecioCosto diferente   : {int(distintos.sum()):,}")
+    print(f"PrecioCosto exacto/tol  : {int(comp['MatchPrecio'].sum()):,}")
+
+    if faltantes.any() or distintos.any():
+        titulo("4. DIFERENCIAS - PRIMERAS 30")
+        print(
+            comp.loc[
+                faltantes | distintos,
+                [
+                    "ClaveBase",
+                    "OrdinalPrecio",
+                    "PrecioCosto_CORE",
+                    "PrecioCosto_STG",
+                    "DifPrecioCosto",
+                ],
+            ]
+            .head(30)
+            .to_string(index=False)
+        )
+
+    titulo("5. CONCILIACION MONETARIA DE FILAS MATCH")
+    print(f"CORE PrecioCosto abs    : {comp['PrecioCosto_CORE'].abs().sum():,.2f}")
+    print(f"STG PrecioCosto abs     : {comp['PrecioCosto_STG'].abs().sum():,.2f}")
+    print(f"Diferencia algebraica   : {comp['DifPrecioCosto'].fillna(0).sum():,.6f}")
+
+    titulo("VEREDICTO")
+    if faltantes.any() or distintos.any():
+        print("RESULTADO: NO APROBADO")
+        print(
+            "Existen filas CORE sin trazabilidad o diferencias de PrecioCosto frente a STAGING."
+        )
+        raise SystemExit(1)
+    print("RESULTADO: APROBADO")
+    print(
+        "Las filas CORE de canje PepsiCo trazan contra STAGING y PrecioCosto se conserva sin diferencias."
+    )
+    print("La auditoría no reconstruye el corte temporal de CORE_OPERACION.")
     print("READ ONLY - Escrituras realizadas: NINGUNA")
 
 

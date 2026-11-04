@@ -276,6 +276,20 @@ def render_fragmento_interactivo_cobertura(
             cols_idx_presentes + cols_dinamicas_batalla
         ].copy()
 
+        # Mantener solamente clientes con al menos un elemento de cobertura
+        # visible que no alcance el mínimo de 3 unidades.
+        # Al aplicarse sobre df_batalla_render, el mismo filtro afecta tanto
+        # la Vista Batalla en pantalla como el Excel descargado.
+        if cols_dinamicas_batalla:
+            mascara_pendiente = (
+                df_batalla_render[cols_dinamicas_batalla]
+                .apply(pd.to_numeric, errors="coerce")
+                .fillna(0)
+                .lt(3)
+                .any(axis=1)
+            )
+            df_batalla_render = df_batalla_render.loc[mascara_pendiente].copy()
+
     if df_matriz_render.empty and df_batalla_render.empty:
         st.warning("No hay datos que coincidan con los filtros seleccionados.")
         return
