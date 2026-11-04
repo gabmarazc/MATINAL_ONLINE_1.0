@@ -12,7 +12,7 @@ def _cargar_y_normalizar_vendedores() -> pd.DataFrame:
     - Cargar maestro_vendedores desde SQLite
     - Normalizar CodVendedor
     - Mantener Nombre y SUP
-    - Extraer Ajuste_Entrega y Rutas_Ajustadas
+    - Extraer Ajuste_Entrega, Rutas_Ajustadas, Cambios y Combos
     - Eliminar duplicados
     - Ordenar por CodVendedor
     """
@@ -88,6 +88,18 @@ def _cargar_y_normalizar_vendedores() -> pd.DataFrame:
     else:
         core["Rutas_Ajustadas"] = 0
 
+    # Presupuestos monetarios enteros por vendedor. CORE solo transporta y tipa;
+    # no aplica reglas comerciales de consumo, saldo ni semáforos.
+    for col_presupuesto in ["Cambios", "Combos"]:
+        if col_presupuesto in df.columns:
+            core[col_presupuesto] = (
+                pd.to_numeric(df[col_presupuesto], errors="coerce")
+                .fillna(0)
+                .astype(int)
+            )
+        else:
+            core[col_presupuesto] = 0
+
     core = core[core["CodVendedor"].notna()].copy()
     core = core.drop_duplicates(subset=["CodVendedor"])
     core = core.sort_values("CodVendedor").reset_index(drop=True)
@@ -104,6 +116,7 @@ def obtener_core_vendedores(incluir_vendedor_20: bool = False) -> pd.DataFrame:
     - Cargar maestro_vendedores normalizado mediante función privada.
     - Excluir por defecto al vendedor 20 (comportamiento histórico preservado).
     - Permitir opcionalmente incluir al vendedor 20 mediante el parámetro incluir_vendedor_20=True (uso gerencial).
+    - Preservar Cambios y Combos como presupuestos monetarios enteros.
     - Eliminar duplicados y ordenar de forma ascendente.
     """
     core = _cargar_y_normalizar_vendedores()

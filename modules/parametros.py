@@ -44,11 +44,21 @@ def obtener_maestro_vendedores_sql(anio: str = None, mes: str = None) -> pd.Data
                     "Nombre_Vendedor",
                     "Supervisor",
                     "Rutas_Ajustadas",
+                    "Cambios",
+                    "Combos",
                 ]
             )
 
         if "Rutas_Ajustadas" not in df_all.columns:
             df_all["Rutas_Ajustadas"] = 0
+        for col_presupuesto in ["Cambios", "Combos"]:
+            if col_presupuesto not in df_all.columns:
+                df_all[col_presupuesto] = 0
+            df_all[col_presupuesto] = (
+                pd.to_numeric(df_all[col_presupuesto], errors="coerce")
+                .fillna(0)
+                .astype(int)
+            )
 
         if not mes or str(mes).strip() == "":
             return df_all
@@ -320,9 +330,17 @@ def obtener_maestro_innovaciones_sql(anio: str = None, mes: str = None) -> pd.Da
                     "Articulo",
                     "Innovacion",
                     "Condicion_Vta",
+                    "Desde",
+                    "Hasta",
                 ]
             )
 
+        for col_fecha in ["Desde", "Hasta"]:
+            if col_fecha not in df_all.columns:
+                df_all[col_fecha] = pd.NaT
+            df_all[col_fecha] = pd.to_datetime(
+                df_all[col_fecha], errors="coerce", dayfirst=True
+            )
         if not mes or str(mes).strip() == "":
             return df_all
 
@@ -335,7 +353,16 @@ def obtener_maestro_innovaciones_sql(anio: str = None, mes: str = None) -> pd.Da
         return df_all
     except Exception:
         return pd.DataFrame(
-            columns=["Anio", "Mes", "Codigo", "Articulo", "Innovacion", "Condicion_Vta"]
+            columns=[
+                "Anio",
+                "Mes",
+                "Codigo",
+                "Articulo",
+                "Innovacion",
+                "Condicion_Vta",
+                "Desde",
+                "Hasta",
+            ]
         )
 
 
@@ -508,6 +535,15 @@ def render_parametros_view(filtros_globales: dict = None):
                 if "Rutas_Ajustadas" not in df_nuevo_master.columns:
                     df_nuevo_master["Rutas_Ajustadas"] = 0
 
+            for col_presupuesto in ["Cambios", "Combos"]:
+                if col_presupuesto not in df_nuevo_master.columns:
+                    df_nuevo_master[col_presupuesto] = 0
+                df_nuevo_master[col_presupuesto] = (
+                    pd.to_numeric(df_nuevo_master[col_presupuesto], errors="coerce")
+                    .fillna(0)
+                    .astype(int)
+                )
+
             st.write("Vista previa del archivo cargado:", df_nuevo_master.head())
 
             if st.button("📥 Registrar y Guardar Vendedores en Base de Datos"):
@@ -525,6 +561,15 @@ def render_parametros_view(filtros_globales: dict = None):
                         .fillna(0)
                         .astype(int)
                     )
+
+                    for col_presupuesto in ["Cambios", "Combos"]:
+                        df_nuevo_master[col_presupuesto] = (
+                            pd.to_numeric(
+                                df_nuevo_master.get(col_presupuesto, 0), errors="coerce"
+                            )
+                            .fillna(0)
+                            .astype(int)
+                        )
 
                     query_check = "SELECT name FROM sqlite_master WHERE type='table' AND name='maestro_vendedores'"
                     res_check = db.cargar_tabla_sql(query_check)
@@ -1117,9 +1162,19 @@ def render_parametros_view(filtros_globales: dict = None):
 
     if archivo_innovaciones is not None:
         try:
+            df_preview_innovaciones = pd.read_excel(archivo_innovaciones)
+            for col_fecha in ["Desde", "Hasta"]:
+                if col_fecha not in df_preview_innovaciones.columns:
+                    df_preview_innovaciones[col_fecha] = pd.NaT
+                else:
+                    df_preview_innovaciones[col_fecha] = pd.to_datetime(
+                        df_preview_innovaciones[col_fecha],
+                        errors="coerce",
+                        dayfirst=True,
+                    )
             st.write(
                 "Vista previa del archivo de innovaciones:",
-                pd.read_excel(archivo_innovaciones).head(),
+                df_preview_innovaciones.head(),
             )
 
             if st.button("📥 Registrar y Guardar Innovaciones en Base de Datos"):

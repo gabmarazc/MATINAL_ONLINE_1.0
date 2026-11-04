@@ -3294,76 +3294,175 @@ def guardar_objetivos_calibrados_desde_excel(file_buffer_or_path, anio, mes):
 
 
 def guardar_innovaciones_desde_excel(file_buffer_or_path, anio, mes):
-    """Guarda o reemplaza el maestro de innovaciones en la tabla 'maestro_innovaciones' para el período (Anio, Mes)."""
+    """
+    Guarda o reemplaza maestro_innovaciones para (Anio, Mes).
+
+    Contrato:
+    - Codigo: entero.
+    - Condicion_Vta: entero.
+    - Desde / Hasta: fechas de entrada DD/MM/YYYY; se persisten YYYY-MM-DD.
+    - Desde / Hasta pueden quedar vacias.
+    - Si ambas existen, Desde no puede ser posterior a Hasta.
+    """
     try:
         df_subida = pd.read_excel(file_buffer_or_path)
     except Exception as e:
         return False, f"Error al leer el archivo Excel de innovaciones: {e}"
 
-    columnas_requeridas = ["Codigo", "Articulo", "Innovacion", "Condicion_Vta"]
+    columnas_requeridas = [
+        "Codigo",
+        "Articulo",
+        "Innovacion",
+        "Condicion_Vta",
+        "Desde",
+        "Hasta",
+    ]
     faltantes = [c for c in columnas_requeridas if c not in df_subida.columns]
     if faltantes:
         return (
             False,
-            f"El archivo Excel no tiene el formato correcto. Faltan las columnas: {', '.join(faltantes)}",
+            "El archivo Excel no tiene el formato correcto. "
+            f"Faltan las columnas: {', '.join(faltantes)}",
         )
 
     try:
         anio_int = int(float(str(anio)))
-    except Exception:
-        anio_int = 2026
-
-    try:
         mes_int = int(float(str(mes)))
     except Exception:
-        mes_int = 9
+        return False, "Anio y Mes deben ser valores numericos validos."
+    if mes_int < 1 or mes_int > 12:
+        return False, "Mes debe estar comprendido entre 1 y 12."
 
-    df_subida["Anio"] = anio_int
-    df_subida["Mes"] = mes_int
-    df_subida["Codigo"] = pd.to_numeric(df_subida["Codigo"], errors="coerce").astype(
+    trabajo = df_subida[columnas_requeridas].copy()
+    trabajo["Codigo"] = pd.to_numeric(trabajo["Codigo"], errors="coerce").astype(
         "Int64"
     )
-    df_subida["Articulo"] = df_subida["Articulo"].fillna("").astype(str).str.strip()
-    df_subida["Innovacion"] = (
-        df_subida["Innovacion"].fillna("").astype(str).str.strip().str.upper()
+    if trabajo["Codigo"].isna().any():
+        return False, "Codigo contiene valores vacios o no numericos."
+    if trabajo["Codigo"].duplicated().any():
+        duplicados = sorted(
+            trabajo.loc[trabajo["Codigo"].duplicated(False), "Codigo"]
+            .dropna()
+            .astype(int)
+            .unique()
+            .tolist()
+        )
+        return False, f"Codigo contiene duplicados: {duplicados}."
+
+    trabajo["Articulo"] = trabajo["Articulo"].fillna("").astype(str).str.strip()
+    trabajo["Innovacion"] = (
+        trabajo["Innovacion"].fillna("").astype(str).str.strip().str.upper()
     )
-    df_subida["Condicion_Vta"] = pd.to_numeric(
-        df_subida["Condicion_Vta"], errors="coerce"
+    trabajo["Condicion_Vta"] = pd.to_numeric(
+        trabajo["Condicion_Vta"], errors="coerce"
     ).astype("Int64")
+    if trabajo["Condicion_Vta"].isna().any():
+        return False, "Condicion_Vta contiene valores vacios o no numericos."
+
+    for col_fecha in ["Desde", "Hasta"]:
+        originales = trabajo[col_fecha].copy()
+        vacios = originales.isna() | originales.astype(str).str.strip().isin(
+            ["", "NaT", "nan", "None"]
+        )
+        fechas = pd.to_datetime(originales, errors="coerce", dayfirst=True)
+        invalidas = ~vacios & fechas.isna()
+        if invalidas.any():
+            ejemplos = originales.loc[invalidas].head(5).tolist()
+            return False, (
+                f"{col_fecha} contiene fechas invalidas. "
+                f"Formato esperado DD/MM/YYYY. Ejemplos: {ejemplos}."
+            )
+        trabajo[col_fecha] = fechas.dt.strftime("%Y-%m-%d")
+        trabajo.loc[vacios, col_fecha] = None
+
+    desde_dt = pd.to_datetime(trabajo["Desde"], errors="coerce")
+    hasta_dt = pd.to_datetime(trabajo["Hasta"], errors="coerce")
+    rango_invalido = desde_dt.notna() & hasta_dt.notna() & desde_dt.gt(hasta_dt)
+    if rango_invalido.any():
+        muestra = (
+            trabajo.loc[rango_invalido, ["Codigo", "Desde", "Hasta"]]
+            .head(10)
+            .to_dict("records")
+        )
+        return False, f"Existen innovaciones con Desde posterior a Hasta: {muestra}."
+
+    trabajo["Anio"] = anio_int
+    trabajo["Mes"] = mes_int
+    trabajo = trabajo[
+        [
+            "Anio",
+            "Mes",
+            "Codigo",
+            "Articulo",
+            "Innovacion",
+            "Condicion_Vta",
+            "Desde",
+            "Hasta",
+        ]
+    ]
 
     conn = obtener_conexion()
     try:
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS maestro_innovaciones (
-                Anio INTEGER,
-                Mes INTEGER,
-                Codigo INTEGER,
-                Articulo TEXT,
-                Innovacion TEXT,
-                Condicion_Vta INTEGER,
-                PRIMARY KEY (Anio, Mes, Codigo)
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            # Migracion aditiva para instalaciones existentes.
+            existe = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='maestro_innovaciones' LIMIT 1;"
+            ).fetchone()
+            if existe:
+                columnas_sql = [
+                    r[1]
+                    for r in conn.execute(
+                        "PRAGMA table_info(maestro_innovaciones);"
+                    ).fetchall()
+                ]
+                if "Desde" not in columnas_sql:
+                    conn.execute(
+                        'ALTER TABLE maestro_innovaciones ADD COLUMN "Desde" TEXT;'
+                    )
+                if "Hasta" not in columnas_sql:
+                    conn.execute(
+                        'ALTER TABLE maestro_innovaciones ADD COLUMN "Hasta" TEXT;'
+                    )
+            else:
+                conn.execute(
+                    """
+                    CREATE TABLE maestro_innovaciones (
+                        Anio INTEGER,
+                        Mes INTEGER,
+                        Codigo INTEGER,
+                        Articulo TEXT,
+                        Innovacion TEXT,
+                        Condicion_Vta INTEGER,
+                        Desde TEXT,
+                        Hasta TEXT,
+                        PRIMARY KEY (Anio, Mes, Codigo)
+                    )
+                    """
+                )
+
+            conn.execute(
+                "DELETE FROM maestro_innovaciones WHERE Anio = ? AND Mes = ?",
+                (anio_int, mes_int),
             )
-        """)
-        conn.commit()
-
-        cursor.execute(
-            "DELETE FROM maestro_innovaciones WHERE Anio = ? AND Mes = ?",
-            (anio_int, mes_int),
-        )
-        conn.commit()
-
-        df_subida.to_sql(
-            "maestro_innovaciones",
-            conn,
-            if_exists="append",
-            index=False,
-            chunksize=10000,
-        )
+            conn.executemany(
+                """
+                INSERT INTO maestro_innovaciones
+                    (Anio, Mes, Codigo, Articulo, Innovacion, Condicion_Vta, Desde, Hasta)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                list(trabajo.itertuples(index=False, name=None)),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+    except Exception as exc:
+        return False, f"Error al guardar maestro_innovaciones: {exc}"
     finally:
         conn.close()
 
     return (
         True,
-        f"¡Innovaciones del período {mes_int:02d}/{anio_int} cargadas y versionados con éxito en la base de datos!",
+        f"Innovaciones del periodo {mes_int:02d}/{anio_int} cargadas y versionadas con exito en la base de datos.",
     )

@@ -19,6 +19,7 @@ from modules.rep_MN_core import render_rep_mn_core
 from modules.rep_gerencial_core import render_rep_gerencial_core
 from modules.rep_tp_core import render_rep_tp_core
 from modules.rep_compromisos_core import render_rep_compromisos_core
+from modules.rep_ryc_core import render_rep_ryc_core
 from modules import database as db
 from modules.core.core_validacion_periodo import validar_integridad_periodo_operativo
 
@@ -400,6 +401,9 @@ def main():
     # Cobertura (Todos los niveles)
     titulos_tabs_maestro.append("🎯 Cobertura")
     claves_tabs_maestro.append("COBERTURA")
+    # RyC - Rechazos y Cambios (Todos los niveles)
+    titulos_tabs_maestro.append("🔁 RyC")
+    claves_tabs_maestro.append("RYC")
 
     # Adopción MiNegocio (Todos los niveles)
     titulos_tabs_maestro.append("📱 Adopción MiNegocio")
@@ -482,6 +486,13 @@ def main():
                     print(
                         f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
                     )
+            if "RYC" in mapping_tabs:
+                with mapping_tabs["RYC"]:
+                    t0_ryc = time.perf_counter()
+                    render_rep_ryc_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_ryc_core: {time.perf_counter() - t0_ryc:.2f} s"
+                    )
             if "MN" in mapping_tabs:
                 with mapping_tabs["MN"]:
                     t0_mnc = time.perf_counter()
@@ -545,6 +556,13 @@ def main():
                     print(
                         f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
                     )
+            if "RYC" in mapping_tabs:
+                with mapping_tabs["RYC"]:
+                    t0_ryc = time.perf_counter()
+                    render_rep_ryc_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_ryc_core: {time.perf_counter() - t0_ryc:.2f} s"
+                    )
             if "MN" in mapping_tabs:
                 with mapping_tabs["MN"]:
                     t0_mnc = time.perf_counter()
@@ -591,6 +609,13 @@ def main():
                     render_rep_cobertura_core(filtros_globales)
                     print(
                         f"[PERF] render_rep_cobertura_core: {time.perf_counter() - t0_cob:.2f} s"
+                    )
+            if "RYC" in mapping_tabs:
+                with mapping_tabs["RYC"]:
+                    t0_ryc = time.perf_counter()
+                    render_rep_ryc_core(filtros_globales)
+                    print(
+                        f"[PERF] render_rep_ryc_core: {time.perf_counter() - t0_ryc:.2f} s"
                     )
             if "MN" in mapping_tabs:
                 with mapping_tabs["MN"]:

@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 
 from modules.staging import obtener_staging_rutas
+from modules.parametros import obtener_maestro_innovaciones_sql
 from modules.core.core_operaciones import obtener_core_operacion
 from modules.core.core_clientes import obtener_core_clientes
 from modules.core.core_vendedores import obtener_core_vendedores
@@ -15,6 +16,66 @@ from modules.business_rules.business_rules_cobertura import (
     obtener_estado_cobertura,
 )
 from modules.utils import parsear_fecha_robusta
+
+
+@st.cache_data(show_spinner=False)
+def obtener_core_innovaciones(anio: int, mes: int) -> pd.DataFrame:
+    """
+    Contrato reutilizable de Innovaciones para capas CORE/Business Rules.
+
+    Responsabilidades:
+    - Reutilizar el acceso institucional de Parametros a maestro_innovaciones.
+    - Filtrar el periodo solicitado mediante obtener_maestro_innovaciones_sql.
+    - Normalizar Codigo y Condicion_Vta como Int64.
+    - Normalizar Desde y Hasta como datetime64[ns].
+    - Preservar fechas vacias como NaT: si Desde/Hasta no estan informadas,
+      la ventana temporal no opera.
+    - No aplicar reglas comerciales de Cobertura ni de RyC.
+    """
+    columnas = [
+        "Codigo",
+        "Articulo",
+        "Innovacion",
+        "Condicion_Vta",
+        "Desde",
+        "Hasta",
+    ]
+
+    try:
+        df = obtener_maestro_innovaciones_sql(str(int(anio)), str(int(mes)))
+    except Exception:
+        return pd.DataFrame(columns=columnas)
+
+    if df is None or df.empty:
+        return pd.DataFrame(columns=columnas)
+
+    resultado = df.copy()
+    for col in columnas:
+        if col not in resultado.columns:
+            resultado[col] = pd.NaT if col in ["Desde", "Hasta"] else pd.NA
+
+    resultado["Codigo"] = pd.to_numeric(resultado["Codigo"], errors="coerce").astype(
+        "Int64"
+    )
+    resultado["Condicion_Vta"] = pd.to_numeric(
+        resultado["Condicion_Vta"], errors="coerce"
+    ).astype("Int64")
+    resultado["Articulo"] = resultado["Articulo"].fillna("").astype(str).str.strip()
+    resultado["Innovacion"] = (
+        resultado["Innovacion"].fillna("").astype(str).str.strip().str.upper()
+    )
+    resultado["Desde"] = pd.to_datetime(
+        resultado["Desde"], errors="coerce", dayfirst=True
+    ).dt.normalize()
+    resultado["Hasta"] = pd.to_datetime(
+        resultado["Hasta"], errors="coerce", dayfirst=True
+    ).dt.normalize()
+
+    resultado = resultado.loc[resultado["Codigo"].notna()].copy()
+    resultado = resultado.drop_duplicates(subset=["Codigo"], keep="last")
+    return (
+        resultado[columnas].sort_values("Codigo", kind="stable").reset_index(drop=True)
+    )
 
 
 def _normalizar_cartera_cobertura(df_cartera: pd.DataFrame) -> pd.DataFrame:
