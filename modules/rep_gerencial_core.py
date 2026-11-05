@@ -10,7 +10,6 @@ from modules import database as db
 from modules.business_rules.business_rules_gerencial import obtener_motor_gerencial
 from modules.business_rules.business_rules_tp import generar_business_rules_tp
 from modules.rep_ccc_core import obtener_matriz_ccc_comercial
-from modules.rep_MN_core import obtener_matriz_mn_comercial
 
 
 # ==========================================================
@@ -529,14 +528,13 @@ def obtener_motor_gerencial_base(
     maestro_ccc = cargar_maestro_ccc(anio, mes)
 
     df_ccc = obtener_matriz_ccc_comercial(int(anio), int(mes), filtros)
-    df_mn = obtener_matriz_mn_comercial(int(anio), int(mes), filtros)
     df_tp = construir_bloque_tp_gerencial(int(anio), int(mes), supervisor)
 
     return {
         "kilos_raw": motor_base.get("kilos", pd.DataFrame()),
         "gross_raw": motor_base.get("gross", pd.DataFrame()),
         "ccc": construir_bloque_ccc(df_ccc, maestro_ccc),
-        "mn": construir_bloque_mn(df_mn),
+        "mn": construir_bloque_mn(motor_base.get("mn", pd.DataFrame())),
         "tp": df_tp,
     }
 

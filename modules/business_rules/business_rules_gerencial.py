@@ -8,6 +8,7 @@ import streamlit as st
 
 from modules.core.core_operaciones import obtener_core_operacion
 from modules.core.core_vendedores import obtener_core_vendedores
+from modules.core.core_clientes import obtener_core_clientes
 from modules.staging import obtener_staging_maestros, obtener_staging_vta
 
 
@@ -52,6 +53,26 @@ def _filtrar_universo_gerencial(df: pd.DataFrame) -> pd.DataFrame:
             .str.strip()
             .isin(TIPOS_VENTA_EXCLUIDOS)
         ].copy()
+
+    # Exclusion institucional del universo comercial Gerencial.
+    # Se conserva al vendedor 20; la exclusion depende exclusivamente
+    # de Ramo/Subramo = Empleados.
+    ramo_empleados = (
+        resultado["Ramo"].fillna("").astype(str).str.strip().str.upper().eq("EMPLEADOS")
+        if "Ramo" in resultado.columns
+        else pd.Series(False, index=resultado.index)
+    )
+    subramo_empleados = (
+        resultado["Subramo"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .eq("EMPLEADOS")
+        if "Subramo" in resultado.columns
+        else pd.Series(False, index=resultado.index)
+    )
+    resultado = resultado.loc[~(ramo_empleados | subramo_empleados)].copy()
 
     return resultado
 
@@ -955,6 +976,118 @@ def obtener_matriz_gerencial_gross(
 
 
 @st.cache_data(show_spinner=False)
+def obtener_matriz_gerencial_mn(
+    anio: int,
+    mes: int,
+    filtros_globales: dict,
+) -> pd.DataFrame:
+    """
+    Construye MiNegocio Gerencial con el universo institucional Gerencial:
+    titular original, vendedor 20 incluido, Empleados excluidos e importes
+    negativos conservados.
+    """
+    columnas_salida = [
+        "Taxonomia",
+        "Ventas_Totales",
+        "Ventas_MiNegocio",
+        "Participacion_MiNegocio_Pct",
+    ]
+
+    padron, ventas, _ = _obtener_contexto_gerencial(anio, mes, filtros_globales)
+    if padron.empty or ventas.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    periodo = ventas[ventas["Periodo"].isin(["Arrastre", "Actual"])].copy()
+    if periodo.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    periodo["ImporteNetoItem"] = pd.to_numeric(
+        periodo.get("ImporteNetoItem", 0.0), errors="coerce"
+    ).fillna(0.0)
+
+    col_cliente = next(
+        (
+            c
+            for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente"]
+            if c in periodo.columns
+        ),
+        None,
+    )
+    if col_cliente is None:
+        raise ValueError("MiNegocio Gerencial no puede identificar la columna Cliente.")
+    periodo["Cliente"] = pd.to_numeric(periodo[col_cliente], errors="coerce").astype(
+        "Int64"
+    )
+
+    col_origen = next(
+        (
+            c
+            for c in periodo.columns
+            if any(k in str(c).lower() for k in ["origen", "canal"])
+        ),
+        None,
+    )
+    if col_origen is None:
+        periodo["Es_MiNegocio"] = False
+    else:
+        periodo["Es_MiNegocio"] = (
+            periodo[col_origen]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.contains("minegocio|mi negocio", case=False, na=False)
+        )
+
+    clientes = obtener_core_clientes()
+    if clientes is not None and not clientes.empty:
+        clientes = clientes.copy()
+        col_cliente_core = next(
+            (
+                c
+                for c in ["Cliente", "CLIENTE", "NroCliente", "CodCliente", "Codigo"]
+                if c in clientes.columns
+            ),
+            None,
+        )
+        if col_cliente_core is not None and "Taxonomia" in clientes.columns:
+            mapa = clientes[[col_cliente_core, "Taxonomia"]].copy()
+            mapa["Cliente"] = pd.to_numeric(
+                mapa[col_cliente_core], errors="coerce"
+            ).astype("Int64")
+            mapa["Taxonomia"] = (
+                mapa["Taxonomia"].fillna("").astype(str).str.strip().str.upper()
+            )
+            mapa = mapa[["Cliente", "Taxonomia"]].drop_duplicates("Cliente")
+            periodo = periodo.drop(columns=["Taxonomia"], errors="ignore").merge(
+                mapa, on="Cliente", how="left"
+            )
+
+    if "Taxonomia" not in periodo.columns:
+        periodo["Taxonomia"] = "SIN CLASIFICAR"
+    periodo["Taxonomia"] = (
+        periodo["Taxonomia"]
+        .fillna("SIN CLASIFICAR")
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .replace("", "SIN CLASIFICAR")
+    )
+    periodo["_mn_val"] = periodo["ImporteNetoItem"].where(periodo["Es_MiNegocio"], 0.0)
+
+    resultado = periodo.groupby("Taxonomia", as_index=False).agg(
+        Ventas_Totales=("ImporteNetoItem", "sum"),
+        Ventas_MiNegocio=("_mn_val", "sum"),
+    )
+    resultado["Participacion_MiNegocio_Pct"] = (
+        resultado["Ventas_MiNegocio"]
+        .div(resultado["Ventas_Totales"].replace(0, pd.NA))
+        .mul(100.0)
+        .fillna(0.0)
+    )
+    return resultado[columnas_salida].sort_values("Taxonomia").reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
 def obtener_motor_gerencial(
     anio: int,
     mes: int,
@@ -964,4 +1097,5 @@ def obtener_motor_gerencial(
     return {
         "kilos": obtener_matriz_gerencial_kilos(anio, mes, filtros_globales),
         "gross": obtener_matriz_gerencial_gross(anio, mes, filtros_globales),
+        "mn": obtener_matriz_gerencial_mn(anio, mes, filtros_globales),
     }
