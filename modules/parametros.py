@@ -83,6 +83,68 @@ def obtener_maestro_vendedores_sql(anio: str = None, mes: str = None) -> pd.Data
         )
 
 
+def obtener_maestro_taxonomias_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
+    """
+    Carga maestro_taxonomias desde SQLite mediante la API institucional.
+
+    No fabrica taxonomias ni modifica tablas. Si el periodo todavia no fue
+    registrado, devuelve un DataFrame vacio con el contrato esperado.
+    """
+    columnas = ["Anio", "Mes", "Taxonomia", "Activa", "Orden"]
+    try:
+        df = db.obtener_maestro_taxonomias(anio, mes)
+        if df is None or df.empty:
+            return pd.DataFrame(columns=columnas)
+        for columna in columnas:
+            if columna not in df.columns:
+                return pd.DataFrame(columns=columnas)
+        return df[columnas].copy()
+    except Exception:
+        return pd.DataFrame(columns=columnas)
+
+
+def _proponer_taxonomias_iniciales(anio, mes) -> pd.DataFrame:
+    """
+    Construye una propuesta inicial desde los maestros CCC y TP existentes.
+
+    Esta funcion no guarda datos y no contiene un catalogo hardcodeado. Solo
+    permite migrar la configuracion vigente hacia maestro_taxonomias sin cambiar
+    los resultados actuales de la aplicacion.
+    """
+    candidatos = []
+    for nombre_tabla in ["maestro_ccc", "maestro_tp"]:
+        try:
+            df_fuente = db.cargar_tabla_sql(f"SELECT * FROM {nombre_tabla}")
+        except Exception:
+            df_fuente = pd.DataFrame()
+        if df_fuente is None or df_fuente.empty or "Taxonomia" not in df_fuente.columns:
+            continue
+        trabajo = df_fuente.copy()
+        if "Anio" in trabajo.columns and anio is not None and str(anio).strip() != "":
+            trabajo = trabajo[
+                trabajo["Anio"].astype(str) == str(int(float(anio)))
+            ].copy()
+        if "Mes" in trabajo.columns and mes is not None and str(mes).strip() != "":
+            trabajo = trabajo[trabajo["Mes"].astype(str) == str(int(float(mes)))].copy()
+        valores = trabajo["Taxonomia"].astype("string").str.strip().str.upper().dropna()
+        candidatos.extend([valor for valor in valores.tolist() if valor])
+
+    unicos = []
+    vistos = set()
+    for taxonomia in candidatos:
+        if taxonomia not in vistos:
+            vistos.add(taxonomia)
+            unicos.append(taxonomia)
+
+    return pd.DataFrame(
+        {
+            "Taxonomia": unicos,
+            "Activa": [1] * len(unicos),
+            "Orden": list(range(1, len(unicos) + 1)),
+        }
+    )
+
+
 def obtener_maestro_segmentos_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
     """Carga el maestro de segmentos desde SQLite. Si mes está vacío, devuelve la base completa."""
     try:
@@ -105,23 +167,26 @@ def obtener_maestro_segmentos_sql(anio: str = None, mes: str = None) -> pd.DataF
 
 
 def obtener_maestro_marcas_cebe_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
-    """Carga la relación Marca - CEBE y objetivos desde SQLite. Si mes está vacío, devuelve la base completa."""
+    """Carga Marca, CEBE, CEBE1 y objetivos desde SQLite."""
+    columnas = [
+        "Anio",
+        "Mes",
+        "Marca",
+        "CEBE",
+        "CEBE1",
+        "Obj_TN_Mes",
+        "Obj_Gross_Mes",
+        "Obj_Pepsico_Cobertura",
+        "Obj_Empresa_Cobertura",
+    ]
     try:
+        db.asegurar_columna_cebe1_maestro_marcas()
         df_all = db.cargar_tabla_sql("SELECT * FROM maestro_marcas_cebe")
         if df_all is None or df_all.empty:
-            return pd.DataFrame(
-                columns=[
-                    "Anio",
-                    "Mes",
-                    "Marca",
-                    "CEBE",
-                    "Obj_TN_Mes",
-                    "Obj_Gross_Mes",
-                    "Obj_Pepsico_Cobertura",
-                    "Obj_Empresa_Cobertura",
-                ]
-            )
-
+            return pd.DataFrame(columns=columnas)
+        if "CEBE1" not in df_all.columns:
+            df_all["CEBE1"] = ""
+        df_all["CEBE1"] = df_all["CEBE1"].fillna("").astype(str).str.strip().str.upper()
         for col_nec in [
             "Obj_TN_Mes",
             "Obj_Gross_Mes",
@@ -130,30 +195,19 @@ def obtener_maestro_marcas_cebe_sql(anio: str = None, mes: str = None) -> pd.Dat
         ]:
             if col_nec not in df_all.columns:
                 df_all[col_nec] = 0.0
-
+        for col in columnas:
+            if col not in df_all.columns:
+                df_all[col] = "" if col in ["Marca", "CEBE", "CEBE1"] else 0.0
         if not mes or str(mes).strip() == "":
-            return df_all
-
+            return df_all[columnas].copy()
         if "Anio" in df_all.columns and "Mes" in df_all.columns:
             cond = df_all["Mes"].astype(str) == str(mes)
             if anio and str(anio).strip() != "":
                 cond = cond & (df_all["Anio"].astype(str) == str(anio))
-            return df_all[cond]
-
-        return df_all
+            return df_all.loc[cond, columnas].copy()
+        return df_all[columnas].copy()
     except Exception:
-        return pd.DataFrame(
-            columns=[
-                "Anio",
-                "Mes",
-                "Marca",
-                "CEBE",
-                "Obj_TN_Mes",
-                "Obj_Gross_Mes",
-                "Obj_Pepsico_Cobertura",
-                "Obj_Empresa_Cobertura",
-            ]
-        )
+        return pd.DataFrame(columns=columnas)
 
 
 def obtener_maestro_ccc_sql(anio: str = None, mes: str = None) -> pd.DataFrame:
@@ -406,55 +460,23 @@ def render_parametros_view(filtros_globales: dict = None):
                 "🚀 Procesar e Importar Masivamente Todas las Solapas",
                 key="btn_ejecutar_importacion_global_multisolapa",
             ):
-                conn = db.obtener_conexion()
                 try:
-                    sheet_to_table = {
-                        "Maestro_Vendedores": "maestro_vendedores",
-                        "Maestro_Segmentos": "maestro_segmentos",
-                        "Maestro_Marcas_CEBE": "maestro_marcas_cebe",
-                        "Maestro_CCC_Config": "maestro_ccc",
-                        "Maestro_TP_Config": "maestro_tp",
-                        "Maestro_Innovaciones": "maestro_innovaciones",
-                        "Objetivos_Calibrados": "objetivos_vendedores",
-                    }
-
-                    importados_count = 0
-                    for sheet_name, table_name in sheet_to_table.items():
-                        if sheet_name in xls_global.sheet_names:
-                            df_sheet = pd.read_excel(
-                                archivo_global_multisolapa, sheet_name=sheet_name
-                            )
-                            if not df_sheet.empty:
-                                if "Anio" in df_sheet.columns:
-                                    df_sheet["Anio"] = (
-                                        pd.to_numeric(df_sheet["Anio"], errors="coerce")
-                                        .fillna(int(anio_def))
-                                        .astype(int)
-                                    )
-                                if "Mes" in df_sheet.columns:
-                                    df_sheet["Mes"] = (
-                                        pd.to_numeric(df_sheet["Mes"], errors="coerce")
-                                        .fillna(int(mes_def))
-                                        .astype(int)
-                                    )
-
-                                df_sheet.to_sql(
-                                    table_name,
-                                    conn,
-                                    if_exists="replace",
-                                    index=False,
-                                    chunksize=10000,
-                                )
-                                importados_count += 1
-
-                    st.success(
-                        f"¡Se han importado y actualizado exitosamente {importados_count} tablas en SQLite desde el archivo multi-solapa!"
+                    archivo_global_multisolapa.seek(0)
+                    exito_importacion, mensaje_importacion = (
+                        db.importar_maestros_multisolapa_atomica(
+                            archivo_global_multisolapa,
+                            anio_def,
+                            mes_def,
+                        )
                     )
-                    st.rerun()
+                    if exito_importacion:
+                        st.success(mensaje_importacion)
+                        st.cache_data.clear()
+                        st.rerun()
+                    else:
+                        st.error(mensaje_importacion)
                 except Exception as e:
                     st.error(f"Error al procesar la importación multi-solapa: {e}")
-                finally:
-                    conn.close()
         except Exception as e:
             st.error(f"Error al leer el archivo Excel: {e}")
 
@@ -609,6 +631,108 @@ def render_parametros_view(filtros_globales: dict = None):
     st.divider()
 
     # =========================================================================
+    # 1.B SECCIÓN: MAESTRO DE TAXONOMÍAS
+    # =========================================================================
+    st.markdown("### 🧭 1.B Maestro de Taxonomías por Período")
+    st.markdown(
+        "Este maestro define qué taxonomías existen para el período. En esta "
+        "primera etapa se incorpora en paralelo y todavía no modifica CCC, TP, "
+        "CORE ni los reportes."
+    )
+    col_tax_1, col_tax_2 = st.columns(2)
+    with col_tax_1:
+        sel_anio_tax = st.text_input(
+            "Año Operativo (Taxonomías)",
+            value=anio_def,
+            key="anio_taxonomias_param",
+        )
+    with col_tax_2:
+        sel_mes_tax = st.text_input(
+            "Mes Operativo (Taxonomías)",
+            value=mes_def,
+            key="mes_taxonomias_param",
+        )
+
+    df_taxonomias_actual = obtener_maestro_taxonomias_sql(sel_anio_tax, sel_mes_tax)
+    if df_taxonomias_actual.empty:
+        df_taxonomias_editor = _proponer_taxonomias_iniciales(sel_anio_tax, sel_mes_tax)
+        if df_taxonomias_editor.empty:
+            st.info(
+                "El período todavía no tiene taxonomías registradas y no fue "
+                "posible inferir una propuesta desde maestro_ccc o maestro_tp."
+            )
+        else:
+            st.info(
+                "El período todavía no tiene maestro propio. Se muestra una "
+                "propuesta obtenida de las taxonomías vigentes en CCC/TP. "
+                "Revísela y guárdela para crear la nueva fuente de verdad."
+            )
+    else:
+        df_taxonomias_editor = df_taxonomias_actual[
+            ["Taxonomia", "Activa", "Orden"]
+        ].copy()
+
+    df_taxonomias_editado = st.data_editor(
+        df_taxonomias_editor,
+        num_rows="dynamic",
+        column_config={
+            "Taxonomia": st.column_config.TextColumn(
+                "Taxonomia",
+                help="Código de taxonomía. Se normaliza automáticamente a mayúsculas.",
+                required=True,
+            ),
+            "Activa": st.column_config.CheckboxColumn(
+                "Activa",
+                help="Indica si la taxonomía está activa en el período.",
+                default=True,
+            ),
+            "Orden": st.column_config.NumberColumn(
+                "Orden",
+                help="Orden de presentación dentro del período.",
+                min_value=1,
+                step=1,
+                format="%d",
+                required=True,
+            ),
+        },
+        key="editor_maestro_taxonomias",
+        width="stretch",
+        hide_index=True,
+    )
+
+    if st.button(
+        "📥 Registrar y Guardar Maestro de Taxonomías",
+        key="btn_guardar_maestro_taxonomias",
+    ):
+        if not sel_mes_tax or str(sel_mes_tax).strip() == "":
+            st.error("⚠️ Debe especificar un Mes Operativo válido.")
+        else:
+            trabajo_tax = df_taxonomias_editado.copy()
+            if "Activa" in trabajo_tax.columns:
+                trabajo_tax["Activa"] = (
+                    trabajo_tax["Activa"].fillna(False).astype(bool).astype(int)
+                )
+            exito_tax, mensaje_tax = db.guardar_maestro_taxonomias_periodo(
+                trabajo_tax,
+                sel_anio_tax,
+                sel_mes_tax,
+            )
+            if exito_tax:
+                st.success(mensaje_tax)
+                st.cache_data.clear()
+                st.rerun()
+            else:
+                st.error(mensaje_tax)
+
+    st.markdown(
+        f"#### 📋 Taxonomías registradas en SQLite "
+        f"(Período {sel_mes_tax}/{sel_anio_tax})"
+    )
+    df_taxonomias_actual = obtener_maestro_taxonomias_sql(sel_anio_tax, sel_mes_tax)
+    st.dataframe(df_taxonomias_actual, width="stretch", hide_index=True)
+    st.divider()
+
+    # =========================================================================
     # 2. SECCIÓN: MAESTRO DE SEGMENTOS
     # =========================================================================
     st.markdown("### 🏷️ 2. Maestro de Objetivos por Segmento")
@@ -705,10 +829,10 @@ def render_parametros_view(filtros_globales: dict = None):
     st.divider()
 
     # =========================================================================
-    # 3. SECCIÓN: MAESTRO MARCA - CEBE Y OBJETIVOS (INCL. COBERTURA)
+    # 3. SECCIÓN: MAESTRO MARCA - CEBE / CEBE1 Y OBJETIVOS
     # =========================================================================
     st.markdown(
-        "### 🏷️ 3. Maestro de Marcas, CEBE, Objetivos de TN/Gross y Cobertura (Pepsico / Empresa)"
+        "### 🏷️ 3. Maestro de Marcas, CEBE/CEBE1, Objetivos de TN/Gross y Cobertura"
     )
     col5, col6 = st.columns(2)
     with col5:
@@ -724,155 +848,128 @@ def render_parametros_view(filtros_globales: dict = None):
         )
 
     df_marcas_cebe_actual = obtener_maestro_marcas_cebe_sql(sel_anio_m, sel_mes_m)
-
+    columnas_cebe = [
+        "Anio",
+        "Mes",
+        "Marca",
+        "CEBE",
+        "CEBE1",
+        "Obj_TN_Mes",
+        "Obj_Gross_Mes",
+        "Obj_Pepsico_Cobertura",
+        "Obj_Empresa_Cobertura",
+    ]
     output_plantilla = BytesIO()
     with pd.ExcelWriter(output_plantilla, engine="openpyxl") as writer:
         df_plantilla = df_marcas_cebe_actual.copy()
         if df_plantilla.empty:
-            df_plantilla = pd.DataFrame(
-                columns=[
-                    "Anio",
-                    "Mes",
-                    "Marca",
-                    "CEBE",
-                    "Obj_TN_Mes",
-                    "Obj_Gross_Mes",
-                    "Obj_Pepsico_Cobertura",
-                    "Obj_Empresa_Cobertura",
-                ]
-            )
+            df_plantilla = pd.DataFrame(columns=columnas_cebe)
+        else:
+            for columna in columnas_cebe:
+                if columna not in df_plantilla.columns:
+                    df_plantilla[columna] = "" if columna == "CEBE1" else 0.0
+            df_plantilla = df_plantilla[columnas_cebe]
         df_plantilla.to_excel(writer, index=False, sheet_name="Maestro_Marcas_CEBE")
 
     st.download_button(
-        label="📥 Descargar Plantilla de Marcas y CEBE para Completar",
+        label="📥 Descargar Plantilla de Marcas, CEBE y CEBE1",
         data=output_plantilla.getvalue(),
         file_name=f"plantilla_marcas_cebe_{sel_mes_m}_{sel_anio_m}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
     archivo_marcas = st.file_uploader(
-        "📂 Subir Excel Actualizado de Marcas, CEBE y Objetivos",
+        "📂 Subir Excel Actualizado de Marcas, CEBE, CEBE1 y Objetivos",
         type=["xlsx", "xls"],
         key="up_excel_marcas_cebe",
     )
-
     if archivo_marcas is not None:
         try:
             df_nuevo_cebe = pd.read_excel(archivo_marcas)
-            columnas_cebe = list(df_nuevo_cebe.columns)
-
             nuevos_nombres_cebe = {}
-            for col in columnas_cebe:
+            for col in df_nuevo_cebe.columns:
                 col_str = str(col).strip().lower()
                 if "marca" in col_str or "marcaupper" in col_str:
                     nuevos_nombres_cebe[col] = "Marca"
-                elif "cebe" in col_str or "tipo" in col_str or "categoria" in col_str:
+                elif col_str in ["cebe1", "cebe 1", "cebe_1"]:
+                    nuevos_nombres_cebe[col] = "CEBE1"
+                elif col_str in ["cebe", "cebe2", "cebe 2", "cebe_2"]:
                     nuevos_nombres_cebe[col] = "CEBE"
-                elif "obj_tn" in col_str or "tn" in col_str:
+                elif "obj_tn" in col_str or col_str in ["tn", "toneladas"]:
                     nuevos_nombres_cebe[col] = "Obj_TN_Mes"
-                elif "obj_gross" in col_str or "gross" in col_str:
+                elif "obj_gross" in col_str or col_str == "gross":
                     nuevos_nombres_cebe[col] = "Obj_Gross_Mes"
                 elif "pepsico" in col_str or "coberturapepsico" in col_str:
                     nuevos_nombres_cebe[col] = "Obj_Pepsico_Cobertura"
                 elif "empresa" in col_str or "coberturaempresa" in col_str:
                     nuevos_nombres_cebe[col] = "Obj_Empresa_Cobertura"
-
             df_nuevo_cebe = df_nuevo_cebe.rename(columns=nuevos_nombres_cebe)
 
-            cols_necesarias_cebe = [
-                "Obj_TN_Mes",
-                "Obj_Gross_Mes",
-                "Obj_Pepsico_Cobertura",
-                "Obj_Empresa_Cobertura",
+            requeridas_identidad = ["Marca", "CEBE", "CEBE1"]
+            faltantes_identidad = [
+                c for c in requeridas_identidad if c not in df_nuevo_cebe.columns
             ]
-            for col_req in cols_necesarias_cebe:
-                if col_req not in df_nuevo_cebe.columns:
-                    df_nuevo_cebe[col_req] = 0.0
-                else:
-                    df_nuevo_cebe[col_req] = pd.to_numeric(
-                        df_nuevo_cebe[col_req], errors="coerce"
-                    ).fillna(0.0)
-
-            if (
-                "Marca" not in df_nuevo_cebe.columns
-                or "CEBE" not in df_nuevo_cebe.columns
-            ):
+            if faltantes_identidad:
                 st.error(
-                    "⚠️ El archivo Excel debe contener al menos las columnas 'Marca' y 'CEBE'."
+                    "⚠️ Faltan columnas obligatorias: " + ", ".join(faltantes_identidad)
                 )
             else:
-                cols_requeridas = [
+                for col in [
+                    "Obj_TN_Mes",
+                    "Obj_Gross_Mes",
+                    "Obj_Pepsico_Cobertura",
+                    "Obj_Empresa_Cobertura",
+                ]:
+                    if col not in df_nuevo_cebe.columns:
+                        df_nuevo_cebe[col] = 0.0
+                    df_nuevo_cebe[col] = pd.to_numeric(
+                        df_nuevo_cebe[col], errors="coerce"
+                    )
+                cols_carga = [
                     "Marca",
                     "CEBE",
+                    "CEBE1",
                     "Obj_TN_Mes",
                     "Obj_Gross_Mes",
                     "Obj_Pepsico_Cobertura",
                     "Obj_Empresa_Cobertura",
                 ]
-                df_nuevo_cebe = df_nuevo_cebe[
-                    [c for c in cols_requeridas if c in df_nuevo_cebe.columns]
-                ].copy()
-                df_nuevo_cebe = df_nuevo_cebe.dropna(subset=["Marca", "CEBE"])
-                df_nuevo_cebe["Marca"] = df_nuevo_cebe["Marca"].astype(str).str.strip()
-                df_nuevo_cebe["CEBE"] = df_nuevo_cebe["CEBE"].astype(str).str.strip()
-
+                df_nuevo_cebe = df_nuevo_cebe[cols_carga].copy()
+                for col in ["Marca", "CEBE", "CEBE1"]:
+                    df_nuevo_cebe[col] = (
+                        df_nuevo_cebe[col].fillna("").astype(str).str.strip()
+                    )
+                df_nuevo_cebe["CEBE1"] = df_nuevo_cebe["CEBE1"].str.upper()
                 st.write(
-                    "Vista previa de Marcas, CEBE y Objetivos mapeados:",
+                    "Vista previa de Marcas, CEBE, CEBE1 y Objetivos:",
                     df_nuevo_cebe.head(),
                 )
-
                 if st.button(
-                    "📥 Registrar y Guardar Marcas/CEBE y Objetivos en Base de Datos"
+                    "📥 Registrar y Guardar Marcas/CEBE/CEBE1 y Objetivos en Base de Datos"
                 ):
                     if not sel_mes_m or str(sel_mes_m).strip() == "":
-                        st.error(
-                            "⚠️ Debe especificar un Mes Operativo válido para registrar las marcas, CEBE y objetivos."
-                        )
+                        st.error("⚠️ Debe especificar un Mes Operativo válido.")
                     else:
-                        df_nuevo_cebe["Anio"] = str(sel_anio_m)
-                        df_nuevo_cebe["Mes"] = str(sel_mes_m)
-
-                        query_check = "SELECT name FROM sqlite_master WHERE type='table' AND name='maestro_marcas_cebe'"
-                        res_check = db.cargar_tabla_sql(query_check)
-
-                        if res_check is not None and not res_check.empty:
-                            df_existente_cebe = db.cargar_tabla_sql(
-                                "SELECT * FROM maestro_marcas_cebe"
+                        exito_cebe, mensaje_cebe = (
+                            db.guardar_maestro_marcas_cebe_periodo(
+                                df_nuevo_cebe, sel_anio_m, sel_mes_m
                             )
-                            df_existente_cebe = df_existente_cebe[
-                                ~(
-                                    (
-                                        df_existente_cebe["Anio"].astype(str)
-                                        == str(sel_anio_m)
-                                    )
-                                    & (
-                                        df_existente_cebe["Mes"].astype(str)
-                                        == str(sel_mes_m)
-                                    )
-                                )
-                            ]
-                            df_final_cebe = pd.concat(
-                                [df_existente_cebe, df_nuevo_cebe], ignore_index=True
-                            )
+                        )
+                        if exito_cebe:
+                            st.success(mensaje_cebe)
+                            st.rerun()
                         else:
-                            df_final_cebe = df_nuevo_cebe
-
-                        db.guardar_dataframe_sql(
-                            df_final_cebe, "maestro_marcas_cebe", if_exists="replace"
-                        )
-                        st.success(
-                            f"¡Maestro Marca/CEBE y Objetivos guardado exitosamente para el período {sel_mes_m}/{sel_anio_m}!"
-                        )
-                        st.rerun()
+                            st.error(mensaje_cebe)
         except Exception as e:
             st.error(f"Error al procesar el archivo Excel de Marcas/CEBE: {e}")
 
-    titulo_tabla_m = f"📋 Marcas, CEBE y Objetivos registrados en Base de Datos ({'Base Completa - Sin Filtro' if not sel_mes_m or str(sel_mes_m).strip() == '' else f'Período {sel_mes_m}/{sel_anio_m}'})"
+    titulo_tabla_m = (
+        "📋 Marcas, CEBE, CEBE1 y objetivos registrados "
+        f"({'Base Completa - Sin Filtro' if not sel_mes_m or str(sel_mes_m).strip() == '' else f'Período {sel_mes_m}/{sel_anio_m}'})"
+    )
     st.markdown(f"#### {titulo_tabla_m}")
-
     df_marcas_cebe_actual = obtener_maestro_marcas_cebe_sql(sel_anio_m, sel_mes_m)
     st.dataframe(df_marcas_cebe_actual, width="stretch")
-
     st.divider()
 
     # =========================================================================
@@ -1269,6 +1366,9 @@ def render_parametros_view(filtros_globales: dict = None):
         df_maestro_actual.to_excel(writer, index=False, sheet_name="Maestro_Vendedores")
         df_segmentos_actual.to_excel(
             writer, index=False, sheet_name="Maestro_Segmentos"
+        )
+        df_taxonomias_actual.to_excel(
+            writer, index=False, sheet_name="Maestro_Taxonomias"
         )
         df_marcas_cebe_actual.to_excel(
             writer, index=False, sheet_name="Maestro_Marcas_CEBE"

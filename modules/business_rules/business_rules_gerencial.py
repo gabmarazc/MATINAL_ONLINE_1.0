@@ -268,7 +268,13 @@ def _incorporar_calendario(
     }
 
     for columna, mapa in mapas.items():
-        df[columna] = df["CodVendedor"].map(mapa).fillna(0).astype("Int64")
+        # CORE entrega jornadas equivalentes decimales. Se preserva la fraccion
+        # de jornada para que rutas reducidas no vuelvan a convertirse en dias completos.
+        df[columna] = (
+            pd.to_numeric(df["CodVendedor"].map(mapa), errors="coerce")
+            .fillna(0.0)
+            .astype(float)
+        )
 
     df["Días Restantes"] = df["Días Restantes Ajustado"]
     return df

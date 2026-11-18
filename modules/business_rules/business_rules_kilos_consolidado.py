@@ -224,8 +224,9 @@ def _recalcular_escenario(
 ) -> pd.DataFrame:
     resultado = df.copy()
 
+    # Días Pasados y Días Restantes son jornadas equivalentes decimales.
     dias_pasados = pd.to_numeric(resultado["Días Pasados"], errors="coerce").fillna(0.0)
-    divisor_dias_pasados = dias_pasados.replace(0, 1.0)
+    divisor_dias_pasados = dias_pasados.where(dias_pasados.gt(0), 1.0)
 
     actual = pd.to_numeric(resultado["Actual"], errors="coerce").fillna(0.0)
     ajuste_actual = pd.to_numeric(

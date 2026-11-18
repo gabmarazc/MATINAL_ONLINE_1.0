@@ -32,6 +32,264 @@ def obtener_conexion():
     return conn
 
 
+# =============================================================================
+# MAESTRO DE TAXONOMIAS - INFRAESTRUCTURA INSTITUCIONAL
+# =============================================================================
+# Primera etapa: incorpora la fuente de verdad sin modificar consumidores.
+# No crea taxonomias por defecto ni altera CCC, TP, CORE o reportes.
+
+
+def asegurar_tabla_maestro_taxonomias() -> bool:
+    """Crea maestro_taxonomias si no existe, sin insertar valores por defecto."""
+    columnas_esperadas = ["Anio", "Mes", "Taxonomia", "Activa", "Orden"]
+    conn = obtener_conexion()
+    try:
+        existe = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND LOWER(name)='maestro_taxonomias' LIMIT 1;"
+        ).fetchone()
+        if existe is None:
+            try:
+                conn.execute("BEGIN IMMEDIATE;")
+                conn.execute(
+                    """
+                    CREATE TABLE maestro_taxonomias (
+                        Anio INTEGER NOT NULL,
+                        Mes INTEGER NOT NULL CHECK (Mes BETWEEN 1 AND 12),
+                        Taxonomia TEXT NOT NULL,
+                        Activa INTEGER NOT NULL CHECK (Activa IN (0, 1)),
+                        Orden INTEGER NOT NULL CHECK (Orden >= 1),
+                        PRIMARY KEY (Anio, Mes, Taxonomia)
+                    );
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS
+                        ux_maestro_taxonomias_periodo_orden
+                    ON maestro_taxonomias (Anio, Mes, Orden);
+                    """
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            logger.info("MAESTRO_TAXONOMIAS: tabla creada sin registros por defecto.")
+            return True
+
+        columnas_actuales = [
+            str(fila[1]).strip()
+            for fila in conn.execute(
+                "PRAGMA table_info(maestro_taxonomias);"
+            ).fetchall()
+        ]
+        if columnas_actuales != columnas_esperadas:
+            raise ValueError(
+                "La tabla maestro_taxonomias no cumple el contrato institucional. "
+                f"Esperadas={columnas_esperadas}; encontradas={columnas_actuales}. "
+                "No se realizaron modificaciones automaticas."
+            )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS
+                ux_maestro_taxonomias_periodo_orden
+            ON maestro_taxonomias (Anio, Mes, Orden);
+            """
+        )
+        conn.commit()
+        return False
+    finally:
+        conn.close()
+
+
+def obtener_maestro_taxonomias(anio=None, mes=None) -> pd.DataFrame:
+    """Obtiene el historico completo o un periodo, sin fabricar taxonomias."""
+    columnas = ["Anio", "Mes", "Taxonomia", "Activa", "Orden"]
+    asegurar_tabla_maestro_taxonomias()
+    conn = obtener_conexion()
+    try:
+        if anio is None and mes is None:
+            df = pd.read_sql_query(
+                """
+                SELECT Anio, Mes, Taxonomia, Activa, Orden
+                FROM maestro_taxonomias
+                ORDER BY Anio, Mes, Orden, Taxonomia;
+                """,
+                conn,
+            )
+        else:
+            if anio is None or mes is None:
+                raise ValueError(
+                    "Para filtrar maestro_taxonomias deben informarse Anio y Mes."
+                )
+            try:
+                anio_int = int(float(anio))
+                mes_int = int(float(mes))
+            except (TypeError, ValueError):
+                raise ValueError("Anio y Mes deben ser valores numericos validos.")
+            if mes_int < 1 or mes_int > 12:
+                raise ValueError("Mes debe estar comprendido entre 1 y 12.")
+            df = pd.read_sql_query(
+                """
+                SELECT Anio, Mes, Taxonomia, Activa, Orden
+                FROM maestro_taxonomias
+                WHERE Anio=? AND Mes=?
+                ORDER BY Orden, Taxonomia;
+                """,
+                conn,
+                params=(anio_int, mes_int),
+            )
+        if df.empty:
+            return pd.DataFrame(columns=columnas)
+        df["Anio"] = pd.to_numeric(df["Anio"], errors="coerce").astype("Int64")
+        df["Mes"] = pd.to_numeric(df["Mes"], errors="coerce").astype("Int64")
+        df["Taxonomia"] = df["Taxonomia"].astype("string").str.strip().str.upper()
+        df["Activa"] = pd.to_numeric(df["Activa"], errors="coerce").astype("Int64")
+        df["Orden"] = pd.to_numeric(df["Orden"], errors="coerce").astype("Int64")
+        return df[columnas].copy()
+    finally:
+        conn.close()
+
+
+def guardar_maestro_taxonomias_periodo(df: pd.DataFrame, anio, mes) -> tuple[bool, str]:
+    """Reemplaza solo un periodo, preservando el resto del historico."""
+    if df is None:
+        return False, "El maestro de taxonomias no puede ser nulo."
+    columnas_entrada = ["Taxonomia", "Activa", "Orden"]
+    faltantes = [col for col in columnas_entrada if col not in df.columns]
+    if faltantes:
+        return False, (
+            "Faltan columnas obligatorias para maestro_taxonomias: "
+            + ", ".join(faltantes)
+        )
+    try:
+        anio_int = int(float(anio))
+        mes_int = int(float(mes))
+    except (TypeError, ValueError):
+        return False, "Anio y Mes deben ser valores numericos validos."
+    if mes_int < 1 or mes_int > 12:
+        return False, "Mes debe estar comprendido entre 1 y 12."
+    if df.empty:
+        return False, "El maestro de taxonomias del periodo no puede estar vacio."
+
+    trabajo = df[columnas_entrada].copy()
+    trabajo["Taxonomia"] = trabajo["Taxonomia"].astype("string").str.strip().str.upper()
+    trabajo["Activa"] = pd.to_numeric(trabajo["Activa"], errors="coerce")
+    trabajo["Orden"] = pd.to_numeric(trabajo["Orden"], errors="coerce")
+
+    taxonomia_vacia = trabajo["Taxonomia"].isna() | trabajo["Taxonomia"].eq("")
+    if taxonomia_vacia.any():
+        return False, "Taxonomia contiene valores vacios o nulos."
+    if trabajo["Taxonomia"].duplicated().any():
+        duplicadas = sorted(
+            trabajo.loc[trabajo["Taxonomia"].duplicated(False), "Taxonomia"]
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+        return False, f"Taxonomias duplicadas en el periodo: {duplicadas}."
+    if trabajo["Activa"].isna().any():
+        return False, "Activa contiene valores vacios o no numericos."
+    if not trabajo["Activa"].isin([0, 1]).all():
+        invalidos = sorted(
+            trabajo.loc[~trabajo["Activa"].isin([0, 1]), "Activa"].unique().tolist()
+        )
+        return False, f"Activa solo admite 0 o 1. Valores invalidos: {invalidos}."
+    if trabajo["Orden"].isna().any():
+        return False, "Orden contiene valores vacios o no numericos."
+    if not (trabajo["Orden"] % 1 == 0).all():
+        return False, "Orden debe contener valores enteros."
+    if (trabajo["Orden"] < 1).any():
+        return False, "Orden debe ser mayor o igual que 1."
+    if trabajo["Orden"].duplicated().any():
+        duplicados = sorted(
+            trabajo.loc[trabajo["Orden"].duplicated(False), "Orden"]
+            .astype(int)
+            .unique()
+            .tolist()
+        )
+        return False, f"Orden contiene valores duplicados: {duplicados}."
+
+    trabajo["Activa"] = trabajo["Activa"].astype(int)
+    trabajo["Orden"] = trabajo["Orden"].astype(int)
+    trabajo["Anio"] = anio_int
+    trabajo["Mes"] = mes_int
+    trabajo = (
+        trabajo[["Anio", "Mes", "Taxonomia", "Activa", "Orden"]]
+        .sort_values(["Orden", "Taxonomia"])
+        .reset_index(drop=True)
+    )
+
+    try:
+        asegurar_tabla_maestro_taxonomias()
+    except Exception as exc:
+        return False, f"Error al asegurar maestro_taxonomias: {exc}"
+
+    conn = obtener_conexion()
+    tabla_tmp = "maestro_taxonomias_periodo_tmp"
+    try:
+        conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
+        conn.commit()
+        trabajo.to_sql(tabla_tmp, conn, if_exists="replace", index=False)
+        filas_tmp = int(
+            conn.execute(f'SELECT COUNT(*) FROM "{tabla_tmp}";').fetchone()[0]
+        )
+        if filas_tmp != len(trabajo):
+            raise AssertionError(
+                "Conciliacion temporal maestro_taxonomias fallida: "
+                f"origen={len(trabajo)}, temporal={filas_tmp}."
+            )
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute(
+                "DELETE FROM maestro_taxonomias WHERE Anio=? AND Mes=?;",
+                (anio_int, mes_int),
+            )
+            conn.execute(
+                f"""
+                INSERT INTO maestro_taxonomias
+                    (Anio, Mes, Taxonomia, Activa, Orden)
+                SELECT Anio, Mes, Taxonomia, Activa, Orden
+                FROM "{tabla_tmp}";
+                """
+            )
+            guardadas = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM maestro_taxonomias WHERE Anio=? AND Mes=?;",
+                    (anio_int, mes_int),
+                ).fetchone()[0]
+            )
+            if guardadas != len(trabajo):
+                raise AssertionError(
+                    "Conciliacion final maestro_taxonomias fallida: "
+                    f"origen={len(trabajo)}, SQLite={guardadas}."
+                )
+            conn.execute(f'DROP TABLE "{tabla_tmp}";')
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        logger.info(
+            "MAESTRO_TAXONOMIAS: periodo %02d/%d guardado con %d registros.",
+            mes_int,
+            anio_int,
+            len(trabajo),
+        )
+        return True, (
+            f"Maestro de taxonomias guardado para {mes_int:02d}/{anio_int}: "
+            f"{len(trabajo)} registros."
+        )
+    except Exception as exc:
+        try:
+            conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
+            conn.commit()
+        except Exception:
+            pass
+        return False, f"Error al guardar maestro_taxonomias: {exc}"
+    finally:
+        conn.close()
+
+
 def sincronizar_parametros_desde_filtros(filtros_globales: dict) -> dict:
     """
     Sincroniza en SQLite.parametros las fechas seleccionadas en los filtros
@@ -237,6 +495,342 @@ def init_db():
         logger.exception(
             "Error crítico al intentar crear los índices de rendimiento para la tabla vta en init_db."
         )
+    finally:
+        conn.close()
+
+
+def asegurar_columna_cebe1_maestro_marcas() -> bool:
+    """
+    Compatibilidad con llamadas existentes.
+
+    Incorpora CEBE1 de forma aditiva cuando la tabla histórica ya existe.
+    La migración mensual completa de Anio/Mes y objetivos se ejecuta desde
+    asegurar_esquema_maestro_marcas_cebe_periodo(), porque allí se conoce el
+    período que debe asignarse a los registros heredados.
+    """
+    conn = obtener_conexion()
+    try:
+        existe = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND LOWER(name)='maestro_marcas_cebe' LIMIT 1;"
+        ).fetchone()
+        if existe is None:
+            return False
+
+        columnas = {
+            str(fila[1]).strip()
+            for fila in conn.execute(
+                "PRAGMA table_info(maestro_marcas_cebe);"
+            ).fetchall()
+        }
+        if "CEBE1" in columnas:
+            return False
+
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute('ALTER TABLE maestro_marcas_cebe ADD COLUMN "CEBE1" TEXT;')
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        logger.info(
+            "MAESTRO_MARCAS_CEBE: CEBE1 incorporada de forma aditiva; "
+            "registros historicos preservados."
+        )
+        return True
+    finally:
+        conn.close()
+
+
+def asegurar_esquema_maestro_marcas_cebe_periodo(
+    conn, anio_int: int, mes_int: int
+) -> bool:
+    """
+    Asegura el contrato completo mensual de maestro_marcas_cebe.
+
+    Contrato requerido:
+        Anio, Mes, Marca, CEBE, CEBE1, Obj_TN_Mes, Obj_Gross_Mes,
+        Obj_Pepsico_Cobertura, Obj_Empresa_Cobertura.
+
+    Si existe la estructura vertical histórica CEBE1/Métrica/Valor, la conserva
+    con un nombre de respaldo y crea maestro_marcas_cebe con el contrato actual.
+    No intenta transformar esa estructura porque no contiene Marca ni CEBE y,
+    por tanto, no existe una correspondencia fiable fila a fila.
+    """
+    columnas_contrato = [
+        "Anio",
+        "Mes",
+        "Marca",
+        "CEBE",
+        "CEBE1",
+        "Obj_TN_Mes",
+        "Obj_Gross_Mes",
+        "Obj_Pepsico_Cobertura",
+        "Obj_Empresa_Cobertura",
+    ]
+
+    def crear_tabla_contrato():
+        conn.execute(
+            """
+            CREATE TABLE maestro_marcas_cebe (
+                Anio INTEGER NOT NULL,
+                Mes INTEGER NOT NULL CHECK (Mes BETWEEN 1 AND 12),
+                Marca TEXT NOT NULL,
+                CEBE TEXT NOT NULL,
+                CEBE1 TEXT NOT NULL,
+                Obj_TN_Mes REAL NOT NULL DEFAULT 0,
+                Obj_Gross_Mes REAL NOT NULL DEFAULT 0,
+                Obj_Pepsico_Cobertura REAL NOT NULL DEFAULT 0,
+                Obj_Empresa_Cobertura REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (Anio, Mes, Marca)
+            );
+            """
+        )
+
+    existe = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' "
+        "AND LOWER(name)='maestro_marcas_cebe' LIMIT 1;"
+    ).fetchone()
+
+    if existe is None:
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            crear_tabla_contrato()
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        logger.info(
+            "MAESTRO_MARCAS_CEBE: tabla creada con el contrato mensual completo."
+        )
+        return True
+
+    columnas_actuales = [
+        str(fila[1]).strip()
+        for fila in conn.execute("PRAGMA table_info(maestro_marcas_cebe);").fetchall()
+    ]
+
+    if set(columnas_contrato).issubset(set(columnas_actuales)):
+        return False
+
+    es_vertical_legacy = (
+        "CEBE1" in columnas_actuales
+        and "Valor" in columnas_actuales
+        and ("Metrica" in columnas_actuales or "Métrica" in columnas_actuales)
+    )
+    if es_vertical_legacy:
+        nombre_respaldo_base = "maestro_marcas_cebe_vertical_legacy"
+        nombre_respaldo = nombre_respaldo_base
+        sufijo = 1
+        while (
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1;",
+                (nombre_respaldo,),
+            ).fetchone()
+            is not None
+        ):
+            nombre_respaldo = f"{nombre_respaldo_base}_{sufijo}"
+            sufijo += 1
+
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            conn.execute(
+                f'ALTER TABLE maestro_marcas_cebe RENAME TO "{nombre_respaldo}";'
+            )
+            crear_tabla_contrato()
+            columnas_finales = [
+                str(fila[1]).strip()
+                for fila in conn.execute(
+                    "PRAGMA table_info(maestro_marcas_cebe);"
+                ).fetchall()
+            ]
+            if columnas_finales != columnas_contrato:
+                raise AssertionError(
+                    "No se pudo crear el contrato completo de maestro_marcas_cebe. "
+                    f"Esperadas={columnas_contrato}; obtenidas={columnas_finales}."
+                )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        logger.warning(
+            "MAESTRO_MARCAS_CEBE: estructura vertical anterior preservada en "
+            f"'{nombre_respaldo}'. Tabla operativa recreada con el contrato "
+            "mensual completo."
+        )
+        return True
+
+    raise ValueError(
+        "La tabla maestro_marcas_cebe tiene un esquema no reconocido y no fue "
+        "modificada. "
+        f"Columnas encontradas: {columnas_actuales}. "
+        f"Contrato esperado: {columnas_contrato}."
+    )
+
+
+def guardar_maestro_marcas_cebe_periodo(
+    df: pd.DataFrame, anio, mes
+) -> tuple[bool, str]:
+    """Valida y reemplaza solo el periodo indicado de maestro_marcas_cebe."""
+    columnas_entrada = [
+        "Marca",
+        "CEBE",
+        "CEBE1",
+        "Obj_TN_Mes",
+        "Obj_Gross_Mes",
+        "Obj_Pepsico_Cobertura",
+        "Obj_Empresa_Cobertura",
+    ]
+    faltantes = [col for col in columnas_entrada if col not in df.columns]
+    if faltantes:
+        return False, (
+            "Faltan columnas obligatorias para maestro_marcas_cebe: "
+            + ", ".join(faltantes)
+        )
+    try:
+        anio_int = int(float(anio))
+        mes_int = int(float(mes))
+    except (TypeError, ValueError):
+        return False, "Anio y Mes deben ser valores numericos validos."
+    if mes_int < 1 or mes_int > 12:
+        return False, "Mes debe estar comprendido entre 1 y 12."
+
+    trabajo = df[columnas_entrada].copy()
+    for col in ["Marca", "CEBE", "CEBE1"]:
+        trabajo[col] = trabajo[col].fillna("").astype(str).str.strip()
+    for col in ["Marca", "CEBE", "CEBE1"]:
+        if (trabajo[col] == "").any():
+            return False, f"{col} contiene valores vacios."
+
+    trabajo["CEBE1"] = trabajo["CEBE1"].str.upper()
+    cebe1_validos = {"SALTY", "CRACKER", "CEREAL"}
+    invalidos = sorted(
+        set(trabajo.loc[~trabajo["CEBE1"].isin(cebe1_validos), "CEBE1"].tolist())
+    )
+    if invalidos:
+        return False, (
+            "CEBE1 solo admite SALTY, CRACKER o CEREAL. "
+            f"Valores invalidos: {invalidos}."
+        )
+
+    marca_key = trabajo["Marca"].str.upper()
+    if marca_key.duplicated().any():
+        duplicadas = sorted(
+            trabajo.loc[marca_key.duplicated(False), "Marca"].unique().tolist()
+        )
+        return False, f"El periodo contiene marcas duplicadas: {duplicadas}."
+
+    numericas = [
+        "Obj_TN_Mes",
+        "Obj_Gross_Mes",
+        "Obj_Pepsico_Cobertura",
+        "Obj_Empresa_Cobertura",
+    ]
+    for col in numericas:
+        trabajo[col] = pd.to_numeric(trabajo[col], errors="coerce")
+        if trabajo[col].isna().any():
+            return False, f"{col} contiene valores vacios o no numericos."
+        if (trabajo[col] < 0).any():
+            return False, f"{col} no puede contener valores negativos."
+
+    trabajo["Anio"] = anio_int
+    trabajo["Mes"] = mes_int
+    columnas_destino = [
+        "Anio",
+        "Mes",
+        "Marca",
+        "CEBE",
+        "CEBE1",
+        "Obj_TN_Mes",
+        "Obj_Gross_Mes",
+        "Obj_Pepsico_Cobertura",
+        "Obj_Empresa_Cobertura",
+    ]
+    trabajo = trabajo[columnas_destino].copy()
+
+    conn = obtener_conexion()
+    tabla_tmp = "maestro_marcas_cebe_periodo_tmp"
+    try:
+        existe = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' "
+            "AND LOWER(name)='maestro_marcas_cebe' LIMIT 1;"
+        ).fetchone()
+        if existe is not None:
+            asegurar_esquema_maestro_marcas_cebe_periodo(conn, anio_int, mes_int)
+
+        conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
+        conn.commit()
+        trabajo.to_sql(tabla_tmp, conn, if_exists="replace", index=False)
+        filas_tmp = int(
+            conn.execute(f'SELECT COUNT(*) FROM "{tabla_tmp}";').fetchone()[0]
+        )
+        if filas_tmp != len(trabajo):
+            raise AssertionError(
+                f"Conciliacion temporal fallida: origen={len(trabajo)}, "
+                f"temporal={filas_tmp}."
+            )
+
+        try:
+            conn.execute("BEGIN IMMEDIATE;")
+            if existe is None:
+                conn.execute("""
+                    CREATE TABLE maestro_marcas_cebe (
+                        Anio INTEGER NOT NULL,
+                        Mes INTEGER NOT NULL,
+                        Marca TEXT NOT NULL,
+                        CEBE TEXT NOT NULL,
+                        CEBE1 TEXT NOT NULL,
+                        Obj_TN_Mes REAL NOT NULL DEFAULT 0,
+                        Obj_Gross_Mes REAL NOT NULL DEFAULT 0,
+                        Obj_Pepsico_Cobertura REAL NOT NULL DEFAULT 0,
+                        Obj_Empresa_Cobertura REAL NOT NULL DEFAULT 0,
+                        PRIMARY KEY (Anio, Mes, Marca)
+                    );
+                """)
+            conn.execute(
+                "DELETE FROM maestro_marcas_cebe WHERE Anio=? AND Mes=?;",
+                (anio_int, mes_int),
+            )
+            conn.execute("""
+                INSERT INTO maestro_marcas_cebe (
+                    Anio, Mes, Marca, CEBE, CEBE1, Obj_TN_Mes,
+                    Obj_Gross_Mes, Obj_Pepsico_Cobertura,
+                    Obj_Empresa_Cobertura
+                )
+                SELECT Anio, Mes, Marca, CEBE, CEBE1, Obj_TN_Mes,
+                       Obj_Gross_Mes, Obj_Pepsico_Cobertura,
+                       Obj_Empresa_Cobertura
+                FROM maestro_marcas_cebe_periodo_tmp;
+            """)
+            guardadas = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM maestro_marcas_cebe WHERE Anio=? AND Mes=?;",
+                    (anio_int, mes_int),
+                ).fetchone()[0]
+            )
+            if guardadas != len(trabajo):
+                raise AssertionError(
+                    f"Conciliacion final fallida: origen={len(trabajo)}, "
+                    f"SQLite={guardadas}."
+                )
+            conn.execute(f'DROP TABLE "{tabla_tmp}";')
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        return True, (
+            f"Maestro Marca/CEBE guardado para {mes_int:02d}/{anio_int}: "
+            f"{len(trabajo)} marcas con CEBE1."
+        )
+    except Exception as exc:
+        try:
+            conn.execute(f'DROP TABLE IF EXISTS "{tabla_tmp}";')
+            conn.commit()
+        except Exception:
+            pass
+        return False, f"Error al guardar maestro_marcas_cebe: {exc}"
     finally:
         conn.close()
 
@@ -658,7 +1252,7 @@ def _asignar_entero_con_topes_tp(df, columna_capacidad, objetivo_total):
 
 
 def _objetivos_base_tp(maestro):
-    factores = {"A": 1.20, "B": 1.20, "C": 1.05, "D": 1.05}
+    factores = {"A": 1.05, "B": 1.05, "C": 1.05, "D": 1.05}
     prioridad_empate = {"B": 0, "A": 1, "C": 2, "D": 3}
     trabajo = maestro.copy().sort_values("Taxonomia").reset_index(drop=True)
     trabajo["Factor_Ajuste"] = trabajo["Taxonomia"].map(factores)
@@ -682,8 +1276,8 @@ def _objetivos_base_tp(maestro):
 def generar_snapshot_objetivos_tp(anio, mes):
     """
     Genera una única vez los objetivos TP congelados.
-    A/B reciben +20%; C/D +5%. El adicional para alcanzar +20% global
-    se distribuye solo entre C/D según la capacidad libre observada en ese momento.
+    El objetivo total de la compañía recibe un +5%. La distribución por taxonomía
+    conserva la participación original de A/B/C/D en el objetivo PepsiCo.
     """
     anio_int, mes_int = int(float(anio)), int(float(mes))
     asegurar_tablas_objetivos_tp()
@@ -818,7 +1412,7 @@ def generar_snapshot_objetivos_tp(anio, mes):
         base["Clientes_Potenciales_Snapshot"] = (
             base["Clientes_Potenciales_Snapshot"].fillna(0).astype(int)
         )
-        minimo_global = int(round(float(maestro["Obj_TP_Pepsico"].sum()) * 1.20))
+        minimo_global = int(round(float(maestro["Obj_TP_Pepsico"].sum()) * 1.05))
         adicional_total = minimo_global - int(base["Objetivo_Base_Ajustado"].sum())
         if adicional_total < 0:
             adicional_total = 0
@@ -935,7 +1529,7 @@ def generar_snapshot_objetivos_tp(anio, mes):
                 f"Conciliación por taxonomía fallida: asignado={conciliacion.to_dict()}, esperado={esperados.to_dict()}.",
             )
         if int(detalle["Obj_TP_Asignado"].sum()) < minimo_global:
-            return False, "Control global +20% no cumplido."
+            return False, "Control global +5% no cumplido."
 
         periodo = base[
             [
@@ -1208,7 +1802,7 @@ def importar_snapshot_objetivos_tp_desde_excel(archivo):
                     .fillna(0)
                     .sum()
                 )
-                * 1.20
+                * 1.05
             )
         )
         total_final = int(trabajo["Obj_TP_Asignado"].sum())
@@ -2918,6 +3512,20 @@ def inicializar_bd_desde_excel(archivos_dict):
     conn = obtener_conexion()
     try:
         for nombre_tabla, archivo in archivos_dict.items():
+            nombre_tabla_normalizado = str(nombre_tabla).strip().lower()
+            if nombre_tabla_normalizado in {
+                "maestro_marcas_cebe",
+                "marcas_cebe",
+                "cebes",
+                "maestro_taxonomias",
+                "taxonomias",
+            }:
+                logger.info(
+                    f"RECARGAR BASES: {nombre_tabla_normalizado} preservado. "
+                    "Su persistencia se administra exclusivamente desde Parametros."
+                )
+                continue
+
             logger.warning(f"CARGANDO TABLA: {nombre_tabla}")
             if "altas" in nombre_tabla.lower():
                 xls_altas = pd.ExcelFile(archivo)
@@ -3188,13 +3796,127 @@ def importar_maestros_multisolapa_atomica(
                             .astype(int)
                         )
 
-                    df_sheet.to_sql(
-                        table_name,
-                        conn,
-                        if_exists="replace",
-                        index=False,
-                        chunksize=5000,
-                    )
+                    if sheet_name == "Maestro_Marcas_CEBE":
+                        columnas_cebe = [
+                            "Anio",
+                            "Mes",
+                            "Marca",
+                            "CEBE",
+                            "CEBE1",
+                            "Obj_TN_Mes",
+                            "Obj_Gross_Mes",
+                            "Obj_Pepsico_Cobertura",
+                            "Obj_Empresa_Cobertura",
+                        ]
+                        faltantes_cebe = [
+                            columna
+                            for columna in columnas_cebe
+                            if columna not in df_sheet.columns
+                        ]
+                        if faltantes_cebe:
+                            raise ValueError(
+                                "Maestro_Marcas_CEBE no cumple el contrato. "
+                                "Faltan columnas: " + ", ".join(faltantes_cebe)
+                            )
+
+                        df_cebe = df_sheet[columnas_cebe].copy()
+                        periodos_cebe = (
+                            df_cebe[["Anio", "Mes"]]
+                            .drop_duplicates()
+                            .itertuples(index=False, name=None)
+                        )
+
+                        tabla_cebe_existe = cursor.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table' "
+                            "AND LOWER(name)='maestro_marcas_cebe' LIMIT 1;"
+                        ).fetchone()
+                        if tabla_cebe_existe is not None:
+                            columnas_sql_cebe = [
+                                str(fila[1]).strip()
+                                for fila in cursor.execute(
+                                    "PRAGMA table_info(maestro_marcas_cebe);"
+                                ).fetchall()
+                            ]
+                            esquema_vertical_legacy = (
+                                "CEBE1" in columnas_sql_cebe
+                                and "Valor" in columnas_sql_cebe
+                                and (
+                                    "Metrica" in columnas_sql_cebe
+                                    or "Métrica" in columnas_sql_cebe
+                                )
+                            )
+                            if esquema_vertical_legacy:
+                                nombre_respaldo_base = (
+                                    "maestro_marcas_cebe_vertical_legacy"
+                                )
+                                nombre_respaldo = nombre_respaldo_base
+                                sufijo_respaldo = 1
+                                while (
+                                    cursor.execute(
+                                        "SELECT 1 FROM sqlite_master "
+                                        "WHERE type='table' AND name=? LIMIT 1;",
+                                        (nombre_respaldo,),
+                                    ).fetchone()
+                                    is not None
+                                ):
+                                    nombre_respaldo = (
+                                        f"{nombre_respaldo_base}_{sufijo_respaldo}"
+                                    )
+                                    sufijo_respaldo += 1
+                                cursor.execute(
+                                    f"ALTER TABLE maestro_marcas_cebe "
+                                    f'RENAME TO "{nombre_respaldo}";'
+                                )
+                            elif not set(columnas_cebe).issubset(
+                                set(columnas_sql_cebe)
+                            ):
+                                raise ValueError(
+                                    "maestro_marcas_cebe tiene un esquema no "
+                                    "reconocido. Columnas encontradas: "
+                                    f"{columnas_sql_cebe}."
+                                )
+
+                        cursor.execute(
+                            """
+                            CREATE TABLE IF NOT EXISTS maestro_marcas_cebe (
+                                Anio INTEGER NOT NULL,
+                                Mes INTEGER NOT NULL CHECK (Mes BETWEEN 1 AND 12),
+                                Marca TEXT NOT NULL,
+                                CEBE TEXT NOT NULL,
+                                CEBE1 TEXT NOT NULL,
+                                Obj_TN_Mes REAL NOT NULL DEFAULT 0,
+                                Obj_Gross_Mes REAL NOT NULL DEFAULT 0,
+                                Obj_Pepsico_Cobertura REAL NOT NULL DEFAULT 0,
+                                Obj_Empresa_Cobertura REAL NOT NULL DEFAULT 0,
+                                PRIMARY KEY (Anio, Mes, Marca)
+                            );
+                            """
+                        )
+                        for anio_cebe, mes_cebe in periodos_cebe:
+                            cursor.execute(
+                                "DELETE FROM maestro_marcas_cebe "
+                                "WHERE Anio=? AND Mes=?;",
+                                (int(anio_cebe), int(mes_cebe)),
+                            )
+                        cursor.executemany(
+                            """
+                            INSERT INTO maestro_marcas_cebe (
+                                Anio, Mes, Marca, CEBE, CEBE1,
+                                Obj_TN_Mes, Obj_Gross_Mes,
+                                Obj_Pepsico_Cobertura,
+                                Obj_Empresa_Cobertura
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                            """,
+                            list(df_cebe.itertuples(index=False, name=None)),
+                        )
+                    else:
+                        df_sheet.to_sql(
+                            table_name,
+                            conn,
+                            if_exists="replace",
+                            index=False,
+                            chunksize=5000,
+                        )
                     importados_count += 1
 
         conn.commit()

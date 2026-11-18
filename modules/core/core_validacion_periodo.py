@@ -7,6 +7,7 @@ from modules.parametros import (
     obtener_maestro_segmentos_sql,
     obtener_maestro_marcas_cebe_sql,
     obtener_maestro_ccc_sql,
+    obtener_maestro_taxonomias_sql,
     obtener_maestro_innovaciones_sql,
     obtener_objetivos_vendedores_sql,
 )
@@ -14,20 +15,18 @@ from modules.parametros import (
 
 def _validar_dataframe(df: pd.DataFrame) -> bool:
     """
-    Determina si una tabla contiene información válida.
+    Determina si una tabla contiene informacion valida.
     """
-
     return df is not None and isinstance(df, pd.DataFrame) and not df.empty
 
 
 def validar_integridad_periodo_operativo(anio: int | str, mes: int | str) -> dict:
     """
     Valida que todas las bases mensuales obligatorias
-    existan para el período operativo seleccionado.
+    existan para el periodo operativo seleccionado.
 
-    Retorna un diccionario único de estado.
+    Retorna un diccionario unico de estado.
     """
-
     estado = {}
 
     estado["Maestro Vendedores"] = _validar_dataframe(
@@ -43,6 +42,10 @@ def validar_integridad_periodo_operativo(anio: int | str, mes: int | str) -> dic
     )
 
     estado["Maestro CCC"] = _validar_dataframe(obtener_maestro_ccc_sql(anio, mes))
+
+    estado["Maestro Taxonomias"] = _validar_dataframe(
+        obtener_maestro_taxonomias_sql(anio, mes)
+    )
 
     estado["Maestro Innovaciones"] = _validar_dataframe(
         obtener_maestro_innovaciones_sql(anio, mes)

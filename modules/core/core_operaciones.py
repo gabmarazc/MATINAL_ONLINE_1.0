@@ -113,10 +113,23 @@ def calcular_calendario_y_rutas(
     mes: int,
     dia_venta: str,
     modo_ajuste: str = "AJUSTADO",
-) -> tuple[dict, dict, dict, dict, int, int]:
+) -> tuple[dict, dict, dict, dict, dict, float, float]:
     """
-    Capa CORE: Calcula los días pasados, rutas totales del mes, días restantes todo y días restantes ajustados por vendedor.
-    Expone explícitamente tanto el contrato histórico (para mantener compatibilidad hacia atrás) como los nuevos mapas requeridos.
+    Calcula jornadas equivalentes por vendedor a partir de la carga real de
+    clientes programados en RUTAS.
+
+    Regla:
+    - Se cuenta la cantidad de clientes unicos por vendedor y fecha.
+    - La carga normal del vendedor es la mediana de clientes de sus jornadas
+      de lunes a viernes del mes. Si no existen, se usa la mediana de todas
+      sus jornadas del mes.
+    - Peso de jornada = min(clientes del dia / carga normal, 1.0).
+    - Los dias pasados y futuros son la suma de esos pesos.
+
+    De este modo, una jornada reducida de sabado no equivale automaticamente
+    a un dia completo. Se conservan las mismas claves publicas para no romper
+    consumidores existentes, pero sus valores pasan a ser jornadas
+    equivalentes decimales.
     """
     t0 = time.perf_counter()
     rutas = (
@@ -163,14 +176,14 @@ def calcular_calendario_y_rutas(
     rutas_totales_map = {}
     dias_restantes_todo_map = {}
     dias_restantes_ajustado_map = {}
-    total_dias_pasados_val = 0
-    total_dias_restantes_val = 0
+    total_dias_pasados_val = 0.0
+    total_dias_restantes_val = 0.0
 
     if not rutas.empty:
         cols_f_rutas = ["Fecha", "fecha", "Dia", "Date", "FECHA"]
         col_fecha_r = next((c for c in cols_f_rutas if c in rutas.columns), None)
         if not col_fecha_r:
-            raise ValueError("No se encontró columna de fecha en la tabla de rutas.")
+            raise ValueError("No se encontro columna de fecha en la tabla de rutas.")
 
         cols_v_rutas = [
             "codven",
@@ -182,7 +195,24 @@ def calcular_calendario_y_rutas(
         ]
         col_vend_r = next((c for c in cols_v_rutas if c in rutas.columns), None)
         if not col_vend_r:
-            raise ValueError("No se encontró columna de vendedor en la tabla de rutas.")
+            raise ValueError("No se encontro columna de vendedor en la tabla de rutas.")
+
+        cols_cliente_rutas = [
+            "Codigo",
+            "Cliente",
+            "Cliente_id",
+            "Codigo Cliente",
+            "CodCliente",
+            "NroCliente",
+        ]
+        col_cliente_r = next(
+            (c for c in cols_cliente_rutas if c in rutas.columns), None
+        )
+        if not col_cliente_r:
+            raise ValueError(
+                "No se encontro columna de cliente en la tabla de rutas. "
+                f"Candidatas={cols_cliente_rutas}; disponibles={list(rutas.columns)}."
+            )
 
         s_fechas = (
             rutas[col_fecha_r]
@@ -192,7 +222,6 @@ def calcular_calendario_y_rutas(
         )
         dt_directo = pd.to_datetime(s_fechas, format="%Y-%m-%d", errors="coerce")
         dt_invertido = pd.to_datetime(s_fechas, format="%Y-%d-%m", errors="coerce")
-
         if (
             (dt_directo.dt.year == int(anio)) & (dt_directo.dt.month == int(mes))
         ).sum() >= (
@@ -205,56 +234,94 @@ def calcular_calendario_y_rutas(
         rutas["CodVend"] = pd.to_numeric(rutas[col_vend_r], errors="coerce").astype(
             "Int64"
         )
+        rutas["ClienteRuta"] = pd.to_numeric(
+            rutas[col_cliente_r], errors="coerce"
+        ).astype("Int64")
+
         rutas_mes = rutas[
-            (
-                (rutas["Fecha_dt"].dt.year == int(anio))
-                & (rutas["Fecha_dt"].dt.month == int(mes))
-            )
+            (rutas["Fecha_dt"].dt.year == int(anio))
+            & (rutas["Fecha_dt"].dt.month == int(mes))
         ].copy()
+        rutas_mes = rutas_mes.dropna(subset=["CodVend", "Fecha_dt", "ClienteRuta"])
+
+        # Una fila logica por cliente, vendedor y fecha antes de medir la carga.
+        rutas_mes = rutas_mes.drop_duplicates(
+            subset=["CodVend", "Fecha_dt", "ClienteRuta"]
+        )
+
+        carga_diaria = rutas_mes.groupby(["CodVend", "Fecha_dt"], as_index=False).agg(
+            ClientesRutaDia=("ClienteRuta", "nunique")
+        )
+        carga_diaria["DiaSemana"] = carga_diaria["Fecha_dt"].dt.dayofweek
+
+        # Referencia normal: mediana lunes-viernes. Fallback: mediana mensual.
+        referencia_habil = (
+            carga_diaria[carga_diaria["DiaSemana"].le(4)]
+            .groupby("CodVend")["ClientesRutaDia"]
+            .median()
+        )
+        referencia_total = carga_diaria.groupby("CodVend")["ClientesRutaDia"].median()
+        referencia = referencia_habil.combine_first(referencia_total)
+        carga_diaria["ClientesRutaNormal"] = carga_diaria["CodVend"].map(referencia)
+        carga_diaria["PesoJornada"] = (
+            carga_diaria["ClientesRutaDia"]
+            .div(carga_diaria["ClientesRutaNormal"].replace(0, pd.NA))
+            .fillna(0.0)
+            .clip(lower=0.0, upper=1.0)
+        )
 
         dia_v_dt = parsear_fecha_robusta(pd.Series([dia_venta])).iloc[0]
         corte_date = dia_v_dt.date() if pd.notna(dia_v_dt) else None
-
         pasadas = (
-            rutas_mes[rutas_mes["Fecha_dt"].dt.date <= corte_date]
+            carga_diaria[carga_diaria["Fecha_dt"].dt.date <= corte_date]
             if corte_date is not None
-            else rutas_mes
+            else carga_diaria
         )
         restantes_base = (
-            rutas_mes[rutas_mes["Fecha_dt"].dt.date > corte_date]
+            carga_diaria[carga_diaria["Fecha_dt"].dt.date > corte_date]
             if corte_date is not None
-            else rutas_mes
+            else carga_diaria
         )
 
-        dias_pasados_map = pasadas.groupby("CodVend")["Fecha_dt"].nunique().to_dict()
-        rutas_totales_map = rutas_mes.groupby("CodVend")["Fecha_dt"].nunique().to_dict()
+        dias_pasados_map = pasadas.groupby("CodVend")["PesoJornada"].sum().to_dict()
+        rutas_totales_map = (
+            carga_diaria.groupby("CodVend")["PesoJornada"].sum().to_dict()
+        )
         dias_restantes_base_map = (
-            restantes_base.groupby("CodVend")["Fecha_dt"].nunique().to_dict()
+            restantes_base.groupby("CodVend")["PesoJornada"].sum().to_dict()
         )
 
-        for cv, dr_b in dias_restantes_base_map.items():
+        codigos_mes = carga_diaria["CodVend"].dropna().unique().tolist()
+        for cv in codigos_mes:
+            dr_b = float(dias_restantes_base_map.get(cv, 0.0))
             cv_clean_str = str(int(cv)) if pd.notna(cv) else ""
-            desc = rutas_ajust_map.get(cv_clean_str, 0) if cv_clean_str else 0
+            desc = float(rutas_ajust_map.get(cv_clean_str, 0)) if cv_clean_str else 0.0
             dias_restantes_todo_map[cv] = dr_b
-            dias_restantes_ajustado_map[cv] = max(0, dr_b - desc)
-            if modo_ajuste == "AJUSTADO":
-                dias_restantes_map[cv] = max(0, dr_b - desc)
-            else:
-                dias_restantes_map[cv] = dr_b
+            dias_restantes_ajustado_map[cv] = max(0.0, dr_b - desc)
+            dias_restantes_map[cv] = (
+                dias_restantes_ajustado_map[cv]
+                if modo_ajuste == "AJUSTADO"
+                else dias_restantes_todo_map[cv]
+            )
 
-        total_dias_pasados_val = int(pasadas["Fecha_dt"].nunique())
+        # Totales tecnicos conservados para compatibilidad.
+        if dias_pasados_map:
+            total_dias_pasados_val = float(
+                pd.Series(list(dias_pasados_map.values()), dtype="float64").mean()
+            )
         mapa_activo = (
             dias_restantes_ajustado_map
             if modo_ajuste == "AJUSTADO"
             else dias_restantes_todo_map
         )
         if mapa_activo:
-            total_dias_restantes_val = int(pd.Series(list(mapa_activo.values())).mean())
-        else:
-            total_dias_restantes_val = int(restantes_base["Fecha_dt"].nunique())
+            total_dias_restantes_val = float(
+                pd.Series(list(mapa_activo.values()), dtype="float64").mean()
+            )
 
     print(
-        f"[PERF_CORE] 6) calcular_calendario_y_rutas -> {time.perf_counter() - t0:.4f} s"
+        f"[PERF_CORE] 6) calcular_calendario_y_rutas -> "
+        f"{time.perf_counter() - t0:.4f} s"
     )
     return (
         dias_pasados_map,

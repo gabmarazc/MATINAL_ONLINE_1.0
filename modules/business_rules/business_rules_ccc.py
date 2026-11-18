@@ -11,6 +11,258 @@ from modules.core.core_operaciones import obtener_core_operacion
 from modules.utils import parsear_fecha_robusta
 
 
+def _obtener_taxonomias_activas_ccc(anio: int, mes: int) -> pd.DataFrame:
+    """
+    Obtiene la dimension activa de taxonomias para construir las matrices CCC.
+
+    No aplica fallbacks ni define objetivos. Si el periodo no posee un maestro
+    valido con taxonomias activas, falla explicitamente.
+    """
+    maestro = db.obtener_maestro_taxonomias(anio, mes)
+
+    if maestro is None or maestro.empty:
+        raise ValueError(
+            "BUSINESS_RULES_CCC: no existe maestro_taxonomias para el periodo "
+            f"{int(mes):02d}/{int(anio)}."
+        )
+
+    requeridas = {"Taxonomia", "Activa"}
+    if not requeridas.issubset(set(maestro.columns)):
+        raise ValueError(
+            "BUSINESS_RULES_CCC: maestro_taxonomias no cumple el contrato "
+            "Taxonomia/Activa."
+        )
+
+    trabajo = maestro.copy()
+    trabajo["Taxonomia"] = trabajo["Taxonomia"].astype("string").str.strip().str.upper()
+    trabajo["Activa"] = pd.to_numeric(trabajo["Activa"], errors="coerce")
+
+    if "Orden" in trabajo.columns:
+        trabajo["Orden"] = pd.to_numeric(trabajo["Orden"], errors="coerce")
+        trabajo = trabajo.sort_values(["Orden", "Taxonomia"], na_position="last")
+    else:
+        trabajo = trabajo.sort_values("Taxonomia")
+
+    taxonomias_df = (
+        trabajo.loc[
+            trabajo["Activa"].eq(1)
+            & trabajo["Taxonomia"].notna()
+            & trabajo["Taxonomia"].ne(""),
+            ["Taxonomia"],
+        ]
+        .drop_duplicates("Taxonomia")
+        .reset_index(drop=True)
+    )
+
+    if taxonomias_df.empty:
+        raise ValueError(
+            "BUSINESS_RULES_CCC: maestro_taxonomias no posee taxonomias activas "
+            f"para {int(mes):02d}/{int(anio)}."
+        )
+
+    return taxonomias_df
+
+
+def obtener_auditoria_taxonomias_ccc(
+    anio: int, mes: int, filtros_globales: dict = None
+) -> pd.DataFrame:
+    """
+    Audita la calidad de Taxonomia directamente contra SQLite.universo para el
+    periodo operativo indicado. No corrige, no imputa y no persiste datos.
+
+    Estados:
+    - SIN_TAXONOMIA: valor nulo, vacio o equivalente.
+    - TAXONOMIA_NO_REGISTRADA: valor informado no activo en maestro_taxonomias.
+    """
+    columnas_salida = [
+        "Cliente",
+        "NombreCliente",
+        "CodVendedor",
+        "Ruta",
+        "Taxonomia_Original",
+        "Taxonomia_Normalizada",
+        "Estado_Auditoria",
+    ]
+
+    maestro = db.obtener_maestro_taxonomias(anio, mes)
+    if maestro is None or maestro.empty:
+        raise ValueError(
+            "BUSINESS_RULES_CCC: no existe maestro_taxonomias para el periodo "
+            f"{int(mes):02d}/{int(anio)}."
+        )
+    requeridas_maestro = {"Taxonomia", "Activa"}
+    if not requeridas_maestro.issubset(set(maestro.columns)):
+        raise ValueError(
+            "BUSINESS_RULES_CCC: maestro_taxonomias no cumple el contrato "
+            "Taxonomia/Activa."
+        )
+
+    maestro = maestro.copy()
+    maestro["Taxonomia"] = maestro["Taxonomia"].astype("string").str.strip().str.upper()
+    maestro["Activa"] = pd.to_numeric(maestro["Activa"], errors="coerce")
+    activas = set(
+        maestro.loc[maestro["Activa"].eq(1), "Taxonomia"].dropna().astype(str).tolist()
+    )
+    if not activas:
+        raise ValueError(
+            "BUSINESS_RULES_CCC: maestro_taxonomias no posee taxonomias activas "
+            f"para {int(mes):02d}/{int(anio)}."
+        )
+
+    try:
+        universo = db.cargar_tabla_sql("SELECT * FROM universo")
+    except Exception as exc:
+        raise ValueError(
+            f"BUSINESS_RULES_CCC: no se pudo leer SQLite.universo: {exc}"
+        ) from exc
+    if universo is None or universo.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    columnas_universo = list(universo.columns)
+    col_cliente = next(
+        (
+            c
+            for c in ["Codigo", "Cliente", "NroCliente", "CodCliente"]
+            if c in columnas_universo
+        ),
+        None,
+    )
+    if col_cliente is None:
+        raise ValueError(
+            "BUSINESS_RULES_CCC: no se encontro columna de cliente en universo."
+        )
+
+    col_taxonomia = next(
+        (
+            c
+            for c in columnas_universo
+            if str(c).strip().lower().replace("_", "") == "segmentoclientecodigo"
+            or any(
+                clave in str(c).lower()
+                for clave in ["taxonomia", "clasificacion", "tax"]
+            )
+        ),
+        None,
+    )
+    if col_taxonomia is None:
+        raise ValueError(
+            "BUSINESS_RULES_CCC: no se encontro columna de taxonomia en universo."
+        )
+
+    col_vendedor = next(
+        (
+            c
+            for c in columnas_universo
+            if any(clave in str(c).lower() for clave in ["codven", "vendedor"])
+        ),
+        None,
+    )
+    col_nombre = next(
+        (
+            c
+            for c in [
+                "Razon_Social",
+                "RazonSocial",
+                "NombreCliente",
+                "Nombre_Cliente",
+                "ClienteDesc",
+            ]
+            if c in columnas_universo
+        ),
+        None,
+    )
+    col_ruta = next(
+        (
+            c
+            for c in [
+                "Ruta",
+                "CodRuta",
+                "Cod_Ruta",
+                "Dia_Visita",
+                "DiaVisita",
+                "Visita",
+                "Dia",
+            ]
+            if c in columnas_universo
+        ),
+        None,
+    )
+    col_subsegmento = next(
+        (c for c in columnas_universo if str(c).strip().lower() == "subsegmento"),
+        None,
+    )
+    col_subramo = next(
+        (c for c in columnas_universo if str(c).strip().lower() == "subramo"),
+        None,
+    )
+
+    trabajo = pd.DataFrame(index=universo.index)
+    trabajo["Cliente"] = pd.to_numeric(universo[col_cliente], errors="coerce").astype(
+        "Int64"
+    )
+    trabajo["CodVendedor"] = (
+        pd.to_numeric(universo[col_vendedor], errors="coerce").astype("Int64")
+        if col_vendedor
+        else pd.Series(pd.NA, index=universo.index, dtype="Int64")
+    )
+    trabajo["NombreCliente"] = (
+        universo[col_nombre].fillna("").astype(str).str.strip() if col_nombre else ""
+    )
+    trabajo["Ruta"] = (
+        universo[col_ruta].fillna("").astype(str).str.strip() if col_ruta else ""
+    )
+    trabajo["Taxonomia_Original"] = universo[col_taxonomia].fillna("")
+
+    if col_subsegmento:
+        trabajo["_subsegmento"] = (
+            universo[col_subsegmento].fillna("").astype(str).str.strip().str.casefold()
+        )
+    if col_subramo:
+        trabajo["_subramo"] = (
+            universo[col_subramo].fillna("").astype(str).str.strip().str.casefold()
+        )
+
+    if "_subsegmento" in trabajo.columns:
+        trabajo = trabajo[trabajo["_subsegmento"] != "empleados"].copy()
+    if "_subramo" in trabajo.columns:
+        trabajo = trabajo[trabajo["_subramo"] != "empleados"].copy()
+
+    trabajo = trabajo[
+        trabajo["Cliente"].notna() & trabajo["CodVendedor"].notna()
+    ].copy()
+    trabajo["Taxonomia_Normalizada"] = (
+        trabajo["Taxonomia_Original"].astype(str).str.strip().str.upper()
+    )
+
+    valores_sin_taxonomia = {
+        "",
+        "NAN",
+        "NONE",
+        "NAT",
+        "<NA>",
+        "NULL",
+        "SIN TAXONOMIA",
+        "SIN TAXONOMÍA",
+    }
+    sin_taxonomia = trabajo["Taxonomia_Normalizada"].isin(valores_sin_taxonomia)
+    no_registrada = ~sin_taxonomia & ~trabajo["Taxonomia_Normalizada"].isin(activas)
+
+    auditoria = trabajo[sin_taxonomia | no_registrada].copy()
+    if auditoria.empty:
+        return pd.DataFrame(columns=columnas_salida)
+
+    auditoria["Estado_Auditoria"] = "TAXONOMIA_NO_REGISTRADA"
+    mascara_sin = auditoria["Taxonomia_Normalizada"].isin(valores_sin_taxonomia)
+    auditoria.loc[mascara_sin, "Estado_Auditoria"] = "SIN_TAXONOMIA"
+
+    return (
+        auditoria[columnas_salida]
+        .drop_duplicates(["Cliente", "Estado_Auditoria"])
+        .sort_values(["Estado_Auditoria", "CodVendedor", "Cliente"])
+        .reset_index(drop=True)
+    )
+
+
 def _filtrar_ventas_ccc_comercial(
     df_vta_core: pd.DataFrame,
     anio_op: int,
@@ -231,70 +483,98 @@ def _obtener_hoja_ccc_config(
     anio_op: int, mes_op: int, hoja_ccc_param: pd.DataFrame = None
 ) -> pd.DataFrame:
     """
-    BUSINESS_RULES CCC: Recupera la configuración de objetivos porcentuales de cartera desde maestro_ccc.
+    Recupera exclusivamente los objetivos CCC configurados para el periodo.
+
+    Este contrato no define que taxonomias existen. Esa responsabilidad
+    pertenece a maestro_taxonomias. No fabrica catalogos ni porcentajes por
+    defecto. Una taxonomia activa puede existir sin objetivo CCC.
     """
     try:
-        df_ccc_db = db.cargar_tabla_sql("SELECT * FROM maestro_ccc")
-        if (
-            df_ccc_db is not None
-            and not df_ccc_db.empty
-            and "Anio" in df_ccc_db.columns
-            and "Mes" in df_ccc_db.columns
-        ):
-            df_ccc_per = df_ccc_db[
-                (df_ccc_db["Anio"].astype(str) == str(anio_op))
-                & (df_ccc_db["Mes"].astype(str) == str(mes_op))
-            ]
-            if not df_ccc_per.empty:
-                hoja_ccc = df_ccc_per
-            else:
-                hoja_ccc = (
-                    hoja_ccc_param if hoja_ccc_param is not None else pd.DataFrame()
-                )
-        else:
-            hoja_ccc = hoja_ccc_param if hoja_ccc_param is not None else pd.DataFrame()
-    except Exception:
-        hoja_ccc = hoja_ccc_param if hoja_ccc_param is not None else pd.DataFrame()
+        hoja_ccc = db.cargar_tabla_sql("SELECT * FROM maestro_ccc")
+    except Exception as exc:
+        raise ValueError(
+            f"BUSINESS_RULES_CCC: no se pudo leer maestro_ccc: {exc}"
+        ) from exc
 
     if hoja_ccc is None or hoja_ccc.empty:
-        hoja_ccc = pd.DataFrame(
-            {
-                "Taxonomia": ["A", "B", "C", "D"],
-                "Porcentaje_Cartera": [80.0, 70.0, 60.0, 50.0],
-            }
-        )
-    else:
-        hoja_ccc = hoja_ccc.copy()
-        hoja_ccc.columns = hoja_ccc.columns.astype(str).str.strip()
-        rename_metas = {}
-        for c in hoja_ccc.columns:
-            if str(c).lower() in [
-                "porcentaje_cartera",
-                "porcentaje",
-                "pct",
-                "obj",
-                "objetivo",
-                "obj_ccc",
-            ]:
-                rename_metas[c] = "Porcentaje_Cartera"
-            if str(c).lower() in ["taxonomia", "taxonomía", "categoria", "categoría"]:
-                rename_metas[c] = "Taxonomia"
-        hoja_ccc = hoja_ccc.rename(columns=rename_metas)
-        if "Taxonomia" in hoja_ccc.columns:
-            hoja_ccc["Taxonomia"] = (
-                hoja_ccc["Taxonomia"].astype(str).str.strip().str.upper()
-            )
-        if "Porcentaje_Cartera" in hoja_ccc.columns:
-            hoja_ccc["Porcentaje_Cartera"] = pd.to_numeric(
-                hoja_ccc["Porcentaje_Cartera"], errors="coerce"
-            ).fillna(80.0)
-            hoja_ccc = hoja_ccc[["Taxonomia", "Porcentaje_Cartera"]].drop_duplicates(
-                "Taxonomia"
-            )
-        else:
-            hoja_ccc["Porcentaje_Cartera"] = 80.0
+        return pd.DataFrame(columns=["Taxonomia", "Porcentaje_Cartera"])
 
-    return hoja_ccc
+    hoja_ccc = hoja_ccc.copy()
+    hoja_ccc.columns = hoja_ccc.columns.astype(str).str.strip()
+
+    if "Anio" not in hoja_ccc.columns or "Mes" not in hoja_ccc.columns:
+        raise ValueError(
+            "BUSINESS_RULES_CCC: maestro_ccc no cumple el contrato Anio/Mes."
+        )
+
+    hoja_ccc = hoja_ccc[
+        (pd.to_numeric(hoja_ccc["Anio"], errors="coerce") == int(anio_op))
+        & (pd.to_numeric(hoja_ccc["Mes"], errors="coerce") == int(mes_op))
+    ].copy()
+
+    if hoja_ccc.empty:
+        return pd.DataFrame(columns=["Taxonomia", "Porcentaje_Cartera"])
+
+    rename_metas = {}
+    for columna in hoja_ccc.columns:
+        nombre = str(columna).strip().lower()
+        if nombre in [
+            "porcentaje_cartera",
+            "porcentaje",
+            "pct",
+            "obj",
+            "objetivo",
+            "obj_ccc",
+        ]:
+            rename_metas[columna] = "Porcentaje_Cartera"
+        if nombre in ["taxonomia", "taxonomía", "categoria", "categoría"]:
+            rename_metas[columna] = "Taxonomia"
+    hoja_ccc = hoja_ccc.rename(columns=rename_metas)
+
+    requeridas = {"Taxonomia", "Porcentaje_Cartera"}
+    if not requeridas.issubset(set(hoja_ccc.columns)):
+        raise ValueError(
+            "BUSINESS_RULES_CCC: maestro_ccc no cumple el contrato "
+            "Taxonomia/Porcentaje_Cartera."
+        )
+
+    hoja_ccc["Taxonomia"] = (
+        hoja_ccc["Taxonomia"].astype("string").str.strip().str.upper()
+    )
+    hoja_ccc["Porcentaje_Cartera"] = pd.to_numeric(
+        hoja_ccc["Porcentaje_Cartera"], errors="coerce"
+    )
+
+    invalidas = (
+        hoja_ccc["Taxonomia"].isna()
+        | hoja_ccc["Taxonomia"].eq("")
+        | hoja_ccc["Porcentaje_Cartera"].isna()
+    )
+    if invalidas.any():
+        raise ValueError(
+            "BUSINESS_RULES_CCC: maestro_ccc contiene taxonomias u objetivos "
+            "nulos/invalidos para el periodo solicitado."
+        )
+
+    if hoja_ccc["Taxonomia"].duplicated().any():
+        duplicadas = sorted(
+            hoja_ccc.loc[hoja_ccc["Taxonomia"].duplicated(keep=False), "Taxonomia"]
+            .unique()
+            .tolist()
+        )
+        raise ValueError(
+            "BUSINESS_RULES_CCC: maestro_ccc contiene taxonomias duplicadas "
+            f"para {int(mes_op):02d}/{int(anio_op)}: {duplicadas}."
+        )
+
+    fuera_rango = ~hoja_ccc["Porcentaje_Cartera"].between(0, 100, inclusive="both")
+    if fuera_rango.any():
+        raise ValueError(
+            "BUSINESS_RULES_CCC: maestro_ccc contiene porcentajes fuera del "
+            "rango 0-100."
+        )
+
+    return hoja_ccc[["Taxonomia", "Porcentaje_Cartera"]].reset_index(drop=True)
 
 
 def _construir_modelo_atribucion_ccc(
@@ -652,11 +932,25 @@ def _procesar_atribucion_clientes_completo(
     )
     det_merged["SUP"] = det_merged["SUP"].fillna("GENERAL").astype(str).str.strip()
     if "Taxonomia" in det_merged.columns:
-        det_merged["Taxonomia"] = (
-            det_merged["Taxonomia"].fillna("A").astype(str).str.strip().str.upper()
+        taxonomia_normalizada = (
+            det_merged["Taxonomia"].astype("string").str.strip().str.upper()
+        )
+        valores_sin_taxonomia = {
+            "",
+            "NAN",
+            "NONE",
+            "NAT",
+            "<NA>",
+            "NULL",
+            "SIN TAXONOMÍA",
+        }
+        det_merged["Taxonomia"] = taxonomia_normalizada.mask(
+            taxonomia_normalizada.isna()
+            | taxonomia_normalizada.isin(valores_sin_taxonomia),
+            "SIN TAXONOMIA",
         )
     else:
-        det_merged["Taxonomia"] = "A"
+        det_merged["Taxonomia"] = "SIN TAXONOMIA"
 
     if df_vta_filtrada is not None and not df_vta_filtrada.empty:
         vta_chk = df_vta_filtrada.copy()
@@ -760,6 +1054,7 @@ def obtener_matriz_ccc_comercial(
                 "CCC_Gerencia",
                 "NC",
                 "Objetivo_CCC",
+                "Tiene_Objetivo_CCC",
                 "Pct_Cartera",
                 "Pct_Objetivo",
             ]
@@ -797,7 +1092,7 @@ def obtener_matriz_ccc_comercial(
         vendedores_df["CodVendedor_Titular"] != 20
     ].drop_duplicates("CodVendedor_Titular")
 
-    taxonomias_df = pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"]})
+    taxonomias_df = _obtener_taxonomias_activas_ccc(anio, mes)
     vendedores_df["_k"], taxonomias_df["_k"] = 1, 1
     matriz_base = vendedores_df.merge(taxonomias_df, on="_k").drop(columns="_k")
 
@@ -823,9 +1118,10 @@ def obtener_matriz_ccc_comercial(
 
     hoja_ccc = _obtener_hoja_ccc_config(anio, mes)
     reporte = reporte.merge(hoja_ccc, on="Taxonomia", how="left")
-    reporte["Porcentaje_Cartera"] = reporte["Porcentaje_Cartera"].fillna(80.0)
+    reporte["Tiene_Objetivo_CCC"] = reporte["Porcentaje_Cartera"].notna()
     reporte["Objetivo_CCC"] = (
-        (reporte["Cartera_Neta"] * (reporte["Porcentaje_Cartera"] / 100.0))
+        reporte["Cartera_Neta"]
+        .mul(reporte["Porcentaje_Cartera"].div(100.0))
         .round(0)
         .astype("Int64")
     )
@@ -837,11 +1133,12 @@ def obtener_matriz_ccc_comercial(
         .round(2)
     )
     reporte["Pct_Objetivo"] = (
-        (reporte["CCC_Vendedor"] / reporte["Objetivo_CCC"].replace(0, pd.NA))
+        reporte["CCC_Vendedor"]
+        .div(reporte["Objetivo_CCC"].replace(0, pd.NA))
         .mul(100)
-        .fillna(0.0)
         .round(2)
     )
+    reporte.loc[~reporte["Tiene_Objetivo_CCC"], "Pct_Objetivo"] = pd.NA
 
     reporte = reporte.rename(columns={"CodVendedor_Titular": "CodVendedor"})
     reporte["CodVendedor"] = pd.to_numeric(
@@ -864,6 +1161,7 @@ def obtener_matriz_ccc_comercial(
         "CCC_Gerencia",
         "NC",
         "Objetivo_CCC",
+        "Tiene_Objetivo_CCC",
         "Pct_Cartera",
         "Pct_Objetivo",
     ]
@@ -920,6 +1218,7 @@ def obtener_matriz_ccc_comercial_v2(
                 "CCC_Gerencia",
                 "NC",
                 "Objetivo_CCC",
+                "Tiene_Objetivo_CCC",
                 "Pct_Cartera",
                 "Pct_Objetivo",
             ]
@@ -957,7 +1256,7 @@ def obtener_matriz_ccc_comercial_v2(
         vendedores_df["CodVendedor_Titular"] != 20
     ].drop_duplicates("CodVendedor_Titular")
 
-    taxonomias_df = pd.DataFrame({"Taxonomia": ["A", "B", "C", "D"]})
+    taxonomias_df = _obtener_taxonomias_activas_ccc(anio, mes)
     vendedores_df["_k"], taxonomias_df["_k"] = 1, 1
     matriz_base = vendedores_df.merge(taxonomias_df, on="_k").drop(columns="_k")
 
@@ -983,9 +1282,10 @@ def obtener_matriz_ccc_comercial_v2(
 
     hoja_ccc = _obtener_hoja_ccc_config(anio, mes)
     reporte = reporte.merge(hoja_ccc, on="Taxonomia", how="left")
-    reporte["Porcentaje_Cartera"] = reporte["Porcentaje_Cartera"].fillna(80.0)
+    reporte["Tiene_Objetivo_CCC"] = reporte["Porcentaje_Cartera"].notna()
     reporte["Objetivo_CCC"] = (
-        (reporte["Cartera_Neta"] * (reporte["Porcentaje_Cartera"] / 100.0))
+        reporte["Cartera_Neta"]
+        .mul(reporte["Porcentaje_Cartera"].div(100.0))
         .round(0)
         .astype("Int64")
     )
@@ -997,11 +1297,12 @@ def obtener_matriz_ccc_comercial_v2(
         .round(2)
     )
     reporte["Pct_Objetivo"] = (
-        (reporte["CCC_Vendedor"] / reporte["Objetivo_CCC"].replace(0, pd.NA))
+        reporte["CCC_Vendedor"]
+        .div(reporte["Objetivo_CCC"].replace(0, pd.NA))
         .mul(100)
-        .fillna(0.0)
         .round(2)
     )
+    reporte.loc[~reporte["Tiene_Objetivo_CCC"], "Pct_Objetivo"] = pd.NA
 
     reporte = reporte.rename(columns={"CodVendedor_Titular": "CodVendedor"})
     reporte["CodVendedor"] = pd.to_numeric(
@@ -1024,6 +1325,7 @@ def obtener_matriz_ccc_comercial_v2(
         "CCC_Gerencia",
         "NC",
         "Objetivo_CCC",
+        "Tiene_Objetivo_CCC",
         "Pct_Cartera",
         "Pct_Objetivo",
     ]

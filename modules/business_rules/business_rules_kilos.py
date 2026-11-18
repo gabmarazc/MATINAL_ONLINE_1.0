@@ -341,15 +341,30 @@ def _calcular_calendario_ajustado_comercial(
     df["Ajuste_Entrega"] = df["CodVendedor"].map(map_ajuste).fillna(1).astype(int)
     df["Rutas_Ajustadas"] = df["CodVendedor"].map(map_rutas_ajust).fillna(0).astype(int)
 
+    # Las metricas de calendario son jornadas equivalentes decimales.
+    # No deben convertirse a enteros porque una ruta reducida puede representar
+    # una fraccion de jornada completa.
     df["Días Pasados"] = (
-        df["CodVendedor"].map(dias_pasados_map).fillna(0).astype("Int64")
+        pd.to_numeric(df["CodVendedor"].map(dias_pasados_map), errors="coerce")
+        .fillna(0.0)
+        .astype(float)
     )
-    df["Rutas"] = df["CodVendedor"].map(rutas_totales_map).fillna(0).astype("Int64")
+    df["Rutas"] = (
+        pd.to_numeric(df["CodVendedor"].map(rutas_totales_map), errors="coerce")
+        .fillna(0.0)
+        .astype(float)
+    )
     df["Días Restantes Todo"] = (
-        df["CodVendedor"].map(dias_restantes_todo_map).fillna(0).astype("Int64")
+        pd.to_numeric(df["CodVendedor"].map(dias_restantes_todo_map), errors="coerce")
+        .fillna(0.0)
+        .astype(float)
     )
     df["Días Restantes Ajustado"] = (
-        df["CodVendedor"].map(dias_restantes_ajustado_map).fillna(0).astype("Int64")
+        pd.to_numeric(
+            df["CodVendedor"].map(dias_restantes_ajustado_map), errors="coerce"
+        )
+        .fillna(0.0)
+        .astype(float)
     )
     df["Días Restantes"] = df["Días Restantes Ajustado"]
 

@@ -9,6 +9,7 @@ from st_aggrid import AgGrid, GridOptionsBuilder, DataReturnMode, GridUpdateMode
 from modules.business_rules.business_rules_ccc import (
     obtener_matriz_ccc_comercial,
     obtener_detalle_clientes_ccc,
+    obtener_auditoria_taxonomias_ccc,
 )
 from modules import database as db
 
@@ -708,6 +709,97 @@ def render_rep_ccc_core(filtros_globales=None):
     # CONSUMO EXCLUSIVO DE BUSINESS_RULES (obtener_matriz_ccc_comercial y obtener_detalle_clientes_ccc)
     matriz_ccc = obtener_matriz_ccc_comercial(anio_op, mes_op, filtros_globales)
     detalle_ccc = obtener_detalle_clientes_ccc(anio_op, mes_op, filtros_globales)
+    auditoria_taxonomias = obtener_auditoria_taxonomias_ccc(
+        anio_op, mes_op, filtros_globales
+    )
+
+    # CCC-4: auditoria informativa. No interviene en KPIs, filtros ni matrices CCC.
+    if auditoria_taxonomias is None or auditoria_taxonomias.empty:
+        st.success("✅ Auditoría de taxonomías: sin incidencias.")
+    else:
+        auditoria_taxonomias = auditoria_taxonomias.copy()
+        total_incidencias = len(auditoria_taxonomias)
+        estados_norm = (
+            auditoria_taxonomias["Estado_Auditoria"].astype(str).str.strip().str.upper()
+        )
+        total_sin_taxonomia = int(estados_norm.eq("SIN_TAXONOMIA").sum())
+        total_no_registradas = int(estados_norm.eq("TAXONOMIA_NO_REGISTRADA").sum())
+        st.warning(
+            f"⚠️ Se detectaron {total_incidencias} clientes con incidencias de "
+            "taxonomía. Estos clientes no fueron imputados automáticamente a "
+            "ninguna taxonomía comercial."
+        )
+        with st.expander("🔎 Auditoría de Taxonomías CCC", expanded=False):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.metric("Incidencias totales", total_incidencias)
+            with c2:
+                st.metric("Sin taxonomía", total_sin_taxonomia)
+            with c3:
+                st.metric("Taxonomía no registrada", total_no_registradas)
+
+            estados_disponibles = sorted(
+                auditoria_taxonomias["Estado_Auditoria"]
+                .dropna()
+                .astype(str)
+                .str.strip()
+                .unique()
+                .tolist()
+            )
+            vendedores_disponibles = sorted(
+                pd.to_numeric(auditoria_taxonomias["CodVendedor"], errors="coerce")
+                .dropna()
+                .astype(int)
+                .unique()
+                .tolist()
+            )
+            f1, f2 = st.columns(2)
+            with f1:
+                estados_seleccionados = st.multiselect(
+                    "Estado de auditoría",
+                    estados_disponibles,
+                    default=[],
+                    key="ccc_tax_aud_estado",
+                )
+            with f2:
+                vendedores_seleccionados = st.multiselect(
+                    "Vendedor de auditoría",
+                    vendedores_disponibles,
+                    default=[],
+                    key="ccc_tax_aud_vendedor",
+                )
+
+            auditoria_filtrada = auditoria_taxonomias.copy()
+            if estados_seleccionados:
+                auditoria_filtrada = auditoria_filtrada[
+                    auditoria_filtrada["Estado_Auditoria"]
+                    .astype(str)
+                    .str.strip()
+                    .isin(estados_seleccionados)
+                ].copy()
+            if vendedores_seleccionados:
+                auditoria_filtrada = auditoria_filtrada[
+                    pd.to_numeric(
+                        auditoria_filtrada["CodVendedor"], errors="coerce"
+                    ).isin(vendedores_seleccionados)
+                ].copy()
+
+            st.dataframe(auditoria_filtrada, width="stretch", hide_index=True)
+            buf_tax = io.BytesIO()
+            with pd.ExcelWriter(buf_tax, engine="openpyxl") as writer:
+                auditoria_filtrada.to_excel(
+                    writer, index=False, sheet_name="Auditoria_Taxonomias"
+                )
+            buf_tax.seek(0)
+            st.download_button(
+                label="📥 Exportar Auditoría de Taxonomías",
+                data=buf_tax,
+                file_name=(f"Auditoria_Taxonomias_CCC_{anio_op}_{mes_op:02d}.xlsx"),
+                mime=(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ),
+                key="btn_dl_auditoria_taxonomias_ccc",
+            )
 
     if matriz_ccc.empty:
         st.info(

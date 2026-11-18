@@ -11,7 +11,7 @@ from modules import database as db
 
 
 @st.cache_data(show_spinner=False)
-def _generar_excel_tp_core(r_vend, r_sub, r_tax, r_op):
+def _generar_excel_tp_core(r_vend, r_sub, r_tax, r_obj_tax, r_op):
     """
     Función cacheada para diferir la serialización a Excel estrictamente bajo demanda.
     """
@@ -20,7 +20,17 @@ def _generar_excel_tp_core(r_vend, r_sub, r_tax, r_op):
         r_vend.to_excel(writer, index=False, sheet_name="Ranking_Vendedor")
         r_sub.to_excel(writer, index=False, sheet_name="Ranking_SubCanal")
         r_tax.to_excel(writer, index=False, sheet_name="Ranking_Taxonomia")
+        r_obj_tax.to_excel(writer, index=False, sheet_name="Objetivos_Vend_Tax")
         r_op.to_excel(writer, index=False, sheet_name="Tabla_Oportunidades")
+    return buffer.getvalue()
+
+
+@st.cache_data(show_spinner=False)
+def _generar_excel_objetivos_tp(matriz_objetivos):
+    """Genera el Excel específico de objetivos TP por vendedor y taxonomía."""
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        matriz_objetivos.to_excel(writer, index=False, sheet_name="Objetivos_Vend_Tax")
     return buffer.getvalue()
 
 
@@ -128,6 +138,52 @@ def render_fragmento_interactivo_tp(br_data):
         if not objetivos_scope.empty
         else 0
     )
+
+    # Matriz de objetivos congelados: una fila por vendedor y una columna por taxonomía.
+    matriz_objetivos_taxonomia = pd.DataFrame()
+    columnas_objetivo = {"Vendedor", "Taxonomia", "Objetivo_TP"}
+    if not objetivos_scope.empty and columnas_objetivo.issubset(
+        objetivos_scope.columns
+    ):
+        base_objetivos = objetivos_scope[
+            ["Vendedor", "Taxonomia", "Objetivo_TP"]
+        ].copy()
+        base_objetivos["Vendedor"] = (
+            base_objetivos["Vendedor"].fillna("SIN VENDEDOR").astype(str).str.strip()
+        )
+        base_objetivos["Taxonomia"] = (
+            base_objetivos["Taxonomia"]
+            .fillna("SIN TAXONOMIA")
+            .astype(str)
+            .str.strip()
+            .str.upper()
+        )
+        base_objetivos["Objetivo_TP"] = (
+            pd.to_numeric(base_objetivos["Objetivo_TP"], errors="coerce")
+            .fillna(0)
+            .astype(int)
+        )
+        matriz_objetivos_taxonomia = base_objetivos.pivot_table(
+            index="Vendedor",
+            columns="Taxonomia",
+            values="Objetivo_TP",
+            aggfunc="sum",
+            fill_value=0,
+        ).reset_index()
+        columnas_taxonomia = sorted(
+            [c for c in matriz_objetivos_taxonomia.columns if c != "Vendedor"]
+        )
+        matriz_objetivos_taxonomia = matriz_objetivos_taxonomia[
+            ["Vendedor"] + columnas_taxonomia
+        ]
+        matriz_objetivos_taxonomia["TOTAL"] = (
+            matriz_objetivos_taxonomia[columnas_taxonomia].sum(axis=1).astype(int)
+            if columnas_taxonomia
+            else 0
+        )
+        matriz_objetivos_taxonomia = matriz_objetivos_taxonomia.sort_values(
+            "Vendedor"
+        ).reset_index(drop=True)
 
     # Recálculo local en memoria de KPIs realizados
     total_censados = int(
@@ -434,6 +490,38 @@ def render_fragmento_interactivo_tp(br_data):
 
     st.divider()
 
+    st.markdown("#### 🎯 Objetivos TP por Vendedor y Taxonomía")
+    st.caption(
+        "Matriz del objetivo congelado: una fila por vendedor, una columna por taxonomía y total por vendedor."
+    )
+    if not matriz_objetivos_taxonomia.empty:
+        gb_obj = GridOptionsBuilder.from_dataframe(matriz_objetivos_taxonomia)
+        gb_obj.configure_default_column(filterable=True, sortable=True, resizable=True)
+        gb_obj.configure_column("Vendedor", minWidth=190, pinned="left")
+        for columna in matriz_objetivos_taxonomia.columns:
+            if columna != "Vendedor":
+                gb_obj.configure_column(columna, width=105, type=["numericColumn"])
+        gb_obj.configure_column("TOTAL", headerName="TOTAL", width=115)
+        gb_obj.configure_pagination(paginationAutoPageSize=False, paginationPageSize=15)
+        AgGrid(
+            matriz_objetivos_taxonomia,
+            gridOptions=gb_obj.build(),
+            height=380,
+            width="100%",
+            theme="streamlit",
+        )
+        excel_objetivos = _generar_excel_objetivos_tp(matriz_objetivos_taxonomia)
+        st.download_button(
+            label="📥 Descargar objetivos TP por vendedor y taxonomía (.xlsx)",
+            data=excel_objetivos,
+            file_name="Objetivos_TP_por_Vendedor_y_Taxonomia.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="btn_dl_objetivos_tp_taxonomia",
+        )
+    else:
+        st.info("No hay objetivos TP por vendedor y taxonomía para mostrar.")
+
+    st.divider()
     st.markdown("#### 📊 Rankings Institucionales de Tienda Perfecta")
 
     dimension_sel = st.radio(
@@ -644,6 +732,7 @@ def render_fragmento_interactivo_tp(br_data):
                     ranking_vendedor,
                     ranking_subcanal,
                     ranking_taxonomia,
+                    matriz_objetivos_taxonomia,
                     tabla_oportunidades,
                 )
                 st.download_button(
