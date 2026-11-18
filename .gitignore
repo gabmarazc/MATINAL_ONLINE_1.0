@@ -11,3 +11,9 @@ Backup/
 logs/*.log
 
 .DS_Store
+
+# Laboratorio e integración APIs
+APIs/
+
+# Auditorías locales
+AU.py
